@@ -14,25 +14,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Qt
-        run: |
-          curl -L -o qt.7z https://github.com/miurahr7/qt5-MingW-w64/releases/download/v1.0.4/qt-5.15.2-mingw72-x64.7z
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      - name: Extract Qt
+      - name: Install aqtinstall
         run: |
-          7z x qt.7z -o"$env:USERPROFILE\Qt5" -y
-          del qt.7z
+          pip install aqtinstall
+
+      - name: Install Qt
+        run: |
+          aqt install-qt windows desktop 6.7.0 win64_mingw -O Qt6
 
       - name: Set up Qt
         run: |
-          echo "$env:USERPROFILE\Qt5\qt5-15.2-mingw72-x64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          echo "$(pwd)/Qt6/6.7.0/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Configure
         shell: bash
         run: |
           mkdir -p build
           cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(pwd)/Qt6/6.7.0/mingw64"
 
       - name: Build
         shell: bash
@@ -46,8 +50,8 @@ jobs:
           cd build/Release
           mkdir -p im_client/platforms
           cp im_client.exe im_client/
-          cp "$USERPROFILE/Qt5/qt5-15.2-mingw72-x64/mingw64/bin/"*.dll im_client/ 2>/dev/null || true
-          cp "$USERPROFILE/Qt5/qt5-15.2-mingw72-x64/mingw64/plugins/platforms/"*.dll im_client/platforms/ 2>/dev/null || true
+          cp "$(pwd)/../../../Qt6/6.7.0/mingw64/bin/"*.dll im_client/ 2>/dev/null || true
+          cp "$(pwd)/../../../Qt6/6.7.0/mingw64/plugins/platforms/"*.dll im_client/platforms/ 2>/dev/null || true
           powershell Compress-Archive -Path im_client -DestinationPath im_client-Windows.zip -Force
 
       - name: Upload artifact
