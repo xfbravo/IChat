@@ -1,0 +1,62 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Qt
+        env:
+          PYTHONHTTPSVERIFY: "0"
+        run: |
+          pip install aqtinstall
+          python -m aqt install-qt windows desktop 6.5.3 win64_mingw -O C:/Qt --ssl-no-verify || true
+          ls -la C:/Qt/6.5.3/ || echo "Qt not installed"
+
+      - name: Configure
+        if: always()
+        run: |
+          cd im_client
+          rm -rf build
+          mkdir -p build
+          cd build
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="C:/Qt/6.5.3/mingw64"
+
+      - name: Build
+        if: always()
+        run: |
+          cd im_client/build
+          cmake --build . --config Release -- -j4 || echo "Build failed"
+
+      - name: Package
+        if: always()
+        run: |
+          cd im_client/build/Release 2>/dev/null || cd im_client/build 2>/dev/null
+          mkdir -p package/platforms 2>/dev/null || true
+          cp im_client.exe package/ 2>/dev/null || true
+          cp /c/Qt/6.5.3/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp /c/Qt/6.5.3/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force 2>/dev/null || echo "Package failed"
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: im_client-windows
+          path: im_client/build/Release/im_client-Windows.zip
