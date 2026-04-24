@@ -25,7 +25,11 @@ jobs:
 
       - name: Install Qt
         run: |
-          aqt install-qt windows desktop 6.7.0 win64_mingw -O Qt6
+          aqt install-qt windows desktop 6.7.0 win64_mingw -O C:/Qt
+
+      - name: List Qt directory
+        run: |
+          ls -la C:/Qt/6.7.0/
 
       - name: Configure
         shell: bash
@@ -33,7 +37,7 @@ jobs:
           cd im_client
           mkdir -p build
           cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(pwd)/../../../Qt6/6.7.0/mingw64"
+          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/mingw64"
 
       - name: Build
         shell: bash
@@ -47,8 +51,8 @@ jobs:
           cd im_client/build/Release
           mkdir -p package/platforms
           cp im_client.exe package/
-          cp /d/Qt6/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
-          cp /d/Qt6/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          cp C:/Qt/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp C:/Qt/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
           powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force
 
       - name: Upload artifact
