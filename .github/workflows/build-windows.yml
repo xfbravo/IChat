@@ -23,14 +23,13 @@ jobs:
         run: |
           pip install aqtinstall
 
+      - name: List Qt architectures
+        run: |
+          aqt list-qt windows desktop 6.7.0
+
       - name: Install Qt
         run: |
-          aqt install-qt windows desktop 6.7.0 win64_mingw_64 -O C:/Qt
-
-      - name: Check Qt installation
-        run: |
-          find /c/Qt -name "Qt6Config.cmake" 2>/dev/null || echo "Qt6Config.cmake not found"
-          ls -la /c/Qt/6.7.0/ 2>/dev/null || echo "Qt directory not found"
+          aqt install-qt windows desktop 6.7.0 win64_mingw -O C:/Qt
 
       - name: Configure
         run: |
