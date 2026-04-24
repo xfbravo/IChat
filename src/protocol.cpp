@@ -1,0 +1,123 @@
+/**
+ * @file protocol.cpp
+ * @brief 协议实现
+ */
+
+#include "protocol.h"
+#include <QUuid>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QByteArray>
+#include <QDataStream>
+
+QByteArray Protocol::encode(MsgType type, const std::string& body) {
+    QByteArray result;
+
+    // 消息头：2字节类型 + 4字节长度（大端序）
+    quint16 msg_type = static_cast<quint16>(type);
+    quint32 length = static_cast<quint32>(body.size());
+
+    // 转换字节序（如果是小端序）
+#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
+    msg_type = ((msg_type & 0x00FF) << 8) | ((msg_type & 0xFF00) >> 8);
+    length = ((length & 0x000000FF) << 24) |
+             ((length & 0x0000FF00) << 8) |
+             ((length & 0x00FF0000) >> 8) |
+             ((length & 0xFF000000) >> 24);
+#endif
+
+    // 添加头部
+    QDataStream stream(&result, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::BigEndian);
+    stream << msg_type << length;
+
+    // 添加消息体
+    if (!body.empty()) {
+        result.append(body.data(), body.size());
+    }
+
+    return result;
+}
+
+QByteArray Protocol::encode(MsgType type, const QString& body) {
+    return encode(type, body.toStdString());
+}
+
+bool Protocol::decode(const QByteArray& data, MsgType& type, QString& body) {
+    if (data.size() < 6) {
+        return false;  // 数据不足
+    }
+
+    QDataStream stream(data);
+    stream.setByteOrder(QDataStream::BigEndian);
+
+    // 读取头部
+    quint16 msg_type;
+    quint32 length;
+    stream >> msg_type >> length;
+
+    // 转换字节序
+#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
+    msg_type = ((msg_type & 0x00FF) << 8) | ((msg_type & 0xFF00) >> 8);
+    length = ((length & 0x000000FF) << 24) |
+             ((length & 0x0000FF00) << 8) |
+             ((length & 0x00FF0000) >> 8) |
+             ((length & 0xFF000000) >> 24);
+#endif
+
+    type = static_cast<MsgType>(msg_type);
+
+    // 检查数据是否完整
+    if (data.size() < 6 + static_cast<int>(length)) {
+        return false;
+    }
+
+    // 读取消息体
+    if (length > 0) {
+        body = QString::fromUtf8(data.constData() + 6, length);
+    } else {
+        body = "";
+    }
+
+    return true;
+}
+
+QString Protocol::generateMsgId() {
+    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
+QString Protocol::makeLoginRequest(const QString& user_id, const QString& password) {
+    QJsonObject obj;
+    obj["user_id"] = user_id;
+    obj["password"] = password;
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+}
+
+QString Protocol::makeChatMessage(const QString& from, const QString& to,
+                                  const QString& content_type, const QString& content) {
+    QJsonObject obj;
+    obj["msg_id"] = generateMsgId();
+    obj["from_user_id"] = from;
+    obj["to_user_id"] = to;
+    obj["content_type"] = content_type;
+    obj["content"] = content;
+    obj["client_time"] = QDateTime::currentSecsSinceEpoch();
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+}
+
+bool Protocol::parseLoginResponse(const QString& body, LoginResponse& rsp) {
+    QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+    if (!doc.isObject()) {
+        return false;
+    }
+
+    QJsonObject obj = doc.object();
+    rsp.code = obj["code"].toInt();
+    rsp.message = obj["message"].toString();
+    rsp.user_id = obj["user_id"].toString();
+    rsp.nickname = obj["nickname"].toString();
+    rsp.avatar_url = obj["avatar_url"].toString();
+    rsp.token = obj["token"].toString();
+
+    return true;
+}

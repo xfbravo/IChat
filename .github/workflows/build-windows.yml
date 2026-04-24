@@ -1,0 +1,60 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/qt-action@v3
+        with:
+          version: '6.7.0'
+          modules: 'qmake'
+          tools: 'qttools'
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd build
+          cmake --build . --config Release
+
+      - name: Create ZIP
+        run: |
+          cd build/Release
+          mkdir im_client
+          copy im_client.exe im_client\
+          mkdir im_client\platforms
+          copy platforms\qwindows.dll im_client\platforms\
+          mkdir im_client\styles
+          copy styles\qwindowsvistastyle.dll im_client\styles\ 2>nul || true
+          powershell Compress-Archive -Path im_client -DestinationPath im_client-Windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: im_client-windows
+          path: build/Release/im_client-Windows.zip
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: build/Release/im_client-Windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
