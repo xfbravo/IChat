@@ -10,10 +10,6 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
-    defaults:
-      run:
-        shell: bash
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,14 +25,21 @@ jobs:
 
       - name: Install Qt
         run: |
-          aqt install-qt windows desktop 6.7.0 win64_mingw -O C:/Qt
+          aqt install-qt windows desktop 6.7.0 win64_mingw_64 -O C:/Qt
+
+      - name: Check Qt installation
+        run: |
+          find /c/Qt -name "Qt6Config.cmake" 2>/dev/null || echo "Qt6Config.cmake not found"
+          ls -la /c/Qt/6.7.0/ 2>/dev/null || echo "Qt directory not found"
 
       - name: Configure
         run: |
           cd im_client
           mkdir -p build
           cd build
-          cmake .. -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/mingw64"
+          cmake .. -G "MinGW Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/mingw64"
 
       - name: Build
         run: |
@@ -48,8 +51,8 @@ jobs:
           cd im_client/build/Release
           mkdir -p package/platforms
           cp im_client.exe package/
-          cp C:/Qt/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
-          cp C:/Qt/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          cp /c/Qt/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp /c/Qt/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
           powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force
 
       - name: Upload artifact
