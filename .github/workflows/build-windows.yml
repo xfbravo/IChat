@@ -23,13 +23,13 @@ jobs:
         run: |
           pip install aqtinstall
 
-      - name: List Qt architectures
+      - name: List available Qt versions
         run: |
-          aqt list-qt windows desktop 6.7.0
+          aqt list-qt windows desktop
 
-      - name: Install Qt
+      - name: Install Qt 6.5.3
         run: |
-          aqt install-qt windows desktop 6.7.0 win64_mingw -O C:/Qt
+          aqt install-qt windows desktop 6.5.3 win64_mingw -O C:/Qt
 
       - name: Configure
         run: |
@@ -38,7 +38,7 @@ jobs:
           cd build
           cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="C:/Qt/6.7.0/mingw64"
+            -DCMAKE_PREFIX_PATH="C:/Qt/6.5.3/mingw64"
 
       - name: Build
         run: |
@@ -50,8 +50,8 @@ jobs:
           cd im_client/build/Release
           mkdir -p package/platforms
           cp im_client.exe package/
-          cp /c/Qt/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
-          cp /c/Qt/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          cp /c/Qt/6.5.3/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp /c/Qt/6.5.3/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
           powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force
 
       - name: Upload artifact
