@@ -23,22 +23,24 @@ jobs:
         run: |
           pip install aqtinstall
 
-      - name: List available Qt versions
-        run: |
-          aqt list-qt windows desktop
-
-      - name: Install Qt 6.5.3
+      - name: Install Qt
         run: |
           aqt install-qt windows desktop 6.5.3 win64_mingw -O C:/Qt
+
+      - name: Find Qt cmake config
+        run: |
+          find /c/Qt -name "Qt6Config.cmake" 2>/dev/null || echo "Not found"
+          ls -la /c/Qt/6.5.3/ 2>/dev/null || echo "Qt 6.5.3 not found"
 
       - name: Configure
         run: |
           cd im_client
+          rm -rf build
           mkdir -p build
           cd build
           cmake .. -G "MinGW Makefiles" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="C:/Qt/6.5.3/mingw64"
+            -DCMAKE_PREFIX_PATH="/c/Qt/6.5.3/mingw64/lib/cmake"
 
       - name: Build
         run: |
