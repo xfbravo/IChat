@@ -27,10 +27,6 @@ jobs:
         run: |
           aqt install-qt windows desktop 6.7.0 win64_mingw -O Qt6
 
-      - name: Set up Qt
-        run: |
-          Add-Content -FilePath $env:GITHUB_PATH -Value "$(Get-Location)\Qt6\6.7.0\mingw64\bin"
-
       - name: Configure
         shell: bash
         run: |
@@ -49,12 +45,11 @@ jobs:
         shell: bash
         run: |
           cd im_client/build/Release
-          mkdir -p im_client/package
-          cp im_client.exe im_client/package/
-          cp "$(pwd)/../../../../Qt6/6.7.0/mingw64/bin/"*.dll im_client/package/ 2>/dev/null || true
-          cp -r "$(pwd)/../../../../Qt6/6.7.0/mingw64/plugins/platforms/"*.dll im_client/package/platforms/ 2>/dev/null || true
-          mkdir -p im_client/package/platforms
-          powershell Compress-Archive -Path im_client/package -DestinationPath im_client-Windows.zip -Force
+          mkdir -p package/platforms
+          cp im_client.exe package/
+          cp /d/Qt6/6.7.0/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp /d/Qt6/6.7.0/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
