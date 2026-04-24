@@ -1,0 +1,31 @@
+# Build directories
+*/build/
+build/
+*_build/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Qt build artifacts
+*.moc
+*.qrc*
+*.ui
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+
+# Gradle (Android)
+android/.gradle/
+android/build/
+android/*/build/
