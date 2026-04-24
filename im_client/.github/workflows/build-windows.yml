@@ -19,15 +19,20 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Qt
-        env:
-          PYTHONHTTPSVERIFY: "0"
+      - name: Install aqtinstall
         run: |
           pip install aqtinstall
-          python -m aqt install-qt windows desktop 6.5.3 win64_mingw -O C:/Qt --ssl-no-verify || true
+
+      - name: Install Qt
+        shell: bash
+        run: |
+          pip install certifi
+          export PYTHONHTTPSVERIFY=0
+          python -m aqt install-qt windows desktop 6.5.3 win64_mingw -O C:/Qt -k || true
           ls -la C:/Qt/6.5.3/ || echo "Qt not installed"
 
       - name: Configure
+        shell: bash
         if: always()
         run: |
           cd im_client
@@ -39,19 +44,24 @@ jobs:
             -DCMAKE_PREFIX_PATH="C:/Qt/6.5.3/mingw64"
 
       - name: Build
+        shell: bash
         if: always()
         run: |
           cd im_client/build
           cmake --build . --config Release -- -j4 || echo "Build failed"
 
       - name: Package
+        shell: bash
         if: always()
         run: |
-          cd im_client/build/Release 2>/dev/null || cd im_client/build 2>/dev/null
+          cd im_client/build
+          if [ -d "Release" ]; then
+            cd Release
+          fi
           mkdir -p package/platforms 2>/dev/null || true
           cp im_client.exe package/ 2>/dev/null || true
-          cp /c/Qt/6.5.3/mingw64/bin/*.dll package/ 2>/dev/null || true
-          cp /c/Qt/6.5.3/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
+          cp C:/Qt/6.5.3/mingw64/bin/*.dll package/ 2>/dev/null || true
+          cp C:/Qt/6.5.3/mingw64/plugins/platforms/*.dll package/platforms/ 2>/dev/null || true
           powershell Compress-Archive -Path package -DestinationPath im_client-Windows.zip -Force 2>/dev/null || echo "Package failed"
 
       - name: Upload artifact
