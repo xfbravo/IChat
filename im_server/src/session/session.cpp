@@ -140,7 +140,7 @@ void Session::handle_read(const boost::system::error_code& ec, std::size_t /*byt
 
 void Session::handle_message(const Message& msg) {
     std::cout << "[Session] 处理消息: type=0x" << std::hex << static_cast<uint16_t>(msg.type)
-              << std::dec << ", from=" << remote_endpoint() << std::endl;
+              << std::dec << ", body=" << msg.body << ", from=" << remote_endpoint() << std::endl;
 
     // 重置心跳定时器（收到任何消息都认为连接活跃）
     start_heartbeat();

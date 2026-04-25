@@ -71,16 +71,11 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
     QByteArray data = Protocol::encode(type, body);
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
 
-    // 使用同步写入确保数据发送
     qint64 written = socket_->write(data);
     socket_->flush();
+    qDebug() << "Written:" << written << "bytes";
 
-    // 强制等待数据真正发送
-    if (socket_->waitForBytesWritten(3000)) {
-        qDebug() << "Data confirmed sent, bytesToWrite:" << socket_->bytesToWrite();
-    } else {
-        qDebug() << "Data may not have been sent";
-    }
+    // 不再等待 bytesToWrite，因为 waitForBytesWritten 可能会阻塞
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {

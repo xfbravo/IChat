@@ -20,8 +20,11 @@ namespace im {
 MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code& ec) {
     ec.clear();
 
+    std::cout << "[Codec] decode called, buffer size:" << buf.size() << std::endl;
+
     // 检查缓冲区数据是否 >= 6 字节（最小头部）
     if (buf.size() < sizeof(MessageHeader)) {
+        std::cout << "[Codec] Buffer too small, need 6 bytes, got:" << buf.size() << std::endl;
         ec = boost::asio::error::would_block;  // 数据不足，需要继续接收
         return nullptr;
     }
