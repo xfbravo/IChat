@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <string>
+#include <QByteArray>
+#include <QString>
 
 /**
  * @brief 消息类型枚举
