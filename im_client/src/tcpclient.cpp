@@ -64,12 +64,15 @@ void TcpClient::disconnectFromServer() {
 void TcpClient::sendMessage(MsgType type, const QString& body) {
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
-        qWarning() << "Socket not connected, cannot send message";
+        qWarning() << "Socket not connected, state:" << socket_->state();
         return;
     }
 
     QByteArray data = Protocol::encode(type, body);
-    socket_->write(data);
+    qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
+    qDebug() << "Data (hex):" << data.toHex();
+    qint64 written = socket_->write(data);
+    qDebug() << "Written:" << written << "bytes";
     socket_->flush();
 }
 
