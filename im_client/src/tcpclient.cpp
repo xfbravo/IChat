@@ -32,9 +32,11 @@ TcpClient::~TcpClient() {
 }
 
 void TcpClient::connectToServer(const QString& host, quint16 port) {
-    if (state_ == ClientState::Connecting || state_ == ClientState::Connected) {
-        return;
+    // 如果已经在连接中，先断开
+    if (socket_->isOpen()) {
+        socket_->disconnectFromHost();
     }
+    state_ = ClientState::Disconnected;
 
     state_ = ClientState::Connecting;
     socket_->connectToHost(QHostAddress(host), port);
