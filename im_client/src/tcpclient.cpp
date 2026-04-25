@@ -62,7 +62,9 @@ void TcpClient::disconnectFromServer() {
 }
 
 void TcpClient::sendMessage(MsgType type, const QString& body) {
-    if (state_ != ClientState::Connected && state_ != ClientState::LoggedIn) {
+    // 检查 socket 是否已连接
+    if (socket_->state() != QAbstractSocket::ConnectedState) {
+        qWarning() << "Socket not connected, cannot send message";
         return;
     }
 
@@ -72,6 +74,12 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
+    // 确保已连接
+    if (state_ != ClientState::Connected && state_ != ClientState::LoggedIn) {
+        qWarning() << "Not connected, cannot login";
+        return;
+    }
+
     QString body = Protocol::makeLoginRequest(user_id, password);
     sendMessage(MsgType::LOGIN, body);
 }
