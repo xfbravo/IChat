@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QByteArray>
 #include <QDataStream>
+#include <QIODevice>
 
 QByteArray Protocol::encode(MsgType type, const std::string& body) {
     QByteArray result;
@@ -113,11 +114,11 @@ bool Protocol::parseLoginResponse(const QString& body, LoginResponse& rsp) {
 
     QJsonObject obj = doc.object();
     rsp.code = obj["code"].toInt();
-    rsp.message = obj["message"].toString();
-    rsp.user_id = obj["user_id"].toString();
-    rsp.nickname = obj["nickname"].toString();
-    rsp.avatar_url = obj["avatar_url"].toString();
-    rsp.token = obj["token"].toString();
+    rsp.message = obj["message"].toString().toStdString();
+    rsp.user_id = obj["user_id"].toString().toStdString();
+    rsp.nickname = obj["nickname"].toString().toStdString();
+    rsp.avatar_url = obj["avatar_url"].toString().toStdString();
+    rsp.token = obj["token"].toString().toStdString();
 
     return true;
 }
