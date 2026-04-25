@@ -14,7 +14,7 @@
 LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     : QWidget(parent)
     , tcp_client_(tcp_client)
-    , server_host_("127.0.0.1")
+    , server_host_("192.168.40.128")
     , server_port_(8080)
 {
     setWindowTitle("IM 客户端 - 登录");
