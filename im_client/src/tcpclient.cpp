@@ -70,10 +70,11 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
 
     QByteArray data = Protocol::encode(type, body);
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
-    qDebug() << "Data (hex):" << data.toHex();
     qint64 written = socket_->write(data);
-    qDebug() << "Written:" << written << "bytes";
     socket_->flush();
+    qDebug() << "Written:" << written << "bytes, waiting for bytes to write...";
+    socket_->waitForBytesWritten(5000);
+    qDebug() << "Bytes to write:" << socket_->bytesToWrite();
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
