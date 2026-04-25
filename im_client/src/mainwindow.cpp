@@ -4,6 +4,7 @@
  */
 
 #include "mainwindow.h"
+#include <QStatusBar>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
