@@ -62,8 +62,6 @@ void TcpClient::disconnectFromServer() {
 }
 
 void TcpClient::sendMessage(MsgType type, const QString& body) {
-    qDebug() << "sendMessage called, state:" << socket_->state() << "ConnectedState:" << QAbstractSocket::ConnectedState;
-
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
         qWarning() << "Socket not connected, cannot send message, state:" << socket_->state();
@@ -72,10 +70,17 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
 
     QByteArray data = Protocol::encode(type, body);
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
-    qDebug() << "Socket bytesToWrite before:" << socket_->bytesToWrite();
+
+    // 使用同步写入确保数据发送
     qint64 written = socket_->write(data);
     socket_->flush();
-    qDebug() << "Written:" << written << "bytes, bytesToWrite after:" << socket_->bytesToWrite();
+
+    // 强制等待数据真正发送
+    if (socket_->waitForBytesWritten(3000)) {
+        qDebug() << "Data confirmed sent, bytesToWrite:" << socket_->bytesToWrite();
+    } else {
+        qDebug() << "Data may not have been sent";
+    }
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
