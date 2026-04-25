@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QHostAddress>
 #include <QApplication>
+#include <QThread>
 
 TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
@@ -62,6 +63,8 @@ void TcpClient::disconnectFromServer() {
 }
 
 void TcpClient::sendMessage(MsgType type, const QString& body) {
+    qDebug() << "sendMessage called, state:" << socket_->state();
+
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
         qWarning() << "Socket not connected, cannot send message, state:" << socket_->state();
@@ -72,10 +75,20 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
 
     qint64 written = socket_->write(data);
-    socket_->flush();
-    qDebug() << "Written:" << written << "bytes";
+    qDebug() << "write() returned:" << written;
 
-    // 不再等待 bytesToWrite，因为 waitForBytesWritten 可能会阻塞
+    // 确保数据真正发送出去
+    socket_->flush();
+
+    // 检查还有多少数据在缓冲区
+    qDebug() << "bytesToWrite after flush:" << socket_->bytesToWrite();
+
+    // 如果数据没有完全发送出去，等待
+    if (socket_->bytesToWrite() > 0) {
+        qDebug() << "Waiting for data to be sent...";
+        QThread::msleep(50);  // 等待 50ms
+        qDebug() << "bytesToWrite after wait:" << socket_->bytesToWrite();
+    }
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
