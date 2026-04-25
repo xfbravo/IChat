@@ -72,9 +72,7 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
     qint64 written = socket_->write(data);
     socket_->flush();
-    qDebug() << "Written:" << written << "bytes, waiting for bytes to write...";
-    socket_->waitForBytesWritten(5000);
-    qDebug() << "Bytes to write:" << socket_->bytesToWrite();
+    qDebug() << "Written:" << written << "bytes";
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
