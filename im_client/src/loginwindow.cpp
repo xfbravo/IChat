@@ -79,7 +79,7 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
 
     // 连接信号槽
     connect(tcp_client_, &TcpClient::connected, this, &LoginWindow::onConnected);
-    connect(tcp_client_, &TcpClient::error, this, &LoginWindow::onError);
+    connect(tcp_client_, &TcpClient::connectionError, this, &LoginWindow::onError);
     connect(tcp_client_, &TcpClient::loginResponse, this, &LoginWindow::onLoginResponse);
     connect(tcp_client_, &TcpClient::registerResponse, this, &LoginWindow::onRegisterResponse);
 

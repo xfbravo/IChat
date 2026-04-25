@@ -115,7 +115,7 @@ signals:
      * @brief 连接错误信号
      * @param error_string 错误信息
      */
-    void error(const QString& error_string);
+    void connectionError(const QString& error_string);
 
     /**
      * @brief 登录响应信号

@@ -43,7 +43,7 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
     QTimer::singleShot(5000, this, [this]() {
         if (state_ == ClientState::Connecting) {
             socket_->disconnectFromHost();
-            emit error("连接超时");
+            emit connectionError("连接超时");
         }
     });
 }
@@ -128,7 +128,7 @@ void TcpClient::onError(QAbstractSocket::SocketError error) {
     Q_UNUSED(error);
     QString error_string = socket_->errorString();
     qWarning() << "Socket error:" << error_string;
-    emit error(error_string);
+    emit connectionError(error_string);
 }
 
 void TcpClient::sendHeartbeat() {
@@ -150,12 +150,14 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             if (Protocol::parseLoginResponse(body, rsp)) {
                 if (rsp.code == 0) {
                     state_ = ClientState::LoggedIn;
-                    user_id_ = rsp.user_id;
-                    user_nickname_ = rsp.nickname;
-                    token_ = rsp.token;
+                    user_id_ = QString::fromStdString(rsp.user_id);
+                    user_nickname_ = QString::fromStdString(rsp.nickname);
+                    token_ = QString::fromStdString(rsp.token);
                 }
-                emit loginResponse(rsp.code, rsp.message, rsp.user_id,
-                                   rsp.nickname, rsp.token);
+                emit loginResponse(rsp.code, QString::fromStdString(rsp.message),
+                                   QString::fromStdString(rsp.user_id),
+                                   QString::fromStdString(rsp.nickname),
+                                   QString::fromStdString(rsp.token));
             }
             break;
         }
