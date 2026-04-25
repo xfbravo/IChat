@@ -62,17 +62,20 @@ void TcpClient::disconnectFromServer() {
 }
 
 void TcpClient::sendMessage(MsgType type, const QString& body) {
+    qDebug() << "sendMessage called, state:" << socket_->state() << "ConnectedState:" << QAbstractSocket::ConnectedState;
+
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
-        qWarning() << "Socket not connected, state:" << socket_->state();
+        qWarning() << "Socket not connected, cannot send message, state:" << socket_->state();
         return;
     }
 
     QByteArray data = Protocol::encode(type, body);
     qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
+    qDebug() << "Socket bytesToWrite before:" << socket_->bytesToWrite();
     qint64 written = socket_->write(data);
     socket_->flush();
-    qDebug() << "Written:" << written << "bytes";
+    qDebug() << "Written:" << written << "bytes, bytesToWrite after:" << socket_->bytesToWrite();
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
