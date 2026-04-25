@@ -37,6 +37,9 @@ set(HEADERS
     include/protocol.h
 )
 
+# 添加 include 目录
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
 # 资源文件
 set(RESOURCES
     res.qrc
