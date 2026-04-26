@@ -90,13 +90,13 @@ public:
     static QByteArray encode(MsgType type, const QString& body);
 
     /**
-     * @brief 解码消息
-     * @param data 原始数据
+     * @brief 解码消息（会从data中移除已解码的数据）
+     * @param data 原始数据（会被修改）
      * @param type 输出：消息类型
      * @param body 输出：消息体
      * @return true 解码成功
      */
-    static bool decode(const QByteArray& data, MsgType& type, QString& body);
+    static bool decode(QByteArray& data, MsgType& type, QString& body);
 
     /**
      * @brief 生成唯一消息ID

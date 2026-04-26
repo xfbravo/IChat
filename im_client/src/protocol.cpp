@@ -35,7 +35,7 @@ QByteArray Protocol::encode(MsgType type, const QString& body) {
     return encode(type, body.toStdString());
 }
 
-bool Protocol::decode(const QByteArray& data, MsgType& type, QString& body) {
+bool Protocol::decode(QByteArray& data, MsgType& type, QString& body) {
     if (data.size() < 6) {
         return false;  // 数据不足
     }
@@ -61,6 +61,11 @@ bool Protocol::decode(const QByteArray& data, MsgType& type, QString& body) {
     } else {
         body = "";
     }
+
+    // 解码成功后，移除已处理的数据
+    int header_size = 6;
+    int total_size = header_size + static_cast<int>(length);
+    data.remove(0, total_size);
 
     return true;
 }
