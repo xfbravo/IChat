@@ -57,19 +57,23 @@ void Session::close() {
 }
 
 void Session::send(MsgType type, const std::string& body) {
-    // 如果会话正在关闭，不发送消息
-    if (state_ == State::CLOSING || state_ == State::CLOSED) {
-        return;
-    }
+    auto self = shared_from_this();
+    auto msg = std::make_shared<Message>(type, body);
 
-    // 构建消息并加入发送队列
-    Message msg(type, body);
-    write_queue_.push(msg);
+    // 使用 boost::asio::post 确保线程安全
+    boost::asio::post(socket_.get_executor(), [this, self, msg]() {
+        if (state_ == State::CLOSING || state_ == State::CLOSED) {
+            return;
+        }
 
-    // 如果当前没有正在进行的写入，开始写入
-    if (!writing_) {
-        do_write();
-    }
+        // 构建消息并加入发送队列
+        write_queue_.push(*msg);
+
+        // 如果当前没有正在进行的写入，开始写入
+        if (!writing_) {
+            do_write();
+        }
+    });
 }
 
 void Session::send(const Message& msg) {
@@ -89,7 +93,7 @@ void Session::do_read() {
     );
 }
 
-void Session::handle_read(const boost::system::error_code& ec, std::size_t /*bytes_read*/) {
+void Session::handle_read(const boost::system::error_code& ec, std::size_t bytes_read) {
     if (ec) {
         if (ec == boost::asio::error::eof) {
             // 客户端关闭连接
@@ -104,8 +108,12 @@ void Session::handle_read(const boost::system::error_code& ec, std::size_t /*byt
         return;
     }
 
+    // 提交读取到的数据到缓冲区
+    read_buf_.commit(bytes_read);
+
     // 确认读取的数据
-    std::size_t bytes_read = read_buf_.size();
+    std::cout << "[Session] 读取 " << bytes_read << " 字节 from " << remote_endpoint()
+              << ", 缓冲区大小: " << read_buf_.size() << std::endl;
     std::cout << "[Session] 读取 " << bytes_read << " 字节 from " << remote_endpoint()
               << ", 缓冲区大小: " << read_buf_.size() << std::endl;
 

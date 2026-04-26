@@ -18,16 +18,7 @@ QByteArray Protocol::encode(MsgType type, const std::string& body) {
     quint16 msg_type = static_cast<quint16>(type);
     quint32 length = static_cast<quint32>(body.size());
 
-    // 转换字节序（如果是小端序）
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-    msg_type = ((msg_type & 0x00FF) << 8) | ((msg_type & 0xFF00) >> 8);
-    length = ((length & 0x000000FF) << 24) |
-             ((length & 0x0000FF00) << 8) |
-             ((length & 0x00FF0000) >> 8) |
-             ((length & 0xFF000000) >> 24);
-#endif
-
-    // 添加头部
+    // 添加头部 - QDataStream 会自动处理字节序转换
     QDataStream stream(&result, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::BigEndian);
     stream << msg_type << length;
@@ -52,19 +43,10 @@ bool Protocol::decode(const QByteArray& data, MsgType& type, QString& body) {
     QDataStream stream(data);
     stream.setByteOrder(QDataStream::BigEndian);
 
-    // 读取头部
+    // 读取头部 - QDataStream 会自动处理字节序转换
     quint16 msg_type;
     quint32 length;
     stream >> msg_type >> length;
-
-    // 转换字节序
-#if Q_BYTE_ORDER == Q_LITTLE_ENDIAN
-    msg_type = ((msg_type & 0x00FF) << 8) | ((msg_type & 0xFF00) >> 8);
-    length = ((length & 0x000000FF) << 24) |
-             ((length & 0x0000FF00) << 8) |
-             ((length & 0x00FF0000) >> 8) |
-             ((length & 0xFF000000) >> 24);
-#endif
 
     type = static_cast<MsgType>(msg_type);
 

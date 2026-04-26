@@ -76,7 +76,8 @@ DbPool::Guard DbPool::get_connection() {
     std::lock_guard<std::mutex> lock(mutex_);
 
     // 查找空闲连接
-    for (auto* conn : connections_) {
+    for (size_t i = 0; i < connections_.size(); ++i) {
+        auto* conn = connections_[i];
         if (!conn->in_use) {
             // 检查连接是否有效
             if (ping_connection(conn)) {
@@ -86,9 +87,9 @@ DbPool::Guard DbPool::get_connection() {
                 delete conn;
                 auto* new_conn = create_connection();
                 if (new_conn) {
-                    *conn = *new_conn;
+                    connections_[i] = new_conn;
                     delete new_conn;
-                    return Guard(*this, conn);
+                    return Guard(*this, connections_[i]);
                 }
             }
         }
