@@ -63,6 +63,11 @@ private slots:
     void onError(const QString& error_string);
 
     /**
+     * @brief 处理连接断开
+     */
+    void onDisconnected();
+
+    /**
      * @brief 切换到登录页面
      */
     void switchToLoginPage();
@@ -85,8 +90,10 @@ private:
 
     /**
      * @brief 显示错误提示
+     * @param message 错误信息
+     * @param is_login_page true 显示在登录页，false 显示在注册页
      */
-    void showError(const QString& message);
+    void showError(const QString& message, bool is_login_page);
 
     /**
      * @brief 清除错误提示

@@ -50,6 +50,10 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
         QPushButton#primary:pressed {
             background-color: #3d8b40;
         }
+        QPushButton#primary:disabled {
+            background-color: #cccccc;
+            color: #888888;
+        }
         QPushButton#secondary {
             background-color: #2196F3;
             color: white;
@@ -79,6 +83,7 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
 
     // 连接信号槽
     connect(tcp_client_, &TcpClient::connected, this, &LoginWindow::onConnected);
+    connect(tcp_client_, &TcpClient::disconnected, this, &LoginWindow::onDisconnected);
     connect(tcp_client_, &TcpClient::connectionError, this, &LoginWindow::onError);
     connect(tcp_client_, &TcpClient::loginResponse, this, &LoginWindow::onLoginResponse);
     connect(tcp_client_, &TcpClient::registerResponse, this, &LoginWindow::onRegisterResponse);
@@ -210,16 +215,29 @@ void LoginWindow::createRegisterPage() {
 void LoginWindow::onLoginClicked() {
     clearError();
 
+    // 检查连接状态
+    if (tcp_client_->state() == ClientState::Disconnected) {
+        showError("正在连接服务器，请稍后再试", true);
+        tcp_client_->connectToServer(server_host_, server_port_);
+        return;
+    }
+
     QString user_id = login_user_id_edit_->text().trimmed();
     QString password = login_password_edit_->text();
 
     if (user_id.isEmpty()) {
-        showError("请输入用户ID");
+        showError("请输入用户ID", true);
         return;
     }
 
     if (password.isEmpty()) {
-        showError("请输入密码");
+        showError("请输入密码", true);
+        return;
+    }
+
+    // 检查是否正在连接或已登录
+    if (tcp_client_->state() != ClientState::Connected && tcp_client_->state() != ClientState::LoggedIn) {
+        showError("正在连接服务器，请稍后再试", true);
         return;
     }
 
@@ -230,28 +248,41 @@ void LoginWindow::onLoginClicked() {
 void LoginWindow::onRegisterClicked() {
     clearError();
 
+    // 检查连接状态
+    if (tcp_client_->state() == ClientState::Disconnected) {
+        showError("正在连接服务器，请稍后再试", false);
+        tcp_client_->connectToServer(server_host_, server_port_);
+        return;
+    }
+
     QString phone = register_phone_edit_->text().trimmed();
     QString nickname = register_nickname_edit_->text().trimmed();
     QString password = register_password_edit_->text();
     QString confirm = register_confirm_password_edit_->text();
 
     if (phone.isEmpty()) {
-        showError("请输入手机号");
+        showError("请输入手机号", false);
         return;
     }
 
     if (nickname.isEmpty()) {
-        showError("请输入昵称");
+        showError("请输入昵称", false);
         return;
     }
 
     if (password.length() < 6) {
-        showError("密码长度至少6位");
+        showError("密码长度至少6位", false);
         return;
     }
 
     if (password != confirm) {
-        showError("两次密码不一致");
+        showError("两次密码不一致", false);
+        return;
+    }
+
+    // 检查是否正在连接
+    if (tcp_client_->state() != ClientState::Connected && tcp_client_->state() != ClientState::LoggedIn) {
+        showError("正在连接服务器，请稍后再试", false);
         return;
     }
 
@@ -262,34 +293,46 @@ void LoginWindow::onRegisterClicked() {
 void LoginWindow::onLoginResponse(int code, const QString& message,
                                  const QString& user_id, const QString& nickname,
                                  const QString& token) {
-    Q_UNUSED(token);
-
+    // 第一时间恢复按钮状态
     login_button_->setEnabled(true);
+
+    // 只有当前在登录页面才处理登录响应
+    if (stacked_widget_->currentWidget() != login_page_) {
+        qDebug() << "Login response ignored, not on login page";
+        return;
+    }
 
     if (code == 0) {
         qDebug() << "Login success:" << user_id << nickname;
         emit loginSuccess(user_id, nickname);
     } else {
-        showError(message);
+        showError(message, true);
     }
 }
 
 void LoginWindow::onRegisterResponse(int code, const QString& message, const QString& user_id) {
-    Q_UNUSED(user_id);
-
+    // 第一时间恢复按钮状态
     register_button_->setEnabled(true);
 
-    if (code == 0) {
-        QMessageBox::information(this, "注册成功", "账号注册成功，请登录！");
-        switchToLoginPage();
+    // 只有当前在注册页面才处理注册响应
+    if (stacked_widget_->currentWidget() != register_page_) {
+        qDebug() << "Register response ignored, not on register page, code:" << code;
+        return;
+    }
 
-        // 清空注册表单
+    if (code == 0) {
+        qDebug() << "Register success:" << user_id;
+        // 先切换页面
+        switchToLoginPage();
+        // 再清空表单
         register_phone_edit_->clear();
         register_nickname_edit_->clear();
         register_password_edit_->clear();
         register_confirm_password_edit_->clear();
+        // 最后弹出提示
+        QMessageBox::information(this, "注册成功", "账号注册成功，请登录！");
     } else {
-        showError(message);
+        showError(message, false);
     }
 }
 
@@ -298,29 +341,42 @@ void LoginWindow::onConnected() {
     clearError();
 }
 
+void LoginWindow::onDisconnected() {
+    qDebug() << "Disconnected from server";
+    // 恢复所有按钮状态
+    login_button_->setEnabled(true);
+    register_button_->setEnabled(true);
+}
+
 void LoginWindow::onError(const QString& error_string) {
     qDebug() << "Connection error:" << error_string;
-    showError("连接失败：" + error_string);
+    // 恢复所有按钮状态
+    login_button_->setEnabled(true);
+    register_button_->setEnabled(true);
+    showError("连接失败：" + error_string, stacked_widget_->currentWidget() == login_page_);
 }
 
 void LoginWindow::switchToLoginPage() {
+    clearError();
     stacked_widget_->setCurrentWidget(login_page_);
     setWindowTitle("IM 客户端 - 登录");
 }
 
 void LoginWindow::switchToRegisterPage() {
+    clearError();
     stacked_widget_->setCurrentWidget(register_page_);
     setWindowTitle("IM 客户端 - 注册");
 }
 
-void LoginWindow::showError(const QString& message) {
-    // 根据当前页面显示错误
-    if (stacked_widget_->currentWidget() == login_page_) {
+void LoginWindow::showError(const QString& message, bool is_login_page) {
+    if (is_login_page) {
         login_error_label_->setText(message);
         login_error_label_->show();
+        register_error_label_->hide();
     } else {
         register_error_label_->setText(message);
         register_error_label_->show();
+        login_error_label_->hide();
     }
 }
 
