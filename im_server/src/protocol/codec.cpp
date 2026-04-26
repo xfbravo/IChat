@@ -23,7 +23,7 @@ MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code&
     std::cout << "[Codec] decode called, buffer size:" << buf.size() << std::endl;
 
     // 检查缓冲区数据是否 >= 6 字节（最小头部）
-    if (buf.size() < sizeof(MessageHeader)) {
+    if (buf.size() < 6) {
         std::cout << "[Codec] Buffer too small, need 6 bytes, got:" << buf.size() << std::endl;
         ec = boost::asio::error::would_block;  // 数据不足，需要继续接收
         return nullptr;
@@ -47,13 +47,13 @@ MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code&
 
     // 检查缓冲区是否包含完整的消息体
     // 完整消息 = 6 字节头部 + length 字节数据
-    if (buf.size() < sizeof(MessageHeader) + length) {
+    if (buf.size() < 6 + length) {
         ec = boost::asio::error::would_block;  // 数据不足，需要继续接收
         return nullptr;
     }
 
     // 移除头部（6字节）
-    buf.consume(sizeof(MessageHeader));
+    buf.consume(6);
 
     // 读取消息体
     std::string body;
@@ -104,14 +104,14 @@ void Codec::encode(const Message& msg, boost::asio::streambuf& buf) {
 }
 
 bool Codec::hasCompleteMessage(const boost::asio::streambuf& buf) const {
-    if (buf.size() < sizeof(MessageHeader)) {
+    if (buf.size() < 6) {
         return false;
     }
 
     const char* data = static_cast<const char*>(buf.data().data());
     uint32_t length = ntoh(*reinterpret_cast<const uint32_t*>(data + 2));
 
-    return buf.size() >= sizeof(MessageHeader) + length;
+    return buf.size() >= 6 + length;
 }
 
 // ==================== 字节序转换 ====================
