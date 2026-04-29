@@ -574,6 +574,7 @@ void MainWindow::onFriendRequestsReceived(const QString& json) {
 
         // 连接按钮信号
         QObject::connect(acceptBtn, &QPushButton::clicked, this, [this, request_id, acceptBtn, rejectBtn]() {
+            qDebug() << "同意按钮 clicked, request_id:" << request_id;
             tcp_client_->respondFriendRequest(request_id, true);
             acceptBtn->setEnabled(false);
             rejectBtn->setEnabled(false);

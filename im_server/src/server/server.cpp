@@ -338,7 +338,9 @@ void Server::register_default_handlers() {
         }
 
         // 根据手机号查找目标用户
+        std::cout << "[Server] 查找用户 phone=" << phone << std::endl;
         UserInfo target_user = user_service_.get_user_by_phone(phone);
+        std::cout << "[Server] 查找结果: user_id=" << target_user.user_id << std::endl;
         if (target_user.user_id.empty()) {
             std::ostringstream rsp;
             rsp << "{\"code\":1,\"message\":\"用户不存在\"}";
@@ -349,9 +351,12 @@ void Server::register_default_handlers() {
         // 获取当前用户信息
         UserInfo current_user = user_service_.get_user_by_id(session->user_id());
 
+        std::cout << "[Server] 添加好友请求: from=" << session->user_id()
+                  << ", to=" << target_user.user_id << ", remark=" << remark << std::endl;
         LoginResult result = user_service_.add_friend_request(
             session->user_id(), target_user.user_id, remark, current_user.nickname);
 
+        std::cout << "[Server] 添加结果: code=" << result.code << ", message=" << result.message << std::endl;
         std::ostringstream rsp;
         rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
         session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
@@ -383,6 +388,8 @@ void Server::register_default_handlers() {
                 accept = true;
             }
         }
+
+        std::cout << "[Server] 解析结果: request_id=" << request_id << ", accept=" << accept << std::endl;
 
         LoginResult result = user_service_.handle_friend_request(request_id, accept, session->user_id());
 

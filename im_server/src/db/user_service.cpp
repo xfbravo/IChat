@@ -425,13 +425,14 @@ LoginResult UserService::add_friend_request(const std::string& from_user_id,
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
     if (!mysql) {
+        std::cerr << "[UserService] add_friend_request: 数据库连接失败" << std::endl;
         result.code = 5001;
         result.message = "数据库连接失败";
         return result;
     }
 
     // 生成请求ID
-    std::string request_id = generate_token(from_user_id) + "_" + std::to_string(time(nullptr));
+    std::string request_id = std::to_string(time(nullptr)) + "_" + generate_token(from_user_id).substr(0, 16);
 
     // 插入好友请求
     std::ostringstream insert_sql;
@@ -440,6 +441,8 @@ LoginResult UserService::add_friend_request(const std::string& from_user_id,
                << "', '" << remark << "', 0, DATE_ADD(NOW(), INTERVAL 7 DAY))";
 
     if (mysql_query(mysql, insert_sql.str().c_str())) {
+        std::cerr << "[UserService] MySQL错误: " << mysql_error(mysql) << std::endl;
+        std::cerr << "[UserService] SQL: " << insert_sql.str() << std::endl;
         result.code = 5001;
         result.message = "发送好友请求失败";
         return result;
