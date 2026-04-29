@@ -6,6 +6,7 @@
 #include "tcpclient.h"
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QHostAddress>
 #include <QApplication>
 #include <QThread>
