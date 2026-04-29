@@ -206,7 +206,7 @@ private:
     // 心跳
     boost::asio::steady_timer heartbeat_timer_;  // 心跳定时器
     static constexpr int HEARTBEAT_INTERVAL = 30;  // 心跳间隔（秒）
-    static constexpr int HEARTBEAT_TIMEOUT = 90;  // 心跳超时（秒）
+    static constexpr int HEARTBEAT_TIMEOUT = 60;  // 心跳超时（秒）
 
     // 状态
     State state_{State::CONNECTED};

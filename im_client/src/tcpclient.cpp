@@ -15,6 +15,7 @@ TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
     , socket_(std::make_unique<QTcpSocket>(this))
     , heartbeat_timer_(new QTimer(this))
+    , heartbeat_timeout_timer_(new QTimer(this))
     , reconnect_timer_(new QTimer(this))
 {
     // 连接信号槽
@@ -23,8 +24,11 @@ TcpClient::TcpClient(QObject* parent)
     connect(socket_.get(), &QTcpSocket::readyRead, this, &TcpClient::onReadyRead);
     connect(socket_.get(), &QAbstractSocket::errorOccurred, this, &TcpClient::onError);
 
-    // 心跳定时器
+    // 心跳定时器 - 定期发送心跳
     connect(heartbeat_timer_, &QTimer::timeout, this, &TcpClient::sendHeartbeat);
+
+    // 心跳超时定时器 - 如果服务器没响应就重连
+    connect(heartbeat_timeout_timer_, &QTimer::timeout, this, &TcpClient::onHeartbeatTimeout);
 
     // 重连定时器
     connect(reconnect_timer_, &QTimer::timeout, this, &TcpClient::attemptReconnect);
@@ -51,6 +55,7 @@ void TcpClient::saveCredentials() {
 
 TcpClient::~TcpClient() {
     stopHeartbeat();
+    heartbeat_timeout_timer_->stop();
     reconnect_timer_->stop();
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
@@ -67,43 +72,43 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
     server_host_ = host;
     server_port_ = port;
 
-    // 停止重连
+    // 停止所有定时器
     reconnect_timer_->stop();
+    heartbeat_timer_->stop();
+    heartbeat_timeout_timer_->stop();
     reconnect_attempts_ = 0;
 
     state_ = ClientState::Connecting;
     socket_->connectToHost(QHostAddress(host), port);
+    emit connectionStatusChanged(false);
 
-    // 设置超时
+    // 设置连接超时
     QTimer::singleShot(5000, this, [this]() {
         if (state_ == ClientState::Connecting) {
             socket_->disconnectFromHost();
             state_ = ClientState::Disconnected;
             emit connectionError("连接超时");
+            emit connectionStatusChanged(false);
         }
     });
 }
 
 void TcpClient::disconnectFromServer() {
     stopHeartbeat();
+    heartbeat_timeout_timer_->stop();
     reconnect_timer_->stop();
     reconnect_attempts_ = 0;
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
     }
     state_ = ClientState::Disconnected;
-    user_id_.clear();
-    user_nickname_.clear();
-    token_.clear();
+    emit connectionStatusChanged(false);
 }
 
 void TcpClient::sendMessage(MsgType type, const QString& body) {
-    qDebug() << "sendMessage called, state:" << socket_->state();
-
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
-        qWarning() << "Socket not connected, cannot send message, state:" << socket_->state();
-        // 如果还没在重连，触发重连
+        qWarning() << "Socket not connected, attempting reconnect, state:" << socket_->state();
         if (state_ != ClientState::Connecting && reconnect_attempts_ == 0) {
             attemptReconnect();
         }
@@ -111,22 +116,11 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
     }
 
     QByteArray data = Protocol::encode(type, body);
-    qDebug() << "Sending" << data.size() << "bytes, type:" << static_cast<int>(type);
-
     qint64 written = socket_->write(data);
-    qDebug() << "write() returned:" << written;
-
-    // 确保数据真正发送出去
     socket_->flush();
 
-    // 检查还有多少数据在缓冲区
-    qDebug() << "bytesToWrite after flush:" << socket_->bytesToWrite();
-
-    // 如果数据没有完全发送出去，等待
     if (socket_->bytesToWrite() > 0) {
-        qDebug() << "Waiting for data to be sent...";
-        QThread::msleep(50);  // 等待 50ms
-        qDebug() << "bytesToWrite after wait:" << socket_->bytesToWrite();
+        QThread::msleep(50);
     }
 }
 
@@ -134,7 +128,6 @@ void TcpClient::login(const QString& user_id, const QString& password) {
     // 如果正在连接中，等待连接完成后再登录
     if (state_ == ClientState::Connecting) {
         qDebug() << "Still connecting, waiting...";
-        // 保存登录信息，连接成功后自动登录
         pending_login_user_id_ = user_id;
         pending_login_password_ = password;
         return;
@@ -178,8 +171,9 @@ void TcpClient::onConnected() {
     reconnect_attempts_ = 0;
     reconnect_timer_->stop();
     state_ = ClientState::Connected;
-    startHeartbeat();
     emit connected();
+    emit connectionStatusChanged(true);
+    startHeartbeat();
 
     // 如果有待发送的登录请求，自动发送
     if (!pending_login_user_id_.isEmpty()) {
@@ -194,10 +188,17 @@ void TcpClient::onConnected() {
 void TcpClient::onDisconnected() {
     qDebug() << "Disconnected from server";
     stopHeartbeat();
+    heartbeat_timeout_timer_->stop();
     reconnect_timer_->stop();
     state_ = ClientState::Disconnected;
     read_buffer_.clear();
     emit disconnected();
+    emit connectionStatusChanged(false);
+
+    // 自动重连
+    if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+        QTimer::singleShot(RECONNECT_INTERVAL, this, &TcpClient::attemptReconnect);
+    }
 }
 
 void TcpClient::onReadyRead() {
@@ -209,7 +210,7 @@ void TcpClient::onReadyRead() {
         QString body;
 
         if (!Protocol::decode(read_buffer_, type, body)) {
-            break;  // 数据不足，等待更多数据
+            break;
         }
 
         // 处理消息
@@ -222,6 +223,7 @@ void TcpClient::onError(QAbstractSocket::SocketError error) {
     QString error_string = socket_->errorString();
     qWarning() << "Socket error:" << error_string;
     emit connectionError(error_string);
+    emit connectionStatusChanged(false);
 }
 
 void TcpClient::sendHeartbeat() {
@@ -229,11 +231,29 @@ void TcpClient::sendHeartbeat() {
         return;
     }
 
+    // 重置心跳超时定时器
+    heartbeat_timeout_timer_->start(HEARTBEAT_TIMEOUT);
+
     QJsonObject obj;
     obj["user_id"] = user_id_;
     obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
     QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::HEARTBEAT, body);
+}
+
+void TcpClient::onHeartbeatTimeout() {
+    qWarning() << "Heartbeat timeout, server not responding, reconnecting...";
+    heartbeat_timeout_timer_->stop();
+    stopHeartbeat();
+
+    // 断开并重连
+    if (socket_->isOpen()) {
+        socket_->disconnectFromHost();
+    }
+
+    if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+        attemptReconnect();
+    }
 }
 
 void TcpClient::handleMessage(MsgType type, const QString& body) {
@@ -246,7 +266,6 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     user_id_ = QString::fromStdString(rsp.user_id);
                     user_nickname_ = QString::fromStdString(rsp.nickname);
                     token_ = QString::fromStdString(rsp.token);
-                    // 保存登录凭证
                     saveCredentials();
                 }
                 emit loginResponse(rsp.code, QString::fromStdString(rsp.message),
@@ -273,7 +292,6 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
         case MsgType::IMAGE:
         case MsgType::FILE:
         case MsgType::VOICE: {
-            // 解析聊天消息
             QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
             if (doc.isObject()) {
                 QJsonObject obj = doc.object();
@@ -285,6 +303,8 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
         }
 
         case MsgType::HEARTBEAT: {
+            // 收到心跳响应，重置超时定时器
+            heartbeat_timeout_timer_->stop();
             emit heartbeatResponse();
             break;
         }
@@ -301,6 +321,7 @@ void TcpClient::startHeartbeat() {
 
 void TcpClient::stopHeartbeat() {
     heartbeat_timer_->stop();
+    heartbeat_timeout_timer_->stop();
 }
 
 void TcpClient::attemptReconnect() {
@@ -313,11 +334,9 @@ void TcpClient::attemptReconnect() {
         qDebug() << "Max reconnection attempts reached, giving up";
         emit connectionError("连接断开，请手动重试");
         reconnect_attempts_ = 0;
-        reconnect_timer_->stop();
         return;
     }
 
-    // 如果已经在重连中，不要重复启动
     if (state_ == ClientState::Connecting) {
         qDebug() << "Already connecting, skipping reconnect attempt";
         return;
@@ -330,17 +349,17 @@ void TcpClient::attemptReconnect() {
     state_ = ClientState::Connecting;
     socket_->connectToHost(QHostAddress(server_host_), server_port_);
 
-    // 设置超时
+    // 连接超时处理
     QTimer::singleShot(5000, this, [this]() {
         if (state_ == ClientState::Connecting) {
             socket_->disconnectFromHost();
             qDebug() << "Reconnect attempt timeout";
-            // 重连定时器：如果还没达到最大次数，继续尝试
             if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
                 reconnect_timer_->start(RECONNECT_INTERVAL);
             } else {
                 emit connectionError("连接失败，请手动重试");
                 reconnect_attempts_ = 0;
+                state_ = ClientState::Disconnected;
             }
         }
     });

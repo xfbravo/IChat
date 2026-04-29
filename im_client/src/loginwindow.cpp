@@ -18,7 +18,7 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     , server_port_(8080)
 {
     setWindowTitle("IM 客户端 - 登录");
-    setMinimumSize(400, 300);
+    setMinimumSize(400, 320);
     setStyleSheet(R"(
         QWidget {
             background-color: #f5f5f5;
@@ -70,6 +70,23 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
             color: #f44336;
             font-size: 12px;
         }
+        QLabel#status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        QLabel#status_connected {
+            color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+        QLabel#status_disconnected {
+            color: #f44336;
+            background-color: #ffebee;
+        }
+        QLabel#status_connecting {
+            color: #ff9800;
+            background-color: #fff3e0;
+        }
     )");
 
     // 创建页面
@@ -77,8 +94,16 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     createLoginPage();
     createRegisterPage();
 
+    // 连接状态标签
+    connection_status_label_ = new QLabel(this);
+    connection_status_label_->setAlignment(Qt::AlignCenter);
+    connection_status_label_->setObjectName("status_disconnected");
+    connection_status_label_->setText("● 未连接");
+    connection_status_label_->hide();
+
     // 布局
     QVBoxLayout* main_layout = new QVBoxLayout(this);
+    main_layout->addWidget(connection_status_label_);
     main_layout->addWidget(stacked_widget_);
 
     // 连接信号槽
@@ -87,6 +112,7 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     connect(tcp_client_, &TcpClient::connectionError, this, &LoginWindow::onError);
     connect(tcp_client_, &TcpClient::loginResponse, this, &LoginWindow::onLoginResponse);
     connect(tcp_client_, &TcpClient::registerResponse, this, &LoginWindow::onRegisterResponse);
+    connect(tcp_client_, &TcpClient::connectionStatusChanged, this, &LoginWindow::onConnectionStatusChanged);
 
     // 加载保存的登录凭证
     tcp_client_->loadCredentials();
@@ -243,7 +269,6 @@ void LoginWindow::onLoginClicked() {
         return;
     }
 
-    // 检查是否正在连接或已登录
     if (tcp_client_->state() != ClientState::Connected && tcp_client_->state() != ClientState::LoggedIn) {
         showError("正在连接服务器，请稍后再试", true);
         return;
@@ -288,7 +313,6 @@ void LoginWindow::onRegisterClicked() {
         return;
     }
 
-    // 检查是否正在连接
     if (tcp_client_->state() != ClientState::Connected && tcp_client_->state() != ClientState::LoggedIn) {
         showError("正在连接服务器，请稍后再试", false);
         return;
@@ -301,6 +325,8 @@ void LoginWindow::onRegisterClicked() {
 void LoginWindow::onLoginResponse(int code, const QString& message,
                                  const QString& user_id, const QString& nickname,
                                  const QString& token) {
+    Q_UNUSED(token);
+
     // 第一时间恢复按钮状态
     login_button_->setEnabled(true);
 
@@ -319,6 +345,8 @@ void LoginWindow::onLoginResponse(int code, const QString& message,
 }
 
 void LoginWindow::onRegisterResponse(int code, const QString& message, const QString& user_id) {
+    Q_UNUSED(user_id);
+
     // 第一时间恢复按钮状态
     register_button_->setEnabled(true);
 
@@ -347,21 +375,26 @@ void LoginWindow::onRegisterResponse(int code, const QString& message, const QSt
 void LoginWindow::onConnected() {
     qDebug() << "Connected to server";
     clearError();
+    updateConnectionStatus(true);
 }
 
 void LoginWindow::onDisconnected() {
     qDebug() << "Disconnected from server";
-    // 恢复所有按钮状态
     login_button_->setEnabled(true);
     register_button_->setEnabled(true);
+    updateConnectionStatus(false);
 }
 
 void LoginWindow::onError(const QString& error_string) {
     qDebug() << "Connection error:" << error_string;
-    // 恢复所有按钮状态
     login_button_->setEnabled(true);
     register_button_->setEnabled(true);
+    updateConnectionStatus(false);
     showError("连接失败：" + error_string, stacked_widget_->currentWidget() == login_page_);
+}
+
+void LoginWindow::onConnectionStatusChanged(bool is_connected) {
+    updateConnectionStatus(is_connected);
 }
 
 void LoginWindow::switchToLoginPage() {
@@ -391,4 +424,25 @@ void LoginWindow::showError(const QString& message, bool is_login_page) {
 void LoginWindow::clearError() {
     login_error_label_->hide();
     register_error_label_->hide();
+}
+
+void LoginWindow::updateConnectionStatus(bool is_connected) {
+    connection_status_label_->show();
+
+    if (is_connected) {
+        connection_status_label_->setObjectName("status_connected");
+        connection_status_label_->setText("● 已连接");
+        connection_status_label_->setStyleSheet("color: #4CAF50; background-color: #e8f5e9; font-size: 12px; padding: 4px 8px; border-radius: 4px;");
+    } else {
+        ClientState state = tcp_client_->state();
+        if (state == ClientState::Connecting) {
+            connection_status_label_->setObjectName("status_connecting");
+            connection_status_label_->setText("● 连接中...");
+            connection_status_label_->setStyleSheet("color: #ff9800; background-color: #fff3e0; font-size: 12px; padding: 4px 8px; border-radius: 4px;");
+        } else {
+            connection_status_label_->setObjectName("status_disconnected");
+            connection_status_label_->setText("● 未连接");
+            connection_status_label_->setStyleSheet("color: #f44336; background-color: #ffebee; font-size: 12px; padding: 4px 8px; border-radius: 4px;");
+        }
+    }
 }

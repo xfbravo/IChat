@@ -161,6 +161,12 @@ signals:
      */
     void heartbeatResponse();
 
+    /**
+     * @brief 连接状态变化信号
+     * @param is_connected 是否已连接
+     */
+    void connectionStatusChanged(bool is_connected);
+
 private slots:
     /**
      * @brief 处理连接成功
@@ -186,6 +192,11 @@ private slots:
      * @brief 发送心跳
      */
     void sendHeartbeat();
+
+    /**
+     * @brief 处理心跳超时
+     */
+    void onHeartbeatTimeout();
 
 private:
     /**
@@ -213,22 +224,24 @@ private:
      */
     void saveCredentials();
 
-    std::unique_ptr<QTcpSocket> socket_;  // TCP socket
-    ClientState state_ = ClientState::Disconnected;  // 状态
-    QString user_id_;  // 当前用户ID
-    QString user_nickname_;  // 当前用户昵称
-    QString token_;  // 认证Token
-    QString server_host_;  // 服务器地址
-    quint16 server_port_;  // 服务器端口
-    QString pending_login_user_id_;  // 待发送的登录用户ID
-    QString pending_login_password_;  // 待发送的登录密码
+    std::unique_ptr<QTcpSocket> socket_;
+    ClientState state_ = ClientState::Disconnected;
+    QString user_id_;
+    QString user_nickname_;
+    QString token_;
+    QString server_host_;
+    quint16 server_port_;
+    QString pending_login_user_id_;
+    QString pending_login_password_;
 
-    QTimer* heartbeat_timer_ = nullptr;  // 心跳定时器
-    QTimer* reconnect_timer_ = nullptr;  // 重连定时器
-    QByteArray read_buffer_;  // 读取缓冲区
+    QTimer* heartbeat_timer_ = nullptr;
+    QTimer* heartbeat_timeout_timer_ = nullptr;
+    QTimer* reconnect_timer_ = nullptr;
+    QByteArray read_buffer_;
 
-    int reconnect_attempts_ = 0;  // 重连次数
-    static constexpr int MAX_RECONNECT_ATTEMPTS = 3;  // 最大重连次数
-    static constexpr int RECONNECT_INTERVAL = 5000;   // 重连间隔（毫秒）
-    static constexpr int HEARTBEAT_INTERVAL = 30000;  // 心跳间隔（毫秒）
+    int reconnect_attempts_ = 0;
+    static constexpr int MAX_RECONNECT_ATTEMPTS = 5;
+    static constexpr int RECONNECT_INTERVAL = 3000;
+    static constexpr int HEARTBEAT_INTERVAL = 15000;
+    static constexpr int HEARTBEAT_TIMEOUT = 10000;
 };

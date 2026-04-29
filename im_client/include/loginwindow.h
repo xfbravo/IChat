@@ -10,6 +10,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QStackedWidget>
+#include <QStatusBar>
 #include "tcpclient.h"
 
 class LoginWindow : public QWidget {
@@ -68,6 +69,11 @@ private slots:
     void onDisconnected();
 
     /**
+     * @brief 处理连接状态变化
+     */
+    void onConnectionStatusChanged(bool is_connected);
+
+    /**
      * @brief 切换到登录页面
      */
     void switchToLoginPage();
@@ -100,10 +106,16 @@ private:
      */
     void clearError();
 
+    /**
+     * @brief 更新连接状态显示
+     */
+    void updateConnectionStatus(bool is_connected);
+
 private:
     TcpClient* tcp_client_;
 
     QStackedWidget* stacked_widget_;
+    QLabel* connection_status_label_;
 
     // 登录页面
     QWidget* login_page_;
