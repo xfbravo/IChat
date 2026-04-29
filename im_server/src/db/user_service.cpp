@@ -246,6 +246,39 @@ UserInfo UserService::get_user_by_id(const std::string& user_id) {
     return info;
 }
 
+UserInfo UserService::get_user_by_phone(const std::string& phone) {
+    UserInfo info;
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+
+    if (!mysql) return info;
+
+    std::ostringstream sql;
+    sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time "
+        << "FROM im_user WHERE phone = '" << phone << "'";
+
+    if (mysql_query(mysql, sql.str().c_str())) return info;
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return info;
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (row) {
+        info.user_id = row[0] ? row[0] : "";
+        info.phone = row[1] ? row[1] : "";
+        info.email = row[2] ? row[2] : "";
+        info.nickname = row[3] ? row[3] : "";
+        info.avatar_url = row[4] ? row[4] : "";
+        info.status = row[5] ? std::stoi(row[5]) : 0;
+        info.user_type = row[6] ? std::stoi(row[6]) : 1;
+        info.create_time = row[7] ? row[7] : "";
+    }
+
+    mysql_free_result(res);
+    return info;
+}
+
 bool UserService::user_exists(const std::string& user_id) {
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
@@ -276,6 +309,242 @@ void UserService::update_login_info(const std::string& user_id,
         << "' WHERE user_id = '" << user_id << "'";
 
     mysql_query(mysql, sql.str().c_str());
+}
+
+std::string UserService::get_friend_list(const std::string& user_id) {
+    std::ostringstream result;
+    result << "[";
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return result.str();
+
+    std::ostringstream query;
+    query << "SELECT f.friend_id, f.remark, f.friend_nickname, f.friend_avatar, u.status "
+          << "FROM im_friend f "
+          << "LEFT JOIN im_user u ON f.friend_id = u.user_id "
+          << "WHERE f.user_id = '" << user_id << "' AND f.status = 1 "
+          << "ORDER BY f.friend_nickname ASC";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        return result.str();
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return result.str();
+
+    bool first = true;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        if (!first) result << ",";
+        first = false;
+        std::string friend_id = row[0] ? row[0] : "";
+        std::string remark = row[1] ? row[1] : "";
+        std::string nickname = row[2] ? row[2] : "";
+        std::string avatar = row[3] ? row[3] : "";
+        int status = row[4] ? std::stoi(row[4]) : 0;
+
+        result << "{\"friend_id\":\"" << friend_id << "\","
+               << "\"remark\":\"" << remark << "\","
+               << "\"nickname\":\"" << nickname << "\","
+               << "\"avatar_url\":\"" << avatar << "\","
+               << "\"status\":" << status << "}";
+    }
+
+    mysql_free_result(res);
+    result << "]";
+    return result.str();
+}
+
+std::string UserService::get_friend_requests(const std::string& user_id, int status) {
+    std::ostringstream result;
+    result << "[";
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return result.str();
+
+    std::ostringstream query;
+    query << "SELECT request_id, from_user_id, from_nickname, from_avatar, remark, create_time "
+          << "FROM im_friend_request "
+          << "WHERE to_user_id = '" << user_id << "' AND status = " << status
+          << " ORDER BY create_time DESC";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        return result.str();
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return result.str();
+
+    bool first = true;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        if (!first) result << ",";
+        first = false;
+        std::string request_id = row[0] ? row[0] : "";
+        std::string from_user_id = row[1] ? row[1] : "";
+        std::string from_nickname = row[2] ? row[2] : "";
+        std::string from_avatar = row[3] ? row[3] : "";
+        std::string remark = row[4] ? row[4] : "";
+        std::string create_time = row[5] ? row[5] : "";
+
+        result << "{\"request_id\":\"" << request_id << "\","
+               << "\"from_user_id\":\"" << from_user_id << "\","
+               << "\"from_nickname\":\"" << from_nickname << "\","
+               << "\"from_avatar\":\"" << from_avatar << "\","
+               << "\"remark\":\"" << remark << "\","
+               << "\"create_time\":\"" << create_time << "\"}";
+    }
+
+    mysql_free_result(res);
+    result << "]";
+    return result.str();
+}
+
+LoginResult UserService::add_friend_request(const std::string& from_user_id,
+                                             const std::string& to_user_id,
+                                             const std::string& remark,
+                                             const std::string& from_nickname) {
+    LoginResult result;
+
+    // 不能添加自己为好友
+    if (from_user_id == to_user_id) {
+        result.code = 1;
+        result.message = "不能添加自己为好友";
+        return result;
+    }
+
+    // 检查目标用户是否存在
+    if (!user_exists(to_user_id)) {
+        result.code = 2;
+        result.message = "用户不存在";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    // 生成请求ID
+    std::string request_id = generate_token(from_user_id) + "_" + std::to_string(time(nullptr));
+
+    // 插入好友请求
+    std::ostringstream insert_sql;
+    insert_sql << "INSERT INTO im_friend_request (request_id, from_user_id, from_nickname, to_user_id, remark, status, expire_time) "
+               << "VALUES ('" << request_id << "', '" << from_user_id << "', '" << from_nickname << "', '" << to_user_id
+               << "', '" << remark << "', 0, DATE_ADD(NOW(), INTERVAL 7 DAY))";
+
+    if (mysql_query(mysql, insert_sql.str().c_str())) {
+        result.code = 5001;
+        result.message = "发送好友请求失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "好友请求已发送";
+    return result;
+}
+
+LoginResult UserService::handle_friend_request(const std::string& request_id,
+                                               bool accept,
+                                               const std::string& user_id) {
+    LoginResult result;
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    // 先查询请求信息
+    std::ostringstream select_sql;
+    select_sql << "SELECT from_user_id, to_user_id, from_nickname, to_user_id FROM im_friend_request "
+               << "WHERE request_id = '" << request_id << "' AND to_user_id = '" << user_id << "' AND status = 0";
+
+    if (mysql_query(mysql, select_sql.str().c_str())) {
+        result.code = 5001;
+        result.message = "查询请求失败";
+        return result;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res || mysql_num_rows(res) == 0) {
+        result.code = 1;
+        result.message = "请求不存在或已处理";
+        if (res) mysql_free_result(res);
+        return result;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    std::string from_user_id = row[0] ? row[0] : "";
+    std::string from_nickname = row[2] ? row[2] : "";
+    mysql_free_result(res);
+
+    // 更新请求状态
+    std::ostringstream update_sql;
+    update_sql << "UPDATE im_friend_request SET status = " << (accept ? 1 : 2)
+               << ", handle_time = NOW() WHERE request_id = '" << request_id << "'";
+    mysql_query(mysql, update_sql.str().c_str());
+
+    if (accept) {
+        // 双向添加好友记录
+        // 获取对方用户信息
+        UserInfo from_user = get_user_by_id(from_user_id);
+        UserInfo to_user = get_user_by_id(user_id);
+
+        // A添加B，A的friend_id是B，B的friend_id是A
+        std::ostringstream insert_sql1;
+        insert_sql1 << "INSERT INTO im_friend (user_id, friend_id, friend_nickname, friend_avatar) "
+                    << "VALUES ('" << from_user_id << "', '" << user_id << "', '" << to_user.nickname << "', '" << to_user.avatar_url << "')";
+        mysql_query(mysql, insert_sql1.str().c_str());
+
+        std::ostringstream insert_sql2;
+        insert_sql2 << "INSERT INTO im_friend (user_id, friend_id, friend_nickname, friend_avatar) "
+                    << "VALUES ('" << user_id << "', '" << from_user_id << "', '" << from_nickname << "', '" << from_user.avatar_url << "')";
+        mysql_query(mysql, insert_sql2.str().c_str());
+
+        result.code = 0;
+        result.message = "已同意好友请求";
+    } else {
+        result.code = 0;
+        result.message = "已拒绝好友请求";
+    }
+
+    return result;
+}
+
+LoginResult UserService::delete_friend(const std::string& user_id, const std::string& friend_id) {
+    LoginResult result;
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    // 双向删除好友记录
+    std::ostringstream sql;
+    sql << "DELETE FROM im_friend WHERE (user_id = '" << user_id << "' AND friend_id = '" << friend_id << "') "
+        << "OR (user_id = '" << friend_id << "' AND friend_id = '" << user_id << "')";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        result.code = 5001;
+        result.message = "删除好友失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "已删除好友";
+    return result;
 }
 
 } // namespace im

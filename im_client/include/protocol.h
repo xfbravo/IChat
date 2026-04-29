@@ -15,20 +15,28 @@
  */
 enum class MsgType : uint16_t {
     // 客户端 -> 服务端
-    HEARTBEAT     = 0x0001,  // 心跳包
-    LOGIN         = 0x0002,  // 登录请求
-    REGISTER_REQ  = 0x0003,  // 注册请求
-    LOGOUT        = 0x0004,  // 登出请求
-    TEXT          = 0x0005,  // 文本消息
-    IMAGE         = 0x0006,  // 图片消息
-    FILE          = 0x0007,  // 文件消息
-    VOICE         = 0x0008,  // 语音消息
-    ACK           = 0x0009,  // 消息确认
+    HEARTBEAT        = 0x0001,  // 心跳包
+    LOGIN            = 0x0002,  // 登录请求
+    REGISTER_REQ     = 0x0003,  // 注册请求
+    LOGOUT           = 0x0004,  // 登出请求
+    TEXT             = 0x0005,  // 文本消息
+    IMAGE            = 0x0006,  // 图片消息
+    FILE             = 0x0007,  // 文件消息
+    VOICE            = 0x0008,  // 语音消息
+    ACK              = 0x0009,  // 消息确认
+    FRIEND_REQUEST   = 0x000A,  // 发送好友请求
+    GET_FRIEND_LIST   = 0x000B,  // 获取好友列表
+    GET_FRIEND_REQUESTS = 0x000C, // 获取好友请求列表
+    FRIEND_REQUEST_RSP = 0x000D, // 响应好友请求（同意/拒绝）
+    DELETE_FRIEND     = 0x000E,  // 删除好友
 
     // 服务端 -> 客户端
-    LOGIN_RSP     = 0x8002,  // 登录响应
-    REGISTER_RSP  = 0x8003,  // 注册响应
-    ERROR         = 0x800F,  // 错误响应
+    LOGIN_RSP        = 0x8002,  // 登录响应
+    REGISTER_RSP     = 0x8003,  // 注册响应
+    ERROR            = 0x800F,  // 错误响应
+    FRIEND_LIST_RSP  = 0x800A,  // 好友列表响应
+    FRIEND_REQUEST_NEW = 0x800B, // 新好友请求通知
+    FRIEND_LIST_UPDATE = 0x800C, // 好友列表更新通知
 };
 
 /**

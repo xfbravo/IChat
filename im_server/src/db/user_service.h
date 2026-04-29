@@ -48,20 +48,11 @@ public:
 
     /**
      * @brief 用户登录
-     *
-     * @param user_id 用户ID（手机号或user_id）
-     * @param password 密码
-     * @return LoginResult 登录结果
      */
     LoginResult login(const std::string& user_id, const std::string& password);
 
     /**
      * @brief 用户注册
-     *
-     * @param phone 手机号
-     * @param nickname 昵称
-     * @param password 密码
-     * @return LoginResult 注册结果
      */
     LoginResult register_user(const std::string& phone,
                               const std::string& nickname,
@@ -69,32 +60,26 @@ public:
 
     /**
      * @brief 根据用户ID获取用户信息
-     *
-     * @param user_id 用户ID
-     * @return UserInfo 用户信息
      */
     UserInfo get_user_by_id(const std::string& user_id);
 
     /**
+     * @brief 根据手机号获取用户信息
+     */
+    UserInfo get_user_by_phone(const std::string& phone);
+
+    /**
      * @brief 检查用户是否存在
-     *
-     * @param user_id 用户ID
-     * @return bool true 存在，false 不存在
      */
     bool user_exists(const std::string& user_id);
 
     /**
      * @brief 更新最后登录信息
-     *
-     * @param user_id 用户ID
-     * @param ip 登录IP
      */
     void update_login_info(const std::string& user_id, const std::string& ip);
 
     /**
      * @brief 生成简单 token
-     *
-     * 实际应用中应使用 JWT
      */
     std::string generate_token(const std::string& user_id);
 
@@ -103,17 +88,38 @@ public:
      */
     std::string generate_user_id();
 
-private:
     /**
-     * @brief 计算密码哈希
-     *
-     * 实际应用中应使用更安全的算法
+     * @brief 获取好友列表
      */
-    std::string hash_password(const std::string& password, const std::string& salt);
+    std::string get_friend_list(const std::string& user_id);
 
     /**
-     * @brief 生成随机盐值
+     * @brief 获取好友请求列表
      */
+    std::string get_friend_requests(const std::string& user_id, int status = 0);
+
+    /**
+     * @brief 添加好友请求
+     */
+    LoginResult add_friend_request(const std::string& from_user_id,
+                                    const std::string& to_user_id,
+                                    const std::string& remark,
+                                    const std::string& from_nickname);
+
+    /**
+     * @brief 处理好友请求
+     */
+    LoginResult handle_friend_request(const std::string& request_id,
+                                       bool accept,
+                                       const std::string& user_id);
+
+    /**
+     * @brief 删除好友
+     */
+    LoginResult delete_friend(const std::string& user_id, const std::string& friend_id);
+
+private:
+    std::string hash_password(const std::string& password, const std::string& salt);
     std::string generate_salt();
 
     DbPool& db_pool_;

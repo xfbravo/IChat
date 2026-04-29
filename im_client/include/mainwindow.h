@@ -10,78 +10,56 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QListWidget>
+#include <QTreeWidget>
 #include <QSplitter>
 #include <QLabel>
+#include <QStackedWidget>
+#include <QWidget>
 #include "tcpclient.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    /**
-     * @brief 构造函数
-     * @param tcp_client TCP客户端指针
-     * @param user_id 用户ID
-     * @param nickname 昵称
-     * @param parent 父对象
-     */
     explicit MainWindow(TcpClient* tcp_client,
                        const QString& user_id,
                        const QString& nickname,
                        QWidget* parent = nullptr);
 
 signals:
-    /**
-     * @brief 登出信号
-     */
     void logout();
 
 private slots:
-    /**
-     * @brief 处理发送消息
-     */
+    // Navigation
+    void onNavigationItemClicked(int index);
+
+    // Chat functions
     void onSendClicked();
-
-    /**
-     * @brief 处理收到消息
-     */
     void onChatMessageReceived(const QString& from_user_id, const QString& content);
-
-    /**
-     * @brief 处理断开连接
-     */
+    void onChatItemClicked(QListWidgetItem* item);
+    void onContactSelectedInSelector(QListWidgetItem* item);
     void onDisconnected();
 
-    /**
-     * @brief 处理登出按钮
-     */
+    // Contact functions
+    void onAddContactClicked();
+    void onViewFriendRequestsClicked();
+    void onContactItemDoubleClicked(QTreeWidgetItem* item, int column);
+    void onFriendListReceived(const QString& json);
+    void onFriendRequestReceived(const QString& from_user_id, const QString& from_nickname, const QString& message);
+    void onFriendRequestsReceived(const QString& json);
+
     void onLogoutClicked();
 
 private:
-    /**
-     * @brief 创建UI
-     */
-    void createUI();
-
-    /**
-     * @brief 创建聊天区域
-     */
-    void createChatArea();
-
-    /**
-     * @brief 创建好友列表
-     */
-    void createFriendList();
-
-    /**
-     * @brief 添加消息到聊天区域
-     */
+    void createNavigationBar();
+    void createMessageView();
+    void createContactView();
+    void createPlaceholderView(QWidget*& widget, const QString& text);
     void appendMessage(const QString& from, const QString& content, bool is_mine);
-
-    /**
-     * @brief 获取当前选中的聊天对象
-     */
-    QString currentChatTarget() const;
+    void loadChatList();
+    void loadContactSelector();
+    void loadContacts();
+    void switchToChatWith(const QString& user_id, const QString& nickname);
 
 private:
     TcpClient* tcp_client_;
@@ -89,12 +67,31 @@ private:
     QString user_nickname_;
     QString current_chat_target_;
 
-    // UI 组件
-    QSplitter* splitter_;
-    QListWidget* friend_list_widget_;
-    QWidget* chat_widget_;
+    // Navigation
+    QWidget* navigation_bar_;
+    QListWidget* nav_list_;
+    QStackedWidget* content_stacked_;
+
+    // Message View
+    QWidget* message_view_;
+    QSplitter* message_splitter_;
+    QListWidget* chat_list_widget_;
+    QListWidget* contact_selector_widget_;
+    QWidget* chat_interface_panel_;
+    QLabel* chat_target_label_;
     QTextEdit* chat_display_;
     QLineEdit* message_input_;
     QPushButton* send_button_;
+
+    // Contact View
+    QWidget* contact_view_;
+    QTreeWidget* contact_tree_widget_;
+    QPushButton* add_contact_button_;
+
+    // Placeholder views
+    QWidget* moments_view_;
+    QWidget* settings_view_;
+
+    // Status
     QLabel* status_label_;
 };

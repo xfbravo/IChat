@@ -27,6 +27,7 @@ set(SOURCES
     src/loginwindow.cpp
     src/tcpclient.cpp
     src/protocol.cpp
+    src/addcontactdialog.cpp
 )
 
 # 头文件
@@ -35,6 +36,7 @@ set(HEADERS
     include/loginwindow.h
     include/tcpclient.h
     include/protocol.h
+    include/addcontactdialog.h
 )
 
 # 添加 include 目录

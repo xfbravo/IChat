@@ -292,6 +292,129 @@ void Server::register_default_handlers() {
         session->send(MsgType::REGISTER_RSP, rsp.str());
     });
 
+    // 获取好友列表
+    dispatcher_.register_handler(MsgType::GET_FRIEND_LIST, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到获取好友列表请求: " << session->user_id() << std::endl;
+        std::string friend_list = user_service_.get_friend_list(session->user_id());
+        session->send(MsgType::FRIEND_LIST_RSP, friend_list);
+    });
+
+    // 获取好友请求列表
+    dispatcher_.register_handler(MsgType::GET_FRIEND_REQUESTS, [this](std::shared_ptr<Session> session, const Message& msg) {
+        (void)msg;
+        std::cout << "[Server] 收到获取好友请求列表: " << session->user_id() << std::endl;
+        std::string requests = user_service_.get_friend_requests(session->user_id(), 0);
+        session->send(MsgType::FRIEND_REQUEST_NEW, requests);
+    });
+
+    // 发送好友请求
+    dispatcher_.register_handler(MsgType::FRIEND_REQUEST, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到好友请求 from " << session->user_id() << ": " << msg.body << std::endl;
+
+        // 解析请求: {"phone":"xxx","remark":"xxx"}
+        std::string phone, remark;
+        std::string body = msg.body;
+
+        size_t pos = body.find("\"phone\":");
+        if (pos != std::string::npos) {
+            size_t value_start = body.find("\"", pos + 8);
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    phone = body.substr(value_start + 1, value_end - value_start - 1);
+                }
+            }
+        }
+
+        pos = body.find("\"remark\":");
+        if (pos != std::string::npos) {
+            size_t value_start = body.find("\"", pos + 8);
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    remark = body.substr(value_start + 1, value_end - value_start - 1);
+                }
+            }
+        }
+
+        // 根据手机号查找目标用户
+        UserInfo target_user = user_service_.get_user_by_phone(phone);
+        if (target_user.user_id.empty()) {
+            std::ostringstream rsp;
+            rsp << "{\"code\":1,\"message\":\"用户不存在\"}";
+            session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+            return;
+        }
+
+        // 获取当前用户信息
+        UserInfo current_user = user_service_.get_user_by_id(session->user_id());
+
+        LoginResult result = user_service_.add_friend_request(
+            session->user_id(), target_user.user_id, remark, current_user.nickname);
+
+        std::ostringstream rsp;
+        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
+        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+    });
+
+    // 响应好友请求（同意/拒绝）
+    dispatcher_.register_handler(MsgType::FRIEND_REQUEST_RSP, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到好友请求响应 from " << session->user_id() << ": " << msg.body << std::endl;
+
+        // 解析: {"request_id":"xxx","accept":true/false}
+        std::string request_id;
+        bool accept = false;
+
+        size_t pos = msg.body.find("\"request_id\":");
+        if (pos != std::string::npos) {
+            size_t value_start = msg.body.find("\"", pos + 12);
+            if (value_start != std::string::npos) {
+                size_t value_end = msg.body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    request_id = msg.body.substr(value_start + 1, value_end - value_start - 1);
+                }
+            }
+        }
+
+        pos = msg.body.find("\"accept\":");
+        if (pos != std::string::npos) {
+            size_t value_start = pos + 8;
+            if (msg.body.find("true", value_start) == value_start) {
+                accept = true;
+            }
+        }
+
+        LoginResult result = user_service_.handle_friend_request(request_id, accept, session->user_id());
+
+        std::ostringstream rsp;
+        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
+        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+    });
+
+    // 删除好友
+    dispatcher_.register_handler(MsgType::DELETE_FRIEND, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到删除好友请求 from " << session->user_id() << ": " << msg.body << std::endl;
+
+        // 解析: {"friend_id":"xxx"}
+        std::string friend_id;
+        size_t pos = msg.body.find("\"friend_id\":");
+        if (pos != std::string::npos) {
+            size_t value_start = msg.body.find("\"", pos + 10);
+            if (value_start != std::string::npos) {
+                size_t value_end = msg.body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    friend_id = msg.body.substr(value_start + 1, value_end - value_start - 1);
+                }
+            }
+        }
+
+        LoginResult result = user_service_.delete_friend(session->user_id(), friend_id);
+
+        std::ostringstream rsp;
+        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
+        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+    });
+
     // 登出消息处理
     dispatcher_.register_handler(MsgType::LOGOUT, [this](std::shared_ptr<Session> session, const Message& msg) {
         (void)msg;

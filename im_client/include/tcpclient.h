@@ -91,6 +91,30 @@ public:
                          const QString& content);
 
     /**
+     * @brief 发送好友请求
+     * @param phone 目标用户手机号
+     * @param remark 备注信息
+     */
+    void sendFriendRequest(const QString& to_user_id, const QString& remark);
+
+    /**
+     * @brief 获取好友列表
+     */
+    void getFriendList();
+
+    /**
+     * @brief 获取好友请求列表
+     */
+    void getFriendRequests();
+
+    /**
+     * @brief 响应好友请求
+     * @param request_id 请求ID
+     * @param accept 是否接受
+     */
+    void respondFriendRequest(const QString& request_id, bool accept);
+
+    /**
      * @brief 获取当前状态
      */
     ClientState state() const { return state_; }
@@ -166,6 +190,26 @@ signals:
      * @param is_connected 是否已连接
      */
     void connectionStatusChanged(bool is_connected);
+
+    /**
+     * @brief 收到新好友请求信号
+     */
+    void friendRequestReceived(const QString& from_user_id, const QString& from_nickname, const QString& message);
+
+    /**
+     * @brief 好友请求结果信号
+     */
+    void friendRequestResult(int code, const QString& message);
+
+    /**
+     * @brief 好友列表信号
+     */
+    void friendListReceived(const QString& friend_list_json);
+
+    /**
+     * @brief 好友请求列表信号
+     */
+    void friendRequestsReceived(const QString& requests_json);
 
 private slots:
     /**

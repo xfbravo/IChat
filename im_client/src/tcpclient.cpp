@@ -166,6 +166,44 @@ void TcpClient::sendChatMessage(const QString& to_user_id,
     sendMessage(MsgType::TEXT, body);
 }
 
+void TcpClient::sendFriendRequest(const QString& phone, const QString& remark) {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["phone"] = phone;
+    obj["remark"] = remark;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::FRIEND_REQUEST, body);
+}
+
+void TcpClient::getFriendList() {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+    sendMessage(MsgType::GET_FRIEND_LIST, "{}");
+}
+
+void TcpClient::getFriendRequests() {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+    sendMessage(MsgType::GET_FRIEND_REQUESTS, "{}");
+}
+
+void TcpClient::respondFriendRequest(const QString& request_id, bool accept) {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["request_id"] = request_id;
+    obj["accept"] = accept;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::FRIEND_REQUEST_RSP, body);
+}
+
 void TcpClient::onConnected() {
     qDebug() << "Connected to server successfully";
     reconnect_attempts_ = 0;
@@ -306,6 +344,46 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             // 收到心跳响应，重置超时定时器
             heartbeat_timeout_timer_->stop();
             emit heartbeatResponse();
+            break;
+        }
+
+        case MsgType::FRIEND_LIST_RSP: {
+            emit friendListReceived(body);
+            break;
+        }
+
+        case MsgType::FRIEND_REQUEST_NEW: {
+            // 收到好友请求列表
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isArray()) {
+                // 发出原始JSON信号（用于显示请求列表）
+                emit friendRequestsReceived(body);
+                // 同时发出各个请求的信号（用于通知）
+                for (const QJsonValue& value : doc.array()) {
+                    QJsonObject obj = value.toObject();
+                    QString from_user_id = obj["from_user_id"].toString();
+                    QString from_nickname = obj["from_nickname"].toString();
+                    QString remark = obj["remark"].toString();
+                    emit friendRequestReceived(from_user_id, from_nickname, remark);
+                }
+            }
+            break;
+        }
+
+        case MsgType::FRIEND_REQUEST_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                int code = obj["code"].toInt();
+                QString message = obj["message"].toString();
+                emit friendRequestResult(code, message);
+            }
+            break;
+        }
+
+        case MsgType::FRIEND_LIST_UPDATE: {
+            // 好友列表更新通知
+            emit friendListReceived(body);
             break;
         }
 
