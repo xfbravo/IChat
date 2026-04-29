@@ -390,12 +390,6 @@ void MainWindow::onChatItemClicked(QListWidgetItem* item) {
     switchToChatWith(user_id, nickname);
 }
 
-void MainWindow::onContactSelectedInSelector(QListWidgetItem* item) {
-    QString user_id = item->data(Qt::UserRole).toString();
-    QString nickname = item->text();
-    switchToChatWith(user_id, nickname);
-}
-
 void MainWindow::switchToChatWith(const QString& user_id, const QString& nickname) {
     current_chat_target_ = user_id;
     chat_target_label_->setText(nickname);
