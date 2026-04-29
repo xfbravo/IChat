@@ -88,6 +88,14 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     connect(tcp_client_, &TcpClient::loginResponse, this, &LoginWindow::onLoginResponse);
     connect(tcp_client_, &TcpClient::registerResponse, this, &LoginWindow::onRegisterResponse);
 
+    // 加载保存的登录凭证
+    tcp_client_->loadCredentials();
+
+    // 如果有保存的用户ID，预填登录框
+    if (tcp_client_->hasSavedCredentials()) {
+        login_user_id_edit_->setText(tcp_client_->savedUserId());
+    }
+
     // 尝试连接服务器
     tcp_client_->connectToServer(server_host_, server_port_);
 }

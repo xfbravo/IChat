@@ -9,6 +9,7 @@
 #include <QHostAddress>
 #include <QApplication>
 #include <QThread>
+#include <QSettings>
 
 TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
@@ -27,6 +28,27 @@ TcpClient::TcpClient(QObject* parent)
 
     // 重连定时器
     connect(reconnect_timer_, &QTimer::timeout, this, &TcpClient::attemptReconnect);
+}
+
+bool TcpClient::loadCredentials() {
+    QSettings settings("IMClient", "TcpClient");
+    user_id_ = settings.value("user_id", "").toString();
+    user_nickname_ = settings.value("user_nickname", "").toString();
+    token_ = settings.value("token", "").toString();
+
+    if (!user_id_.isEmpty() && !token_.isEmpty()) {
+        qDebug() << "Loaded credentials for user:" << user_id_;
+        return true;
+    }
+    return false;
+}
+
+void TcpClient::saveCredentials() {
+    QSettings settings("IMClient", "TcpClient");
+    settings.setValue("user_id", user_id_);
+    settings.setValue("user_nickname", user_nickname_);
+    settings.setValue("token", token_);
+    qDebug() << "Saved credentials for user:" << user_id_;
 }
 
 TcpClient::~TcpClient() {
@@ -111,9 +133,21 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
 }
 
 void TcpClient::login(const QString& user_id, const QString& password) {
-    // 确保已连接
-    if (state_ != ClientState::Connected && state_ != ClientState::LoggedIn) {
-        qWarning() << "Not connected, cannot login";
+    // 如果正在连接中，等待连接完成后再登录
+    if (state_ == ClientState::Connecting) {
+        qDebug() << "Still connecting, waiting...";
+        // 保存登录信息，连接成功后自动登录
+        pending_login_user_id_ = user_id;
+        pending_login_password_ = password;
+        return;
+    }
+
+    // 如果未连接，触发重连
+    if (state_ == ClientState::Disconnected) {
+        qDebug() << "Disconnected, attempting reconnect first...";
+        pending_login_user_id_ = user_id;
+        pending_login_password_ = password;
+        attemptReconnect();
         return;
     }
 
@@ -148,6 +182,15 @@ void TcpClient::onConnected() {
     state_ = ClientState::Connected;
     startHeartbeat();
     emit connected();
+
+    // 如果有待发送的登录请求，自动发送
+    if (!pending_login_user_id_.isEmpty()) {
+        qDebug() << "Sending pending login for:" << pending_login_user_id_;
+        QString body = Protocol::makeLoginRequest(pending_login_user_id_, pending_login_password_);
+        sendMessage(MsgType::LOGIN, body);
+        pending_login_user_id_.clear();
+        pending_login_password_.clear();
+    }
 }
 
 void TcpClient::onDisconnected() {
@@ -205,6 +248,8 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     user_id_ = QString::fromStdString(rsp.user_id);
                     user_nickname_ = QString::fromStdString(rsp.nickname);
                     token_ = QString::fromStdString(rsp.token);
+                    // 保存登录凭证
+                    saveCredentials();
                 }
                 emit loginResponse(rsp.code, QString::fromStdString(rsp.message),
                                    QString::fromStdString(rsp.user_id),

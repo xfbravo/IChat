@@ -100,6 +100,16 @@ public:
      */
     const QString& userId() const { return user_id_; }
 
+    /**
+     * @brief 是否有保存的登录凭证
+     */
+    bool hasSavedCredentials() const { return !user_id_.isEmpty(); }
+
+    /**
+     * @brief 获取保存的用户ID
+     */
+    const QString& savedUserId() const { return user_id_; }
+
 signals:
     /**
      * @brief 连接成功信号
@@ -172,6 +182,16 @@ private slots:
      */
     void sendHeartbeat();
 
+    /**
+     * @brief 保存登录凭证到本地
+     */
+    void saveCredentials();
+
+    /**
+     * @brief 加载本地保存的登录凭证
+     */
+    void loadCredentials();
+
 private:
     /**
      * @brief 处理接收到的消息
@@ -201,6 +221,8 @@ private:
     QString token_;  // 认证Token
     QString server_host_;  // 服务器地址
     quint16 server_port_;  // 服务器端口
+    QString pending_login_user_id_;  // 待发送的登录用户ID
+    QString pending_login_password_;  // 待发送的登录密码
 
     QTimer* heartbeat_timer_ = nullptr;  // 心跳定时器
     QTimer* reconnect_timer_ = nullptr;  // 重连定时器
