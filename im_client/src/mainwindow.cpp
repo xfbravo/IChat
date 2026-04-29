@@ -59,6 +59,9 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     central->setLayout(main_layout);
     setCentralWidget(central);
 
+    // 加载聊天列表
+    loadChatList();
+
     // 状态栏
     status_label_ = new QLabel("在线");
     statusBar()->addWidget(status_label_);
