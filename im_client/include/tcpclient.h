@@ -110,6 +110,11 @@ public:
      */
     const QString& savedUserId() const { return user_id_; }
 
+    /**
+     * @brief 加载本地保存的登录凭证
+     */
+    void loadCredentials();
+
 signals:
     /**
      * @brief 连接成功信号
@@ -182,16 +187,6 @@ private slots:
      */
     void sendHeartbeat();
 
-    /**
-     * @brief 保存登录凭证到本地
-     */
-    void saveCredentials();
-
-    /**
-     * @brief 加载本地保存的登录凭证
-     */
-    void loadCredentials();
-
 private:
     /**
      * @brief 处理接收到的消息
@@ -213,7 +208,11 @@ private:
      */
     void attemptReconnect();
 
-private:
+    /**
+     * @brief 保存登录凭证到本地
+     */
+    void saveCredentials();
+
     std::unique_ptr<QTcpSocket> socket_;  // TCP socket
     ClientState state_ = ClientState::Disconnected;  // 状态
     QString user_id_;  // 当前用户ID

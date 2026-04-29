@@ -30,17 +30,15 @@ TcpClient::TcpClient(QObject* parent)
     connect(reconnect_timer_, &QTimer::timeout, this, &TcpClient::attemptReconnect);
 }
 
-bool TcpClient::loadCredentials() {
+void TcpClient::loadCredentials() {
     QSettings settings("IMClient", "TcpClient");
     user_id_ = settings.value("user_id", "").toString();
     user_nickname_ = settings.value("user_nickname", "").toString();
     token_ = settings.value("token", "").toString();
 
-    if (!user_id_.isEmpty() && !token_.isEmpty()) {
+    if (!user_id_.isEmpty()) {
         qDebug() << "Loaded credentials for user:" << user_id_;
-        return true;
     }
-    return false;
 }
 
 void TcpClient::saveCredentials() {
