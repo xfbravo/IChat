@@ -206,6 +206,23 @@ void TcpClient::respondFriendRequest(const QString& request_id, bool accept) {
     sendMessage(MsgType::FRIEND_REQUEST_RSP, body);
 }
 
+void TcpClient::getChatHistory(const QString& friend_id, int limit, int64_t before_time) {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+
+    current_chat_history_friend_id_ = friend_id;
+
+    QJsonObject obj;
+    obj["friend_id"] = friend_id;
+    obj["limit"] = limit;
+    if (before_time > 0) {
+        obj["before_time"] = before_time;
+    }
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::GET_CHAT_HISTORY, body);
+}
+
 void TcpClient::onConnected() {
     qDebug() << "Connected to server successfully";
     reconnect_attempts_ = 0;
@@ -383,6 +400,28 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 int code = obj["code"].toInt();
                 QString message = obj["message"].toString();
                 emit friendRequestResult(code, message);
+            }
+            break;
+        }
+
+        case MsgType::CHAT_HISTORY_RSP: {
+            emit chatHistoryReceived(current_chat_history_friend_id_, body);
+            break;
+        }
+
+        case MsgType::OFFLINE_MESSAGE: {
+            // 收到离线消息，格式是消息数组
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isArray()) {
+                QJsonArray messages = doc.array();
+                for (const QJsonValue& value : messages) {
+                    QJsonObject obj = value.toObject();
+                    QString from_user_id = obj["from_user_id"].toString();
+                    QString content = obj["content"].toString();
+                    emit offlineMessageReceived(from_user_id, content);
+                    // 同时触发普通消息接收，让聊天界面显示
+                    emit chatMessageReceived(from_user_id, content);
+                }
             }
             break;
         }

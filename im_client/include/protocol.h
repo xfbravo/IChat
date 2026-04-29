@@ -29,6 +29,8 @@ enum class MsgType : uint16_t {
     GET_FRIEND_REQUESTS = 0x000C, // 获取好友请求列表
     FRIEND_REQUEST_RSP = 0x000D, // 响应好友请求（同意/拒绝）
     DELETE_FRIEND     = 0x000E,  // 删除好友
+    GET_CHAT_HISTORY = 0x000F,  // 获取聊天记录
+    GET_OFFLINE_MESSAGES = 0x0010, // 获取离线消息
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应
@@ -37,6 +39,8 @@ enum class MsgType : uint16_t {
     FRIEND_LIST_RSP  = 0x800A,  // 好友列表响应
     FRIEND_REQUEST_NEW = 0x800B, // 新好友请求通知
     FRIEND_LIST_UPDATE = 0x800C, // 好友列表更新通知
+    CHAT_HISTORY_RSP = 0x8010,  // 聊天记录响应
+    OFFLINE_MESSAGE   = 0x8011,  // 离线消息推送
 };
 
 /**

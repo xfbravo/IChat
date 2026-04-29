@@ -118,6 +118,30 @@ public:
      */
     LoginResult delete_friend(const std::string& user_id, const std::string& friend_id);
 
+    /**
+     * @brief 保存消息到数据库
+     */
+    bool save_message(const std::string& msg_id, int msg_type, int chat_type,
+                      const std::string& from_user_id, const std::string& to_user_id,
+                      const std::string& content_type, const std::string& content,
+                      int64_t client_time);
+
+    /**
+     * @brief 获取离线消息
+     */
+    std::string get_offline_messages(const std::string& user_id);
+
+    /**
+     * @brief 标记离线消息已推送
+     */
+    void mark_offline_messages_pushed(const std::string& user_id, const std::string& msg_id);
+
+    /**
+     * @brief 获取聊天记录
+     */
+    std::string get_chat_history(const std::string& user_id, const std::string& friend_id,
+                                 int limit = 20, int64_t before_time = 0);
+
 private:
     std::string hash_password(const std::string& password, const std::string& salt);
     std::string generate_salt();

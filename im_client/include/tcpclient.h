@@ -115,6 +115,14 @@ public:
     void respondFriendRequest(const QString& request_id, bool accept);
 
     /**
+     * @brief 获取聊天记录
+     * @param friend_id 好友ID
+     * @param limit 消息数量
+     * @param before_time 时间戳（之前的消息）
+     */
+    void getChatHistory(const QString& friend_id, int limit = 20, int64_t before_time = 0);
+
+    /**
      * @brief 获取当前状态
      */
     ClientState state() const { return state_; }
@@ -211,6 +219,16 @@ signals:
      */
     void friendRequestsReceived(const QString& requests_json);
 
+    /**
+     * @brief 聊天记录信号
+     */
+    void chatHistoryReceived(const QString& friend_id, const QString& history_json);
+
+    /**
+     * @brief 收到离线消息信号
+     */
+    void offlineMessageReceived(const QString& from_user_id, const QString& content);
+
 private slots:
     /**
      * @brief 处理连接成功
@@ -269,6 +287,7 @@ private:
     void saveCredentials();
 
     bool expecting_friend_requests_ = false;
+    QString current_chat_history_friend_id_;
 
     std::unique_ptr<QTcpSocket> socket_;
     ClientState state_ = ClientState::Disconnected;

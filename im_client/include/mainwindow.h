@@ -38,6 +38,9 @@ private slots:
     void onChatMessageReceived(const QString& from_user_id, const QString& content);
     void onChatItemClicked(QListWidgetItem* item);
     void onDisconnected();
+    void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
+    void onOfflineMessageReceived(const QString& from_user_id, const QString& content);
+    void onLoadMoreMessages();
 
     // Contact functions
     void onAddContactClicked();

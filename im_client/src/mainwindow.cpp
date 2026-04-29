@@ -77,6 +77,10 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onFriendRequestReceived);
     connect(tcp_client_, &TcpClient::friendRequestsReceived,
             this, &MainWindow::onFriendRequestsReceived);
+    connect(tcp_client_, &TcpClient::chatHistoryReceived,
+            this, &MainWindow::onChatHistoryReceived);
+    connect(tcp_client_, &TcpClient::offlineMessageReceived,
+            this, &MainWindow::onOfflineMessageReceived);
 }
 
 void MainWindow::createNavigationBar() {
@@ -387,6 +391,42 @@ void MainWindow::onChatMessageReceived(const QString& from_user_id, const QStrin
     }
 }
 
+void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& history_json) {
+    QJsonDocument doc = QJsonDocument::fromJson(history_json.toUtf8());
+    if (!doc.isArray()) return;
+
+    QJsonArray messages = doc.array();
+    if (messages.isEmpty()) return;
+
+    QString target_id = friend_id.isEmpty() ? current_chat_target_ : friend_id;
+
+    // 倒序显示消息（从旧到新）
+    for (int i = messages.size() - 1; i >= 0; --i) {
+        QJsonObject msg = messages[i].toObject();
+        QString from_user_id = msg["from_user_id"].toString();
+        QString content = msg["content"].toString();
+        bool is_mine = (from_user_id == user_id_);
+
+        appendMessage(from_user_id, content, is_mine);
+    }
+}
+
+void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content) {
+    // 离线消息也显示在聊天界面
+    if (from_user_id == current_chat_target_) {
+        appendMessage(from_user_id, content, false);
+    }
+    // 可以在这里添加通知
+}
+
+void MainWindow::onLoadMoreMessages() {
+    if (current_chat_target_.isEmpty()) return;
+
+    // 获取当前显示的最早消息的时间戳
+    // 简化处理：直接请求更多消息
+    tcp_client_->getChatHistory(current_chat_target_, 20, QDateTime::currentSecsSinceEpoch());
+}
+
 void MainWindow::onChatItemClicked(QListWidgetItem* item) {
     QString user_id = item->data(Qt::UserRole).toString();
     QString nickname = item->text();
@@ -397,6 +437,8 @@ void MainWindow::switchToChatWith(const QString& user_id, const QString& nicknam
     current_chat_target_ = user_id;
     chat_target_label_->setText(nickname);
     chat_display_->clear();
+    // 加载聊天记录
+    tcp_client_->getChatHistory(user_id, 20, 0);
 }
 
 void MainWindow::onDisconnected() {

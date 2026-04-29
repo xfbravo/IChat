@@ -551,4 +551,151 @@ LoginResult UserService::delete_friend(const std::string& user_id, const std::st
     return result;
 }
 
+bool UserService::save_message(const std::string& msg_id, int msg_type, int chat_type,
+                               const std::string& from_user_id, const std::string& to_user_id,
+                               const std::string& content_type, const std::string& content,
+                               int64_t client_time) {
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return false;
+
+    std::ostringstream sql;
+    sql << "INSERT INTO im_message (msg_id, msg_type, chat_type, from_user_id, to_user_id, "
+        << "content_type, content, client_time, server_time, status) "
+        << "VALUES ('" << msg_id << "', " << msg_type << ", " << chat_type << ", "
+        << "'" << from_user_id << "', '" << to_user_id << "', "
+        << "'" << content_type << "', '" << content << "', "
+        << "FROM_UNIXTIME(" << client_time << "), NOW(), 1)";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        std::cerr << "[UserService] 保存消息失败: " << mysql_error(mysql) << std::endl;
+        return false;
+    }
+    return true;
+}
+
+std::string UserService::get_offline_messages(const std::string& user_id) {
+    std::ostringstream result;
+    result << "[";
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return result.str();
+
+    std::ostringstream query;
+    query << "SELECT msg_id, msg_type, chat_type, from_user_id, content, client_time, server_time "
+          << "FROM im_offline_message "
+          << "WHERE user_id = '" << user_id << "' AND is_pushed = 0 "
+          << "ORDER BY create_time ASC LIMIT 100";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        return result.str();
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return result.str();
+
+    bool first = true;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        if (!first) result << ",";
+        first = false;
+
+        std::string msg_id = row[0] ? row[0] : "";
+        std::string msg_type = row[1] ? row[1] : "1";
+        std::string chat_type = row[2] ? row[2] : "1";
+        std::string from_user_id = row[3] ? row[3] : "";
+        std::string content = row[4] ? row[4] : "";
+        std::string client_time = row[5] ? row[5] : "";
+        std::string server_time = row[6] ? row[6] : "";
+
+        result << "{\"msg_id\":\"" << msg_id << "\","
+               << "\"msg_type\":" << msg_type << ","
+               << "\"chat_type\":" << chat_type << ","
+               << "\"from_user_id\":\"" << from_user_id << "\","
+               << "\"content\":\"" << content << "\","
+               << "\"client_time\":\"" << client_time << "\","
+               << "\"server_time\":\"" << server_time << "\"}";
+    }
+
+    mysql_free_result(res);
+    result << "]";
+    return result.str();
+}
+
+void UserService::mark_offline_messages_pushed(const std::string& user_id, const std::string& msg_id) {
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return;
+
+    std::ostringstream sql;
+    sql << "UPDATE im_offline_message SET is_pushed = 1, push_time = NOW() "
+        << "WHERE user_id = '" << user_id << "' AND msg_id = '" << msg_id << "'";
+
+    mysql_query(mysql, sql.str().c_str());
+}
+
+std::string UserService::get_chat_history(const std::string& user_id, const std::string& friend_id,
+                                        int limit, int64_t before_time) {
+    std::ostringstream result;
+    result << "[";
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return result.str();
+
+    std::ostringstream query;
+    query << "SELECT msg_id, msg_type, chat_type, from_user_id, to_user_id, content_type, content, "
+          << "client_time, server_time, status "
+          << "FROM im_message "
+          << "WHERE ((from_user_id = '" << user_id << "' AND to_user_id = '" << friend_id << "') "
+          << "OR (from_user_id = '" << friend_id << "' AND to_user_id = '" << user_id << "')) ";
+
+    if (before_time > 0) {
+        query << "AND server_time < FROM_UNIXTIME(" << before_time << ") ";
+    }
+
+    query << "ORDER BY server_time DESC LIMIT " << limit;
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        return result.str();
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return result.str();
+
+    bool first = true;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        if (!first) result << ",";
+        first = false;
+
+        std::string msg_id = row[0] ? row[0] : "";
+        std::string msg_type = row[1] ? row[1] : "1";
+        std::string chat_type = row[2] ? row[2] : "1";
+        std::string from_user_id = row[3] ? row[3] : "";
+        std::string to_user_id = row[4] ? row[4] : "";
+        std::string content_type = row[5] ? row[5] : "text";
+        std::string content = row[6] ? row[6] : "";
+        std::string client_time = row[7] ? row[7] : "";
+        std::string server_time = row[8] ? row[8] : "";
+        std::string status = row[9] ? row[9] : "1";
+
+        result << "{\"msg_id\":\"" << msg_id << "\","
+               << "\"msg_type\":" << msg_type << ","
+               << "\"chat_type\":" << chat_type << ","
+               << "\"from_user_id\":\"" << from_user_id << "\","
+               << "\"to_user_id\":\"" << to_user_id << "\","
+               << "\"content_type\":\"" << content_type << "\","
+               << "\"content\":\"" << content << "\","
+               << "\"client_time\":\"" << client_time << "\","
+               << "\"server_time\":\"" << server_time << "\","
+               << "\"status\":" << status << "}";
+    }
+
+    mysql_free_result(res);
+    result << "]";
+    return result.str();
+}
+
 } // namespace im

@@ -221,6 +221,13 @@ void Server::register_default_handlers() {
             user_service_.update_login_info(login_result.user_id, "0.0.0.0");
 
             std::cout << "[Server] 用户登录成功: " << login_result.user_id << std::endl;
+
+            // 发送离线消息
+            std::string offline_msgs = user_service_.get_offline_messages(login_result.user_id);
+            if (!offline_msgs.empty() && offline_msgs != "[]") {
+                std::cout << "[Server] 发送离线消息给: " << login_result.user_id << std::endl;
+                session->send(MsgType::OFFLINE_MESSAGE, offline_msgs);
+            }
         }
 
         rsp << "}";
@@ -305,6 +312,52 @@ void Server::register_default_handlers() {
         std::cout << "[Server] 收到获取好友请求列表: " << session->user_id() << std::endl;
         std::string requests = user_service_.get_friend_requests(session->user_id(), 0);
         session->send(MsgType::FRIEND_REQUEST_NEW, requests);
+    });
+
+    // 获取聊天记录
+    dispatcher_.register_handler(MsgType::GET_CHAT_HISTORY, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到获取聊天记录请求: " << session->user_id() << std::endl;
+
+        std::string friend_id;
+        int limit = 20;
+        int64_t before_time = 0;
+
+        std::string body = msg.body;
+
+        // 解析 friend_id
+        size_t pos = body.find("\"friend_id\":\"");
+        if (pos != std::string::npos) {
+            pos += 12;
+            size_t end = body.find("\"", pos);
+            if (end != std::string::npos) {
+                friend_id = body.substr(pos, end - pos);
+            }
+        }
+
+        // 解析 limit
+        pos = body.find("\"limit\":");
+        if (pos != std::string::npos) {
+            pos += 8;
+            size_t end = body.find(",", pos);
+            if (end == std::string::npos) end = body.find("}", pos);
+            if (end != std::string::npos) {
+                limit = std::stoi(body.substr(pos, end - pos));
+            }
+        }
+
+        // 解析 before_time
+        pos = body.find("\"before_time\":");
+        if (pos != std::string::npos) {
+            pos += 14;
+            size_t end = body.find(",", pos);
+            if (end == std::string::npos) end = body.find("}", pos);
+            if (end != std::string::npos) {
+                before_time = std::stoll(body.substr(pos, end - pos));
+            }
+        }
+
+        std::string history = user_service_.get_chat_history(session->user_id(), friend_id, limit, before_time);
+        session->send(MsgType::CHAT_HISTORY_RSP, history);
     });
 
     // 发送好友请求
@@ -440,21 +493,72 @@ void Server::register_default_handlers() {
     dispatcher_.register_handler(MsgType::TEXT, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到文本消息 from " << session->user_id() << ": " << msg.body << std::endl;
 
-        // 简单解析 JSON 中的 to_user_id
-        std::string to_user_id;
-        size_t pos = msg.body.find("\"to_user_id\":\"");
+        // 解析 JSON
+        std::string msg_id, to_user_id, content, content_type = "text";
+        int64_t client_time = 0;
+
+        std::string body = msg.body;
+
+        // 解析 msg_id
+        size_t pos = body.find("\"msg_id\":\"");
         if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = msg.body.find("\"", pos);
+            pos += 9;
+            size_t end = body.find("\"", pos);
             if (end != std::string::npos) {
-                to_user_id = msg.body.substr(pos, end - pos);
+                msg_id = body.substr(pos, end - pos);
             }
         }
 
-        if (!to_user_id.empty()) {
-            // 转发消息到目标用户
+        // 解析 to_user_id
+        pos = body.find("\"to_user_id\":\"");
+        if (pos != std::string::npos) {
+            pos += 14;
+            size_t end = body.find("\"", pos);
+            if (end != std::string::npos) {
+                to_user_id = body.substr(pos, end - pos);
+            }
+        }
+
+        // 解析 content
+        pos = body.find("\"content\":\"");
+        if (pos != std::string::npos) {
+            pos += 11;
+            size_t end = body.find("\"", pos);
+            if (end != std::string::npos) {
+                content = body.substr(pos, end - pos);
+            }
+        }
+
+        // 解析 client_time
+        pos = body.find("\"client_time\":");
+        if (pos != std::string::npos) {
+            pos += 14;
+            size_t end = body.find(",", pos);
+            if (end == std::string::npos) end = body.find("}", pos);
+            if (end != std::string::npos) {
+                client_time = std::stoll(body.substr(pos, end - pos));
+            }
+        }
+
+        if (!to_user_id.empty() && !msg_id.empty()) {
+            // 保存消息到数据库
+            user_service_.save_message(msg_id, 1, 1, session->user_id(), to_user_id, content_type, content, client_time);
+
+            // 转发消息到目标用户，如果在线的话
             if (!send_to_user(to_user_id, MsgType::TEXT, msg.body)) {
-                std::cout << "[Server] 用户不在线: " << to_user_id << std::endl;
+                // 用户不在线，保存离线消息
+                std::cout << "[Server] 用户不在线，保存离线消息: " << to_user_id << std::endl;
+                auto conn_guard = db_pool_.get_connection();
+                MYSQL* mysql = conn_guard.get();
+                if (mysql) {
+                    std::ostringstream sql;
+                    sql << "INSERT INTO im_offline_message (user_id, msg_id, msg_type, chat_type, "
+                        << "from_user_id, to_user_id, content, client_time, server_time) "
+                        << "VALUES ('" << to_user_id << "', '" << msg_id << "', 1, 1, "
+                        << "'" << session->user_id() << "', '" << to_user_id << "', "
+                        << "'" << content << "', FROM_UNIXTIME(" << client_time << "), NOW())";
+                    mysql_query(mysql, sql.str().c_str());
+                }
             }
         }
     });
