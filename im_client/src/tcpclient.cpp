@@ -190,6 +190,7 @@ void TcpClient::getFriendRequests() {
     if (state_ != ClientState::LoggedIn) {
         return;
     }
+    expecting_friend_requests_ = true;
     sendMessage(MsgType::GET_FRIEND_REQUESTS, "{}");
 }
 
@@ -357,16 +358,20 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             // 收到好友请求列表
             QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
             if (doc.isArray()) {
+                QJsonArray arr = doc.array();
                 // 发出原始JSON信号（用于显示请求列表）
                 emit friendRequestsReceived(body);
-                // 同时发出各个请求的信号（用于通知）
-                for (const QJsonValue& value : doc.array()) {
-                    QJsonObject obj = value.toObject();
-                    QString from_user_id = obj["from_user_id"].toString();
-                    QString from_nickname = obj["from_nickname"].toString();
-                    QString remark = obj["remark"].toString();
-                    emit friendRequestReceived(from_user_id, from_nickname, remark);
+                // 只有在不是主动查询时，才弹出通知
+                if (!expecting_friend_requests_ && !arr.isEmpty()) {
+                    for (const QJsonValue& value : arr) {
+                        QJsonObject obj = value.toObject();
+                        QString from_user_id = obj["from_user_id"].toString();
+                        QString from_nickname = obj["from_nickname"].toString();
+                        QString remark = obj["remark"].toString();
+                        emit friendRequestReceived(from_user_id, from_nickname, remark);
+                    }
                 }
+                expecting_friend_requests_ = false;
             }
             break;
         }

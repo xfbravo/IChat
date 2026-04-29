@@ -268,6 +268,8 @@ private:
      */
     void saveCredentials();
 
+    bool expecting_friend_requests_ = false;
+
     std::unique_ptr<QTcpSocket> socket_;
     ClientState state_ = ClientState::Disconnected;
     QString user_id_;

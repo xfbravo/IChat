@@ -20,6 +20,7 @@
 #include <QJsonArray>
 #include <QDialog>
 #include <QScrollArea>
+#include <QTimer>
 
 MainWindow::MainWindow(TcpClient* tcp_client,
                       const QString& user_id,
@@ -573,18 +574,23 @@ void MainWindow::onFriendRequestsReceived(const QString& json) {
         )");
 
         // 连接按钮信号
-        QObject::connect(acceptBtn, &QPushButton::clicked, this, [this, request_id, acceptBtn, rejectBtn]() {
+        QObject::connect(acceptBtn, &QPushButton::clicked, this, [this, request_id, acceptBtn, rejectBtn, &dialog]() {
             qDebug() << "同意按钮 clicked, request_id:" << request_id;
             tcp_client_->respondFriendRequest(request_id, true);
             acceptBtn->setEnabled(false);
             rejectBtn->setEnabled(false);
             acceptBtn->setText("已同意");
+            // 刷新好友列表
+            loadChatList();
+            // 延迟关闭对话框，让用户看到结果
+            QTimer::singleShot(500, &dialog, &QDialog::accept);
         });
-        QObject::connect(rejectBtn, &QPushButton::clicked, this, [this, request_id, acceptBtn, rejectBtn]() {
+        QObject::connect(rejectBtn, &QPushButton::clicked, this, [this, request_id, acceptBtn, rejectBtn, &dialog]() {
             tcp_client_->respondFriendRequest(request_id, false);
             acceptBtn->setEnabled(false);
             rejectBtn->setEnabled(false);
             rejectBtn->setText("已拒绝");
+            QTimer::singleShot(500, &dialog, &QDialog::accept);
         });
 
         btnLayout->addStretch();

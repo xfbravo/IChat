@@ -179,10 +179,10 @@ void Server::register_default_handlers() {
             }
         }
 
-        // 解析 password
+        // 解析 password (LOGIN)
         size_t pwd_pos = body.find("\"password\":");
         if (pwd_pos != std::string::npos) {
-            size_t value_start = body.find("\"", pwd_pos + 10);  // 10 = strlen("\"password\":")
+            size_t value_start = body.find("\"", pwd_pos + 11);  // "password": 是11个字符
             if (value_start != std::string::npos) {
                 size_t value_end = body.find("\"", value_start + 1);
                 if (value_end != std::string::npos) {
@@ -241,7 +241,7 @@ void Server::register_default_handlers() {
         // 解析 phone
         size_t phone_pos = body.find("\"phone\":");
         if (phone_pos != std::string::npos) {
-            size_t value_start = body.find("\"", phone_pos + 7);
+            size_t value_start = body.find("\"", phone_pos + 8);  // "phone": 是8个字符
             if (value_start != std::string::npos) {
                 size_t value_end = body.find("\"", value_start + 1);
                 if (value_end != std::string::npos) {
@@ -253,7 +253,7 @@ void Server::register_default_handlers() {
         // 解析 nickname
         size_t name_pos = body.find("\"nickname\":");
         if (name_pos != std::string::npos) {
-            size_t value_start = body.find("\"", name_pos + 9);
+            size_t value_start = body.find("\"", name_pos + 10);  // "nickname": 是10个字符
             if (value_start != std::string::npos) {
                 size_t value_end = body.find("\"", value_start + 1);
                 if (value_end != std::string::npos) {
@@ -265,7 +265,7 @@ void Server::register_default_handlers() {
         // 解析 password
         size_t pwd_pos = body.find("\"password\":");
         if (pwd_pos != std::string::npos) {
-            size_t value_start = body.find("\"", pwd_pos + 10);
+            size_t value_start = body.find("\"", pwd_pos + 11);  // "password": 是11个字符
             if (value_start != std::string::npos) {
                 size_t value_end = body.find("\"", value_start + 1);
                 if (value_end != std::string::npos) {
@@ -383,7 +383,7 @@ void Server::register_default_handlers() {
 
         pos = msg.body.find("\"accept\":");
         if (pos != std::string::npos) {
-            size_t value_start = pos + 8;
+            size_t value_start = pos + 9;  // 跳过 "\"accept\":" 的 9 个字符
             if (msg.body.find("true", value_start) == value_start) {
                 accept = true;
             }

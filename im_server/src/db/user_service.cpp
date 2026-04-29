@@ -468,7 +468,7 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
 
     // 先查询请求信息
     std::ostringstream select_sql;
-    select_sql << "SELECT from_user_id, to_user_id, from_nickname, to_user_id FROM im_friend_request "
+    select_sql << "SELECT from_user_id, to_user_id, from_nickname, remark FROM im_friend_request "
                << "WHERE request_id = '" << request_id << "' AND to_user_id = '" << user_id << "' AND status = 0";
 
     if (mysql_query(mysql, select_sql.str().c_str())) {
@@ -488,6 +488,7 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
     MYSQL_ROW row = mysql_fetch_row(res);
     std::string from_user_id = row[0] ? row[0] : "";
     std::string from_nickname = row[2] ? row[2] : "";
+    std::string remark = row[3] ? row[3] : "";
     mysql_free_result(res);
 
     // 更新请求状态
@@ -504,13 +505,13 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
 
         // A添加B，A的friend_id是B，B的friend_id是A
         std::ostringstream insert_sql1;
-        insert_sql1 << "INSERT INTO im_friend (user_id, friend_id, friend_nickname, friend_avatar) "
-                    << "VALUES ('" << from_user_id << "', '" << user_id << "', '" << to_user.nickname << "', '" << to_user.avatar_url << "')";
+        insert_sql1 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
+                    << "VALUES ('" << from_user_id << "', '" << user_id << "', '" << remark << "', '" << to_user.nickname << "', '" << to_user.avatar_url << "')";
         mysql_query(mysql, insert_sql1.str().c_str());
 
         std::ostringstream insert_sql2;
-        insert_sql2 << "INSERT INTO im_friend (user_id, friend_id, friend_nickname, friend_avatar) "
-                    << "VALUES ('" << user_id << "', '" << from_user_id << "', '" << from_nickname << "', '" << from_user.avatar_url << "')";
+        insert_sql2 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
+                    << "VALUES ('" << user_id << "', '" << from_user_id << "', '', '" << from_nickname << "', '" << from_user.avatar_url << "')";
         mysql_query(mysql, insert_sql2.str().c_str());
 
         result.code = 0;
