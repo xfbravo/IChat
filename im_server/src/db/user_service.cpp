@@ -44,14 +44,11 @@ std::string UserService::generate_salt() {
 std::string UserService::hash_password(const std::string& password,
                                       const std::string& salt) {
     // 简单哈希，实际应用应使用 bcrypt 或 Argon2
-    std::ostringstream oss;
-    oss << password << salt;
+    std::string combined = password + salt;
 
-    // SHA256 哈希
-    unsigned char hash[32];
     // 简化：使用简单的字符串哈希
     size_t h = 0;
-    for (char c : oss.str()) {
+    for (unsigned char c : combined) {
         h = h * 31 + c;
     }
 
@@ -183,7 +180,8 @@ LoginResult UserService::register_user(const std::string& phone,
     if (res) mysql_free_result(res);
 
     // 生成用户
-    std::string user_id = generate_user_id();
+    // 优先使用手机号作为 user_id，否则生成随机 ID
+    std::string user_id = phone.empty() ? generate_user_id() : phone;
     std::string salt = generate_salt();
     std::string password_hash = hash_password(password, salt);
 

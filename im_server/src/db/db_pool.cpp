@@ -88,7 +88,6 @@ DbPool::Guard DbPool::get_connection() {
                 auto* new_conn = create_connection();
                 if (new_conn) {
                     connections_[i] = new_conn;
-                    delete new_conn;
                     return Guard(*this, connections_[i]);
                 }
             }

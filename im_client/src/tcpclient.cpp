@@ -14,6 +14,7 @@ TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
     , socket_(std::make_unique<QTcpSocket>(this))
     , heartbeat_timer_(new QTimer(this))
+    , reconnect_timer_(new QTimer(this))
 {
     // 连接信号槽
     connect(socket_.get(), &QTcpSocket::connected, this, &TcpClient::onConnected);
@@ -23,10 +24,14 @@ TcpClient::TcpClient(QObject* parent)
 
     // 心跳定时器
     connect(heartbeat_timer_, &QTimer::timeout, this, &TcpClient::sendHeartbeat);
+
+    // 重连定时器
+    connect(reconnect_timer_, &QTimer::timeout, this, &TcpClient::attemptReconnect);
 }
 
 TcpClient::~TcpClient() {
     stopHeartbeat();
+    reconnect_timer_->stop();
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
     }
@@ -37,7 +42,14 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
     }
-    state_ = ClientState::Disconnected;
+
+    // 保存服务器地址
+    server_host_ = host;
+    server_port_ = port;
+
+    // 停止重连
+    reconnect_timer_->stop();
+    reconnect_attempts_ = 0;
 
     state_ = ClientState::Connecting;
     socket_->connectToHost(QHostAddress(host), port);
@@ -46,6 +58,7 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
     QTimer::singleShot(5000, this, [this]() {
         if (state_ == ClientState::Connecting) {
             socket_->disconnectFromHost();
+            state_ = ClientState::Disconnected;
             emit connectionError("连接超时");
         }
     });
@@ -53,6 +66,8 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
 
 void TcpClient::disconnectFromServer() {
     stopHeartbeat();
+    reconnect_timer_->stop();
+    reconnect_attempts_ = 0;
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
     }
@@ -68,6 +83,10 @@ void TcpClient::sendMessage(MsgType type, const QString& body) {
     // 检查 socket 是否已连接
     if (socket_->state() != QAbstractSocket::ConnectedState) {
         qWarning() << "Socket not connected, cannot send message, state:" << socket_->state();
+        // 如果还没在重连，触发重连
+        if (state_ != ClientState::Connecting && reconnect_attempts_ == 0) {
+            attemptReconnect();
+        }
         return;
     }
 
@@ -123,13 +142,18 @@ void TcpClient::sendChatMessage(const QString& to_user_id,
 }
 
 void TcpClient::onConnected() {
+    qDebug() << "Connected to server successfully";
+    reconnect_attempts_ = 0;
+    reconnect_timer_->stop();
     state_ = ClientState::Connected;
     startHeartbeat();
     emit connected();
 }
 
 void TcpClient::onDisconnected() {
+    qDebug() << "Disconnected from server";
     stopHeartbeat();
+    reconnect_timer_->stop();
     state_ = ClientState::Disconnected;
     read_buffer_.clear();
     emit disconnected();
@@ -234,4 +258,47 @@ void TcpClient::startHeartbeat() {
 
 void TcpClient::stopHeartbeat() {
     heartbeat_timer_->stop();
+}
+
+void TcpClient::attemptReconnect() {
+    if (server_host_.isEmpty() || server_port_ == 0) {
+        qDebug() << "No server info saved, cannot reconnect";
+        return;
+    }
+
+    if (reconnect_attempts_ >= MAX_RECONNECT_ATTEMPTS) {
+        qDebug() << "Max reconnection attempts reached, giving up";
+        emit connectionError("连接断开，请手动重试");
+        reconnect_attempts_ = 0;
+        reconnect_timer_->stop();
+        return;
+    }
+
+    // 如果已经在重连中，不要重复启动
+    if (state_ == ClientState::Connecting) {
+        qDebug() << "Already connecting, skipping reconnect attempt";
+        return;
+    }
+
+    reconnect_attempts_++;
+    qDebug() << "Attempting to reconnect, attempt" << reconnect_attempts_
+             << "of" << MAX_RECONNECT_ATTEMPTS;
+
+    state_ = ClientState::Connecting;
+    socket_->connectToHost(QHostAddress(server_host_), server_port_);
+
+    // 设置超时
+    QTimer::singleShot(5000, this, [this]() {
+        if (state_ == ClientState::Connecting) {
+            socket_->disconnectFromHost();
+            qDebug() << "Reconnect attempt timeout";
+            // 重连定时器：如果还没达到最大次数，继续尝试
+            if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+                reconnect_timer_->start(RECONNECT_INTERVAL);
+            } else {
+                emit connectionError("连接失败，请手动重试");
+                reconnect_attempts_ = 0;
+            }
+        }
+    });
 }

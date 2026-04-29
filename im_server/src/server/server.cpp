@@ -166,20 +166,28 @@ void Server::register_default_handlers() {
 
         // 简单解析 JSON（实际应用应使用 JSON 库）
         std::string body = msg.body;
-        size_t uid_pos = body.find("\"user_id\":\"");
+
+        // 解析 user_id：先找 ":"user_id":" ，然后找值
+        size_t uid_pos = body.find("\"user_id\":");
         if (uid_pos != std::string::npos) {
-            uid_pos += 10;
-            size_t uid_end = body.find("\"", uid_pos);
-            if (uid_end != std::string::npos) {
-                user_id = body.substr(uid_pos, uid_end - uid_pos);
+            size_t value_start = body.find("\"", uid_pos + 10);  // 10 = strlen("\"user_id\":")
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    user_id = body.substr(value_start + 1, value_end - value_start - 1);
+                }
             }
         }
-        size_t pwd_pos = body.find("\"password\":\"");
+
+        // 解析 password
+        size_t pwd_pos = body.find("\"password\":");
         if (pwd_pos != std::string::npos) {
-            pwd_pos += 11;
-            size_t pwd_end = body.find("\"", pwd_pos);
-            if (pwd_end != std::string::npos) {
-                password = body.substr(pwd_pos, pwd_end - pwd_pos);
+            size_t value_start = body.find("\"", pwd_pos + 10);  // 10 = strlen("\"password\":")
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    password = body.substr(value_start + 1, value_end - value_start - 1);
+                }
             }
         }
 
@@ -229,28 +237,40 @@ void Server::register_default_handlers() {
         std::string phone, nickname, password;
 
         std::string body = msg.body;
-        size_t phone_pos = body.find("\"phone\":\"");
+
+        // 解析 phone
+        size_t phone_pos = body.find("\"phone\":");
         if (phone_pos != std::string::npos) {
-            phone_pos += 9;
-            size_t phone_end = body.find("\"", phone_pos);
-            if (phone_end != std::string::npos) {
-                phone = body.substr(phone_pos, phone_end - phone_pos);
+            size_t value_start = body.find("\"", phone_pos + 7);
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    phone = body.substr(value_start + 1, value_end - value_start - 1);
+                }
             }
         }
-        size_t name_pos = body.find("\"nickname\":\"");
+
+        // 解析 nickname
+        size_t name_pos = body.find("\"nickname\":");
         if (name_pos != std::string::npos) {
-            name_pos += 11;
-            size_t name_end = body.find("\"", name_pos);
-            if (name_end != std::string::npos) {
-                nickname = body.substr(name_pos, name_end - name_pos);
+            size_t value_start = body.find("\"", name_pos + 9);
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    nickname = body.substr(value_start + 1, value_end - value_start - 1);
+                }
             }
         }
-        size_t pwd_pos = body.find("\"password\":\"");
+
+        // 解析 password
+        size_t pwd_pos = body.find("\"password\":");
         if (pwd_pos != std::string::npos) {
-            pwd_pos += 11;
-            size_t pwd_end = body.find("\"", pwd_pos);
-            if (pwd_end != std::string::npos) {
-                password = body.substr(pwd_pos, pwd_end - pwd_pos);
+            size_t value_start = body.find("\"", pwd_pos + 10);
+            if (value_start != std::string::npos) {
+                size_t value_end = body.find("\"", value_start + 1);
+                if (value_end != std::string::npos) {
+                    password = body.substr(value_start + 1, value_end - value_start - 1);
+                }
             }
         }
 
