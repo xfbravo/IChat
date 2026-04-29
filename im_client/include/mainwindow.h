@@ -37,7 +37,6 @@ private slots:
     void onSendClicked();
     void onChatMessageReceived(const QString& from_user_id, const QString& content);
     void onChatItemClicked(QListWidgetItem* item);
-    void onContactSelectedInSelector(QListWidgetItem* item);
     void onDisconnected();
 
     // Contact functions
@@ -57,7 +56,6 @@ private:
     void createPlaceholderView(QWidget*& widget, const QString& text);
     void appendMessage(const QString& from, const QString& content, bool is_mine);
     void loadChatList();
-    void loadContactSelector();
     void loadContacts();
     void switchToChatWith(const QString& user_id, const QString& nickname);
 
@@ -76,7 +74,6 @@ private:
     QWidget* message_view_;
     QSplitter* message_splitter_;
     QListWidget* chat_list_widget_;
-    QListWidget* contact_selector_widget_;
     QWidget* chat_interface_panel_;
     QLabel* chat_target_label_;
     QTextEdit* chat_display_;

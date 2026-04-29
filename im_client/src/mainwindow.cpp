@@ -157,24 +157,6 @@ void MainWindow::createMessageView() {
     connect(chat_list_widget_, &QListWidget::itemClicked,
             this, &MainWindow::onChatItemClicked);
 
-    // 联系人选择器 (中间)
-    contact_selector_widget_ = new QListWidget;
-    contact_selector_widget_->setStyleSheet(R"(
-        QListWidget {
-            border: none;
-            background-color: #ffffff;
-        }
-        QListWidget::item {
-            padding: 10px 15px;
-            border-bottom: 1px solid #e0e0e0;
-        }
-        QListWidget::item:selected {
-            background-color: #e3f2fd;
-        }
-    )");
-    connect(contact_selector_widget_, &QListWidget::itemClicked,
-            this, &MainWindow::onContactSelectedInSelector);
-
     // 聊天界面面板 (右侧)
     chat_interface_panel_ = new QWidget;
     QVBoxLayout* chat_layout = new QVBoxLayout(chat_interface_panel_);
@@ -256,11 +238,9 @@ void MainWindow::createMessageView() {
     // 使用分割器
     message_splitter_ = new QSplitter(Qt::Horizontal);
     message_splitter_->addWidget(chat_list_widget_);
-    message_splitter_->addWidget(contact_selector_widget_);
     message_splitter_->addWidget(chat_interface_panel_);
     message_splitter_->setStretchFactor(0, 1);
-    message_splitter_->setStretchFactor(1, 1);
-    message_splitter_->setStretchFactor(2, 3);
+    message_splitter_->setStretchFactor(1, 3);
     message_splitter_->setHandleWidth(1);
 
     main_layout->addWidget(message_splitter_);
@@ -452,7 +432,6 @@ void MainWindow::onFriendListReceived(const QString& json) {
 
     // 更新聊天列表
     chat_list_widget_->clear();
-    contact_selector_widget_->clear();
 
     for (const QJsonValue& value : friends) {
         QJsonObject friend_obj = value.toObject();
@@ -463,11 +442,6 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QListWidgetItem* item = new QListWidgetItem(nickname);
         item->setData(Qt::UserRole, friend_id);
         chat_list_widget_->addItem(item);
-
-        // 添加到联系人选择器
-        QListWidgetItem* selector_item = new QListWidgetItem(nickname);
-        selector_item->setData(Qt::UserRole, friend_id);
-        contact_selector_widget_->addItem(selector_item);
     }
 
     // 更新联系人树（不再调用getFriendList，避免循环）
@@ -644,10 +618,6 @@ void MainWindow::appendMessage(const QString& from, const QString& content, bool
 
 void MainWindow::loadChatList() {
     tcp_client_->getFriendList();
-}
-
-void MainWindow::loadContactSelector() {
-    // 联系人选择器已在 onFriendListReceived 中更新
 }
 
 void MainWindow::loadContacts() {
