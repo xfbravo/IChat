@@ -818,7 +818,7 @@ void MainWindow::onChatItemClicked(QListWidgetItem* item) {
     QString user_id = item->data(Qt::UserRole).toString();
     QString nickname = conversations_.contains(user_id) && !conversations_[user_id].title.isEmpty()
         ? conversations_[user_id].title
-        : item->text();
+        : user_id;
     switchToChatWith(user_id, nickname);
 }
 
@@ -892,7 +892,7 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString friend_id = chatItem->data(Qt::UserRole).toString();
         QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
             ? conversations_[friend_id].title
-            : chatItem->text();
+            : friend_id;
 
         QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
         friendItem->setText(0, nickname);
@@ -1180,8 +1180,9 @@ void MainWindow::refreshConversationList() {
 
     for (const QString& peer_id : peer_ids) {
         const ConversationState& conversation = conversations_[peer_id];
-        QListWidgetItem* item = new QListWidgetItem(conversationTitle(peer_id));
+        QListWidgetItem* item = new QListWidgetItem;
         item->setData(Qt::UserRole, peer_id);
+        item->setData(Qt::AccessibleTextRole, conversationTitle(peer_id));
         item->setSizeHint(QSize(0, 64));
         chat_list_widget_->addItem(item);
 
@@ -1313,7 +1314,7 @@ void MainWindow::loadContacts() {
             QString friend_id = chatItem->data(Qt::UserRole).toString();
             QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
                 ? conversations_[friend_id].title
-                : chatItem->text();
+                : friend_id;
 
             QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
             friendItem->setText(0, nickname);
