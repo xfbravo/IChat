@@ -27,13 +27,13 @@ int main(int argc, char* argv[]) {
 
     // 登录成功后显示主窗口
     QObject::connect(&login_window, &LoginWindow::loginSuccess,
-                     [&](const QString& user_id, const QString& nickname) {
+                     [&](const QString& user_id, const QString& nickname, const QString& avatar_url) {
         login_window.hide();
 
         if (main_window) {
             delete main_window;
         }
-        main_window = new MainWindow(&tcp_client, user_id, nickname);
+        main_window = new MainWindow(&tcp_client, user_id, nickname, avatar_url);
 
         QObject::connect(main_window, &MainWindow::logout, [&]() {
             delete main_window;

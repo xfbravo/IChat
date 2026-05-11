@@ -69,6 +69,9 @@ enum class MsgType : uint16_t {
     DELETE_FRIEND        = 0x000E,  // 删除好友
     GET_CHAT_HISTORY     = 0x000F,  // 获取聊天记录
     GET_OFFLINE_MESSAGES = 0x0010,  // 获取离线消息
+    OFFLINE_MESSAGE_ACK  = 0x0011,  // 离线消息确认
+    UPDATE_FRIEND_REMARK = 0x0012,  // 修改好友备注
+    UPDATE_AVATAR        = 0x0013,  // 更新头像
 
     LOGIN_RSP            = 0x8002,  // 登录响应
     REGISTER_RSP         = 0x8003,  // 注册响应
@@ -78,6 +81,8 @@ enum class MsgType : uint16_t {
     ERROR                = 0x800F,  // 错误响应
     CHAT_HISTORY_RSP     = 0x8010,  // 聊天记录响应
     OFFLINE_MESSAGE      = 0x8011,  // 离线消息推送
+    UPDATE_FRIEND_REMARK_RSP = 0x8012, // 修改好友备注响应
+    UPDATE_AVATAR_RSP    = 0x8013,  // 更新头像响应
 };
 ```
 
@@ -162,9 +167,29 @@ enum class MsgType : uint16_t {
 }
 ```
 
+### 3.4 更新头像
+
+客户端在设置页选择本地图片后，将图片裁剪压缩为 JPEG data URL，再同步到服务端。服务端会保存到用户资料中，并在后续 `LOGIN_RSP` 的 `avatar_url` 中返回。
+
+**请求 (UPDATE_AVATAR / 0x0013)**:
+```json
+{
+    "avatar_url": "data:image/jpeg;base64,..."
+}
+```
+
+**响应 (UPDATE_AVATAR_RSP / 0x8013)**:
+```json
+{
+    "code": 0,
+    "message": "头像已同步",
+    "avatar_url": "data:image/jpeg;base64,..."
+}
+```
+
 ---
 
-### 3.4 统一聊天消息
+### 3.5 统一聊天消息
 
 **发送请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -207,7 +232,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.5 群聊消息（规划）
+### 3.6 群聊消息（规划）
 
 当前代码尚未实现群聊专用消息类型。后续实现时仍应复用 `CHAT_MESSAGE` 的正文结构，通过 `chat_type` 和 `group_id` 区分群聊，而不是新增与媒体类型绑定的包头类型。
 
@@ -243,11 +268,11 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.6 文件/媒体消息
+### 3.7 文件/媒体消息
 
 图片、文件、语音、视频都通过 `CHAT_MESSAGE / 0x0005` 发送，`content_type` 决定内容类型。旧的 `IMAGE(0x0006)`、`FILE(0x0007)`、`VOICE(0x0008)` 仅用于兼容旧客户端，服务端会按统一聊天消息处理并以 `CHAT_MESSAGE` 转发。
 
-#### 3.6.1 文件消息
+#### 3.7.1 文件消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -267,7 +292,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.6.2 大文件分片（规划）
+#### 3.7.2 大文件分片（规划）
 
 当前代码尚未实现独立文件分片协议；以下为规划接口，不能与当前正式 v1 代码混用。
 
@@ -297,7 +322,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.6.3 文件分片数据
+#### 3.7.3 文件分片数据
 
 **请求 (FILE_TRANS_DATA)**:
 ```json
@@ -311,7 +336,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.6.4 传输完成
+#### 3.7.4 传输完成
 
 **请求 (FILE_TRANS_END)**:
 ```json
@@ -326,7 +351,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.7 图片消息
+### 3.8 图片消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -357,7 +382,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.8 语音消息
+### 3.9 语音消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -379,7 +404,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.9 音视频通话
+### 3.10 音视频通话
 
 **呼叫邀请 (CALL_INVITE)**:
 ```json

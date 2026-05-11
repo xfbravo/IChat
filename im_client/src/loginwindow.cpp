@@ -324,7 +324,7 @@ void LoginWindow::onRegisterClicked() {
 
 void LoginWindow::onLoginResponse(int code, const QString& message,
                                  const QString& user_id, const QString& nickname,
-                                 const QString& token) {
+                                 const QString& avatar_url, const QString& token) {
     Q_UNUSED(token);
 
     // 第一时间恢复按钮状态
@@ -338,7 +338,7 @@ void LoginWindow::onLoginResponse(int code, const QString& message,
 
     if (code == 0) {
         qDebug() << "Login success:" << user_id << nickname;
-        emit loginSuccess(user_id, nickname);
+        emit loginSuccess(user_id, nickname, avatar_url);
     } else {
         showError(message, true);
     }

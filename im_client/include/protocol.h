@@ -34,6 +34,8 @@ enum class MsgType : uint16_t {
     GET_OFFLINE_MESSAGES = 0x0010, // 获取离线消息
     OFFLINE_MESSAGE_ACK = 0x0011,  // 离线消息确认
     UPDATE_FRIEND_REMARK = 0x0012, // 修改好友备注
+    UPDATE_AVATAR     = 0x0013,  // 更新头像
+    CHANGE_PASSWORD   = 0x0014,  // 修改密码
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应
@@ -45,6 +47,8 @@ enum class MsgType : uint16_t {
     CHAT_HISTORY_RSP = 0x8010,  // 聊天记录响应
     OFFLINE_MESSAGE   = 0x8011,  // 离线消息推送
     UPDATE_FRIEND_REMARK_RSP = 0x8012, // 修改好友备注响应
+    UPDATE_AVATAR_RSP = 0x8013, // 更新头像响应
+    CHANGE_PASSWORD_RSP = 0x8014, // 修改密码响应
 };
 
 /**

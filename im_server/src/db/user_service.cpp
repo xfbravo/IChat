@@ -248,6 +248,109 @@ LoginResult UserService::register_user(const std::string& phone,
     return result;
 }
 
+LoginResult UserService::change_password(const std::string& user_id,
+                                         const std::string& old_password,
+                                         const std::string& new_password) {
+    LoginResult result;
+
+    if (user_id.empty()) {
+        result.code = 401;
+        result.message = "未登录";
+        return result;
+    }
+
+    if (old_password.empty() || new_password.empty()) {
+        result.code = 1;
+        result.message = "密码不能为空";
+        return result;
+    }
+
+    if (new_password.size() < 6) {
+        result.code = 2;
+        result.message = "新密码长度至少6位";
+        return result;
+    }
+
+    if (old_password == new_password) {
+        result.code = 3;
+        result.message = "新密码不能与旧密码相同";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
+    std::ostringstream query;
+    query << "SELECT password_hash, salt, status "
+          << "FROM im_user WHERE user_id = '" << escaped_user_id << "'";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        result.code = 5001;
+        result.message = "查询失败: " + std::string(mysql_error(mysql));
+        return result;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) {
+        result.code = 5001;
+        result.message = "获取结果失败";
+        return result;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (!row) {
+        mysql_free_result(res);
+        result.code = 1001;
+        result.message = "用户不存在";
+        return result;
+    }
+
+    const std::string db_password_hash = row_string(row, 0);
+    const std::string db_salt = row_string(row, 1);
+    const int db_status = row_int(row, 2);
+    mysql_free_result(res);
+
+    if (db_status == 0) {
+        result.code = 1001;
+        result.message = "用户已被禁用";
+        return result;
+    }
+
+    if (hash_password(old_password, db_salt) != db_password_hash) {
+        result.code = 1001;
+        result.message = "旧密码错误";
+        return result;
+    }
+
+    const std::string new_salt = generate_salt();
+    const std::string new_password_hash = hash_password(new_password, new_salt);
+
+    std::ostringstream update_sql;
+    update_sql << "UPDATE im_user SET password_hash = '" << sql_escape(mysql, new_password_hash)
+               << "', salt = '" << sql_escape(mysql, new_salt)
+               << "', update_time = NOW() "
+               << "WHERE user_id = '" << escaped_user_id << "' AND status = 1";
+
+    if (mysql_query(mysql, update_sql.str().c_str())) {
+        std::cerr << "[UserService] 修改密码失败: " << mysql_error(mysql) << std::endl;
+        result.code = 5001;
+        result.message = "修改密码失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "密码已更新";
+    result.user_id = user_id;
+    return result;
+}
+
 UserInfo UserService::get_user_by_id(const std::string& user_id) {
     UserInfo info;
 
@@ -395,7 +498,7 @@ std::string UserService::get_friend_list(const std::string& user_id) {
 
     std::ostringstream query;
     const std::string escaped_user_id = sql_escape(mysql, user_id);
-    query << "SELECT f.friend_id, f.remark, f.friend_nickname, f.friend_avatar, u.status, "
+    query << "SELECT f.friend_id, f.remark, f.friend_nickname, u.avatar_url, u.status, "
           << "lm.msg_id AS last_msg_id, lm.content AS last_msg_content, "
           << "DATE_FORMAT(lm.server_time, '%Y-%m-%d %H:%i:%s') AS last_msg_time, "
           << "CAST(UNIX_TIMESTAMP(lm.server_time) * 1000 AS UNSIGNED) AS last_msg_timestamp "
@@ -693,6 +796,63 @@ LoginResult UserService::update_friend_remark(const std::string& user_id,
 
     result.code = 0;
     result.message = "备注已更新";
+    return result;
+}
+
+LoginResult UserService::update_avatar(const std::string& user_id,
+                                       const std::string& avatar_url) {
+    LoginResult result;
+
+    if (user_id.empty()) {
+        result.code = 401;
+        result.message = "未登录";
+        return result;
+    }
+
+    if (avatar_url.empty()) {
+        result.code = 1;
+        result.message = "头像不能为空";
+        return result;
+    }
+
+    constexpr std::size_t kMaxAvatarLength = 700 * 1024;
+    if (avatar_url.size() > kMaxAvatarLength) {
+        result.code = 2;
+        result.message = "头像数据过大";
+        return result;
+    }
+
+    if (avatar_url.rfind("data:image/", 0) != 0 || avatar_url.find(',') == std::string::npos) {
+        result.code = 3;
+        result.message = "头像格式不支持";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE im_user SET avatar_url = '" << sql_escape(mysql, avatar_url)
+        << "', update_time = NOW() "
+        << "WHERE user_id = '" << sql_escape(mysql, user_id)
+        << "' AND status = 1";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        std::cerr << "[UserService] 更新头像失败: " << mysql_error(mysql) << std::endl;
+        result.code = 5001;
+        result.message = "头像同步失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "头像已同步";
+    result.user_id = user_id;
+    result.avatar_url = avatar_url;
     return result;
 }
 

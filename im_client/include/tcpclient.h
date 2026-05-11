@@ -125,6 +125,16 @@ public:
     void updateFriendRemark(const QString& friend_id, const QString& remark);
 
     /**
+     * @brief 更新当前用户头像
+     */
+    void updateAvatar(const QString& avatar_url);
+
+    /**
+     * @brief 修改当前用户密码
+     */
+    void changePassword(const QString& old_password, const QString& new_password);
+
+    /**
      * @brief 获取聊天记录
      * @param friend_id 好友ID
      * @param limit 消息数量
@@ -141,6 +151,11 @@ public:
      * @brief 获取用户ID
      */
     const QString& userId() const { return user_id_; }
+
+    /**
+     * @brief 获取当前用户头像
+     */
+    const QString& avatarUrl() const { return user_avatar_url_; }
 
     /**
      * @brief 是否有保存的登录凭证
@@ -184,7 +199,7 @@ signals:
      */
     void loginResponse(int code, const QString& message,
                        const QString& user_id, const QString& nickname,
-                       const QString& token);
+                       const QString& avatar_url, const QString& token);
 
     /**
      * @brief 注册响应信号
@@ -226,6 +241,16 @@ signals:
      */
     void friendRemarkUpdateResult(int code, const QString& message,
                                   const QString& friend_id, const QString& remark);
+
+    /**
+     * @brief 更新头像结果信号
+     */
+    void avatarUpdateResult(int code, const QString& message, const QString& avatar_url);
+
+    /**
+     * @brief 修改密码结果信号
+     */
+    void passwordChangeResult(int code, const QString& message);
 
     /**
      * @brief 好友列表信号
@@ -318,6 +343,7 @@ private:
     ClientState state_ = ClientState::Disconnected;
     QString user_id_;
     QString user_nickname_;
+    QString user_avatar_url_;
     QString token_;
     QString server_host_;
     quint16 server_port_;

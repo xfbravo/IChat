@@ -149,8 +149,13 @@ void Session::handle_read(const boost::system::error_code& ec, std::size_t bytes
 }
 
 void Session::handle_message(const Message& msg) {
+    const std::string body_preview = msg.body.size() > 512
+        ? msg.body.substr(0, 512) + "...(truncated)"
+        : msg.body;
     std::cout << "[Session] 处理消息: type=0x" << std::hex << static_cast<uint16_t>(msg.type)
-              << std::dec << ", body=" << msg.body << ", from=" << remote_endpoint() << std::endl;
+              << std::dec << ", body_size=" << msg.body.size()
+              << ", body=" << body_preview
+              << ", from=" << remote_endpoint() << std::endl;
 
     // 重置心跳定时器（收到任何消息都认为连接活跃）
     start_heartbeat();

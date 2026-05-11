@@ -59,6 +59,13 @@ public:
                               const std::string& password);
 
     /**
+     * @brief 修改用户密码
+     */
+    LoginResult change_password(const std::string& user_id,
+                                const std::string& old_password,
+                                const std::string& new_password);
+
+    /**
      * @brief 根据用户ID获取用户信息
      */
     UserInfo get_user_by_id(const std::string& user_id);
@@ -134,6 +141,12 @@ public:
     LoginResult update_friend_remark(const std::string& user_id,
                                      const std::string& friend_id,
                                      const std::string& remark);
+
+    /**
+     * @brief 更新用户头像
+     */
+    LoginResult update_avatar(const std::string& user_id,
+                              const std::string& avatar_url);
 
     /**
      * @brief 保存消息到数据库

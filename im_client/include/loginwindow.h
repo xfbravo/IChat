@@ -28,7 +28,7 @@ signals:
     /**
      * @brief 登录成功信号
      */
-    void loginSuccess(const QString& user_id, const QString& nickname);
+    void loginSuccess(const QString& user_id, const QString& nickname, const QString& avatar_url);
 
 private slots:
     /**
@@ -46,7 +46,7 @@ private slots:
      */
     void onLoginResponse(int code, const QString& message,
                         const QString& user_id, const QString& nickname,
-                        const QString& token);
+                        const QString& avatar_url, const QString& token);
 
     /**
      * @brief 处理注册响应

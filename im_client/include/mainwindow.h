@@ -28,6 +28,7 @@ public:
     explicit MainWindow(TcpClient* tcp_client,
                        const QString& user_id,
                        const QString& nickname,
+                       const QString& avatar_url = QString(),
                        QWidget* parent = nullptr);
 
 signals:
@@ -63,6 +64,10 @@ private slots:
 
     void onLogoutClicked();
     void onEditContactRemark();
+    void onUploadAvatarClicked();
+    void onAvatarUpdateResult(int code, const QString& message, const QString& avatar_url);
+    void onChangePasswordClicked();
+    void onPasswordChangeResult(int code, const QString& message);
 
 private:
     struct ChatViewMessage {
@@ -78,7 +83,10 @@ private:
     void createNavigationBar();
     void createMessageView();
     void createContactView();
+    void createSettingsView();
     void createPlaceholderView(QWidget*& widget, const QString& text);
+    QString encodeAvatarFile(const QString& file_path);
+    void updateAvatarPreview();
     void appendMessage(const QString& from, const QString& content, bool is_mine,
                        const QString& msg_id = QString(), const QString& status = QString());
     void renderChatMessages();
@@ -97,6 +105,7 @@ private:
     TcpClient* tcp_client_;
     QString user_id_;
     QString user_nickname_;
+    QString current_avatar_url_;
     QString current_chat_target_;
 
     // Navigation
@@ -125,6 +134,16 @@ private:
     // Placeholder views
     QWidget* moments_view_;
     QWidget* settings_view_;
+
+    // Settings View
+    QLabel* settings_avatar_label_ = nullptr;
+    QLabel* settings_avatar_status_label_ = nullptr;
+    QPushButton* upload_avatar_button_ = nullptr;
+    QLineEdit* old_password_edit_ = nullptr;
+    QLineEdit* new_password_edit_ = nullptr;
+    QLineEdit* confirm_password_edit_ = nullptr;
+    QLabel* password_status_label_ = nullptr;
+    QPushButton* change_password_button_ = nullptr;
 
     // Status
     QLabel* status_label_;

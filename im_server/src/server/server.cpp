@@ -489,6 +489,60 @@ void Server::register_default_handlers() {
         session->send(MsgType::UPDATE_FRIEND_REMARK_RSP, json::serialize(rsp));
     });
 
+    // 更新头像
+    dispatcher_.register_handler(MsgType::UPDATE_AVATAR, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到更新头像请求 from " << session->user_id()
+                  << ", body_size=" << msg.body.size() << std::endl;
+
+        if (session->user_id().empty()) {
+            session->send(MsgType::UPDATE_AVATAR_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string avatar_url;
+        try {
+            json::object req = parse_json_object(msg.body);
+            avatar_url = json_string(req, "avatar_url");
+        } catch (const std::exception& e) {
+            session->send(MsgType::UPDATE_AVATAR_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        LoginResult result = user_service_.update_avatar(session->user_id(), avatar_url);
+
+        json::object rsp;
+        rsp["code"] = result.code;
+        rsp["message"] = result.message;
+        if (result.code == 0) {
+            rsp["avatar_url"] = result.avatar_url;
+        }
+        session->send(MsgType::UPDATE_AVATAR_RSP, json::serialize(rsp));
+    });
+
+    // 修改密码
+    dispatcher_.register_handler(MsgType::CHANGE_PASSWORD, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到修改密码请求 from " << session->user_id() << std::endl;
+
+        if (session->user_id().empty()) {
+            session->send(MsgType::CHANGE_PASSWORD_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string old_password;
+        std::string new_password;
+        try {
+            json::object req = parse_json_object(msg.body);
+            old_password = json_string(req, "old_password");
+            new_password = json_string(req, "new_password");
+        } catch (const std::exception& e) {
+            session->send(MsgType::CHANGE_PASSWORD_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        LoginResult result = user_service_.change_password(session->user_id(), old_password, new_password);
+        session->send(MsgType::CHANGE_PASSWORD_RSP, json_response(result.code, result.message));
+    });
+
     dispatcher_.register_handler(MsgType::OFFLINE_MESSAGE_ACK, [this](std::shared_ptr<Session> session, const Message& msg) {
         if (session->user_id().empty()) {
             session->send(MsgType::ERROR, json_response(401, "未登录"));

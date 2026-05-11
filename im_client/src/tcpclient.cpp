@@ -39,6 +39,7 @@ void TcpClient::loadCredentials() {
     QSettings settings("IMClient", "TcpClient");
     user_id_ = settings.value("user_id", "").toString();
     user_nickname_ = settings.value("user_nickname", "").toString();
+    user_avatar_url_ = settings.value("avatar_url", "").toString();
     token_ = settings.value("token", "").toString();
 
     if (!user_id_.isEmpty()) {
@@ -50,6 +51,7 @@ void TcpClient::saveCredentials() {
     QSettings settings("IMClient", "TcpClient");
     settings.setValue("user_id", user_id_);
     settings.setValue("user_nickname", user_nickname_);
+    settings.setValue("avatar_url", user_avatar_url_);
     settings.setValue("token", token_);
     qDebug() << "Saved credentials for user:" << user_id_;
 }
@@ -231,6 +233,29 @@ void TcpClient::updateFriendRemark(const QString& friend_id, const QString& rema
     sendMessage(MsgType::UPDATE_FRIEND_REMARK, body);
 }
 
+void TcpClient::updateAvatar(const QString& avatar_url) {
+    if (state_ != ClientState::LoggedIn || avatar_url.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["avatar_url"] = avatar_url;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::UPDATE_AVATAR, body);
+}
+
+void TcpClient::changePassword(const QString& old_password, const QString& new_password) {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["old_password"] = old_password;
+    obj["new_password"] = new_password;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::CHANGE_PASSWORD, body);
+}
+
 void TcpClient::getChatHistory(const QString& friend_id, int limit, int64_t before_time) {
     if (state_ != ClientState::LoggedIn) {
         return;
@@ -347,12 +372,14 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     state_ = ClientState::LoggedIn;
                     user_id_ = QString::fromStdString(rsp.user_id);
                     user_nickname_ = QString::fromStdString(rsp.nickname);
+                    user_avatar_url_ = QString::fromStdString(rsp.avatar_url);
                     token_ = QString::fromStdString(rsp.token);
                     saveCredentials();
                 }
                 emit loginResponse(rsp.code, QString::fromStdString(rsp.message),
                                    QString::fromStdString(rsp.user_id),
                                    QString::fromStdString(rsp.nickname),
+                                   QString::fromStdString(rsp.avatar_url),
                                    QString::fromStdString(rsp.token));
             }
             break;
@@ -453,6 +480,33 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                                               obj["message"].toString(),
                                               obj["friend_id"].toString(),
                                               obj["remark"].toString());
+            }
+            break;
+        }
+
+        case MsgType::UPDATE_AVATAR_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                const int code = obj["code"].toInt();
+                const QString avatar_url = obj["avatar_url"].toString();
+                if (code == 0 && !avatar_url.isEmpty()) {
+                    user_avatar_url_ = avatar_url;
+                    saveCredentials();
+                }
+                emit avatarUpdateResult(code,
+                                        obj["message"].toString(),
+                                        avatar_url);
+            }
+            break;
+        }
+
+        case MsgType::CHANGE_PASSWORD_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit passwordChangeResult(obj["code"].toInt(),
+                                          obj["message"].toString());
             }
             break;
         }
