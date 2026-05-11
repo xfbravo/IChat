@@ -22,6 +22,13 @@
 #include <QDialog>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QListView>
+#include <QIcon>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
+#include <QPen>
+#include <QSize>
 #include <QStringList>
 #include <QTimer>
 #include <algorithm>
@@ -61,6 +68,48 @@ qint64 timestampFromText(const QString& time_text) {
 
 QString messageHtml(const QString& text) {
     return text.toHtmlEscaped().replace("\n", "<br/>");
+}
+
+QIcon navIcon(const QString& type) {
+    const QColor color("#ecf0f1");
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(color, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    if (type == "message") {
+        painter.drawRoundedRect(QRectF(6, 7, 20, 15), 5, 5);
+        QPainterPath tail;
+        tail.moveTo(12, 22);
+        tail.lineTo(9, 27);
+        tail.lineTo(17, 22);
+        painter.drawPath(tail);
+    } else if (type == "contacts") {
+        painter.drawEllipse(QRectF(11, 5, 10, 10));
+        painter.drawArc(QRectF(7, 15, 18, 14), 20 * 16, 140 * 16);
+        painter.drawEllipse(QRectF(4, 10, 7, 7));
+        painter.drawEllipse(QRectF(21, 10, 7, 7));
+    } else if (type == "moments") {
+        painter.drawEllipse(QRectF(7, 7, 18, 18));
+        painter.drawEllipse(QRectF(13, 3, 6, 6));
+        painter.drawEllipse(QRectF(23, 16, 6, 6));
+        painter.drawEllipse(QRectF(5, 21, 6, 6));
+    } else if (type == "settings") {
+        painter.drawEllipse(QRectF(11, 11, 10, 10));
+        for (int i = 0; i < 8; ++i) {
+            painter.save();
+            painter.translate(16, 16);
+            painter.rotate(i * 45);
+            painter.drawLine(QPointF(0, -13), QPointF(0, -10));
+            painter.restore();
+        }
+        painter.drawEllipse(QRectF(5, 5, 22, 22));
+    }
+
+    return QIcon(pixmap);
 }
 }
 
@@ -129,7 +178,7 @@ MainWindow::MainWindow(TcpClient* tcp_client,
 
 void MainWindow::createNavigationBar() {
     navigation_bar_ = new QWidget;
-    navigation_bar_->setFixedWidth(200);
+    navigation_bar_->setFixedWidth(72);
     navigation_bar_->setStyleSheet(R"(
         QWidget {
             background-color: #2c3e50;
@@ -137,16 +186,17 @@ void MainWindow::createNavigationBar() {
     )");
 
     QVBoxLayout* layout = new QVBoxLayout(navigation_bar_);
-    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setContentsMargins(0, 10, 0, 0);
+    layout->setSpacing(8);
 
     // 标题
-    QLabel* title = new QLabel("IChat");
+    QLabel* title = new QLabel("I");
     title->setStyleSheet(R"(
         QLabel {
             color: white;
-            font-size: 24px;
+            font-size: 18px;
             font-weight: bold;
-            padding: 20px 0;
+            padding: 8px 0;
         }
     )");
     title->setAlignment(Qt::AlignCenter);
@@ -154,27 +204,48 @@ void MainWindow::createNavigationBar() {
 
     // 导航列表
     nav_list_ = new QListWidget;
+    nav_list_->setViewMode(QListView::IconMode);
+    nav_list_->setMovement(QListView::Static);
+    nav_list_->setResizeMode(QListView::Adjust);
+    nav_list_->setFlow(QListView::TopToBottom);
+    nav_list_->setIconSize(QSize(28, 28));
+    nav_list_->setGridSize(QSize(72, 64));
+    nav_list_->setSpacing(2);
+    nav_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    nav_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    nav_list_->setTextElideMode(Qt::ElideNone);
     nav_list_->setStyleSheet(R"(
         QListWidget {
             background-color: #2c3e50;
             border: none;
             color: white;
+            outline: none;
         }
         QListWidget::item {
-            padding: 15px 20px;
-            font-size: 14px;
+            padding: 6px 0;
+            font-size: 11px;
+            color: #dce6ec;
         }
         QListWidget::item:selected {
             background-color: #34495e;
+            color: white;
         }
         QListWidget::item:hover {
             background-color: #34495e;
         }
     )");
-    nav_list_->addItem("消息");
-    nav_list_->addItem("联系人");
-    nav_list_->addItem("朋友圈");
-    nav_list_->addItem("设置");
+    const QList<QPair<QString, QString>> nav_items = {
+        {"message", "消息"},
+        {"contacts", "联系人"},
+        {"moments", "朋友圈"},
+        {"settings", "设置"}
+    };
+    for (const auto& item : nav_items) {
+        QListWidgetItem* nav_item = new QListWidgetItem(navIcon(item.first), item.second);
+        nav_item->setTextAlignment(Qt::AlignCenter);
+        nav_item->setSizeHint(QSize(72, 64));
+        nav_list_->addItem(nav_item);
+    }
     nav_list_->setCurrentRow(0);
     connect(nav_list_, &QListWidget::currentRowChanged,
             this, &MainWindow::onNavigationItemClicked);
@@ -822,7 +893,8 @@ void MainWindow::renderChatMessages() {
     chat_display_->clear();
 
     for (const ChatViewMessage& message : current_messages_) {
-        QString color = message.is_mine ? "#4CAF50" : "#2196F3";
+        QString background_color = message.is_mine ? "#95ec69" : "#ffffff";
+        QString border_color = message.is_mine ? "#7fd454" : "#dddddd";
         QString sender = message.is_mine ? "我" : message.from;
         QString cell_align = message.is_mine ? "right" : "left";
         QString status = statusText(message.status);
@@ -833,15 +905,17 @@ void MainWindow::renderChatMessages() {
         QString message_cell = QString(
             "<td width='80%' align='%1'>"
             "<span style='font-size: 12px; color: #888;'>%2 %3</span><br/>"
-            "<span style='display: inline-block; padding: 8px 12px; "
-            "background-color: %4; color: white; border-radius: 8px; "
-            "max-width: 70%; word-wrap: break-word;'>%5</span>"
-            "%6"
+            "<span style='display: inline-block; padding: 10px 14px; "
+            "background-color: %4; color: #111111; border: 1px solid %5; "
+            "border-radius: 14px; line-height: 1.45; "
+            "max-width: 70%; word-wrap: break-word;'>%6</span>"
+            "%7"
             "</td>"
         ).arg(cell_align,
               sender.toHtmlEscaped(),
               message.time.toHtmlEscaped(),
-              color,
+              background_color,
+              border_color,
               messageHtml(message.content),
               status_html);
         QString empty_cell = "<td width='20%'></td>";
