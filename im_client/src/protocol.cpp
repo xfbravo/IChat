@@ -72,7 +72,7 @@ bool Protocol::decode(QByteArray& data, MsgType& type, QString& body) {
 }
 
 QString Protocol::generateMsgId() {
-    return QUuid::createUuid().toString(QUuid::WithoutBraces);
+    return QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
 }
 
 QString Protocol::makeLoginRequest(const QString& user_id, const QString& password) {
