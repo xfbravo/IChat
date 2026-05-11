@@ -893,22 +893,27 @@ void MainWindow::renderChatMessages() {
     chat_display_->clear();
 
     for (const ChatViewMessage& message : current_messages_) {
-        QString background_color = message.is_mine ? "#95ec69" : "#ffffff";
-        QString border_color = message.is_mine ? "#7fd454" : "#dddddd";
+        QString background_color = message.is_mine ? "#95ec69" : "#eeeeee";
+        QString border_color = message.is_mine ? "#95ec69" : "#e2e2e2";
         QString sender = message.is_mine ? "我" : message.from;
         QString cell_align = message.is_mine ? "right" : "left";
+        QString spacer_cell = "<td width='30%'></td>";
         QString status = statusText(message.status);
         QString status_html = status.isEmpty()
             ? QString()
             : QString("<br/><span style='font-size: 12px; color: #888;'>%1</span>").arg(status.toHtmlEscaped());
 
         QString message_cell = QString(
-            "<td width='80%' align='%1'>"
+            "<td width='70%' align='%1'>"
             "<span style='font-size: 12px; color: #888;'>%2 %3</span><br/>"
-            "<span style='display: inline-block; padding: 10px 14px; "
-            "background-color: %4; color: #111111; border: 1px solid %5; "
-            "border-radius: 14px; line-height: 1.45; "
-            "max-width: 70%; word-wrap: break-word;'>%6</span>"
+            "<table cellspacing='0' cellpadding='0' align='%1' style='margin-top: 4px;'>"
+            "<tr>"
+            "<td style='background-color: %4; color: #111111; border: 1px solid %5; "
+            "border-radius: 6px; padding: 8px 12px; line-height: 1.55;'>"
+            "%6"
+            "</td>"
+            "</tr>"
+            "</table>"
             "%7"
             "</td>"
         ).arg(cell_align,
@@ -918,10 +923,9 @@ void MainWindow::renderChatMessages() {
               border_color,
               messageHtml(message.content),
               status_html);
-        QString empty_cell = "<td width='20%'></td>";
         QString row_cells = message.is_mine
-            ? QString("%1%2").arg(empty_cell, message_cell)
-            : QString("%1%2").arg(message_cell, empty_cell);
+            ? QString("%1%2").arg(spacer_cell, message_cell)
+            : QString("%1%2").arg(message_cell, spacer_cell);
 
         QString html = QString(
             "<table width='100%' cellspacing='0' cellpadding='0' style='margin: 6px 0;'>"
