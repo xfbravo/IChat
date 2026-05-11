@@ -6,14 +6,15 @@
 #pragma once
 
 #include <QMainWindow>
-#include <QTextEdit>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QListWidget>
 #include <QTreeWidget>
 #include <QSplitter>
 #include <QLabel>
+#include <QScrollArea>
 #include <QStackedWidget>
+#include <QVBoxLayout>
 #include <QWidget>
 #include <QHash>
 #include <QVector>
@@ -99,7 +100,9 @@ private:
     QListWidget* chat_list_widget_;
     QWidget* chat_interface_panel_;
     QLabel* chat_target_label_;
-    QTextEdit* chat_display_;
+    QScrollArea* chat_scroll_area_;
+    QWidget* chat_messages_widget_;
+    QVBoxLayout* chat_messages_layout_;
     QLineEdit* message_input_;
     QPushButton* send_button_;
 

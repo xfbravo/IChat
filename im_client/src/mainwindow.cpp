@@ -9,6 +9,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
+#include <QFrame>
 #include <QHeaderView>
 #include <QDate>
 #include <QDateTime>
@@ -66,9 +67,81 @@ qint64 timestampFromText(const QString& time_text) {
     return QDateTime::currentMSecsSinceEpoch();
 }
 
-QString messageHtml(const QString& text) {
-    return text.toHtmlEscaped().replace("\n", "<br/>");
-}
+class MessageBubble : public QWidget {
+public:
+    MessageBubble(const QString& text, bool is_mine, int max_text_width, QWidget* parent = nullptr)
+        : QWidget(parent)
+        , is_mine_(is_mine)
+        , background_(is_mine ? QColor("#95ec69") : QColor("#eeeeee"))
+        , border_(is_mine ? QColor("#95ec69") : QColor("#e2e2e2"))
+    {
+        setAttribute(Qt::WA_TranslucentBackground);
+
+        QLabel* label = new QLabel(text, this);
+        label->setTextFormat(Qt::PlainText);
+        label->setWordWrap(true);
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        label->setMaximumWidth(max_text_width);
+        label->setStyleSheet(R"(
+            QLabel {
+                background: transparent;
+                color: #111111;
+                font-family: "Microsoft YaHei", sans-serif;
+                font-size: 14px;
+                line-height: 155%;
+            }
+        )");
+
+        QHBoxLayout* layout = new QHBoxLayout(this);
+        layout->setSpacing(0);
+        layout->setContentsMargins(is_mine_ ? 12 : 20, 8, is_mine_ ? 20 : 12, 8);
+        layout->addWidget(label);
+    }
+
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        Q_UNUSED(event);
+
+        constexpr int tail_width = 8;
+        constexpr int radius = 6;
+        QRectF bubble_rect = rect().adjusted(
+            is_mine_ ? 0.5 : tail_width + 0.5,
+            0.5,
+            is_mine_ ? -tail_width - 0.5 : -0.5,
+            -0.5);
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(border_, 1));
+        painter.setBrush(background_);
+
+        QPainterPath path;
+        path.addRoundedRect(bubble_rect, radius, radius);
+
+        const qreal tail_top = bubble_rect.top() + 13;
+        const qreal tail_mid = bubble_rect.top() + 19;
+        const qreal tail_bottom = bubble_rect.top() + 25;
+        QPainterPath tail;
+        if (is_mine_) {
+            tail.moveTo(bubble_rect.right() - 1, tail_top);
+            tail.lineTo(width() - 1, tail_mid);
+            tail.lineTo(bubble_rect.right() - 1, tail_bottom);
+        } else {
+            tail.moveTo(bubble_rect.left() + 1, tail_top);
+            tail.lineTo(1, tail_mid);
+            tail.lineTo(bubble_rect.left() + 1, tail_bottom);
+        }
+        tail.closeSubpath();
+        path = path.united(tail);
+
+        painter.drawPath(path);
+    }
+
+private:
+    bool is_mine_;
+    QColor background_;
+    QColor border_;
+};
 
 QIcon navIcon(const QString& type) {
     const QColor color("#ecf0f1");
@@ -263,17 +336,29 @@ void MainWindow::createMessageView() {
 
     // 聊天列表 (左侧)
     chat_list_widget_ = new QListWidget;
+    chat_list_widget_->setFocusPolicy(Qt::NoFocus);
     chat_list_widget_->setStyleSheet(R"(
         QListWidget {
             border: none;
             background-color: #f5f5f5;
+            color: #111111;
+            outline: none;
         }
         QListWidget::item {
             padding: 12px 15px;
             border-bottom: 1px solid #e0e0e0;
+            color: #111111;
         }
         QListWidget::item:selected {
-            background-color: #e8f5e9;
+            background-color: #4CAF50;
+            color: #ffffff;
+            border: none;
+        }
+        QListWidget::item:selected:active,
+        QListWidget::item:selected:!active {
+            background-color: #4CAF50;
+            color: #ffffff;
+            border: none;
         }
     )");
     connect(chat_list_widget_, &QListWidget::itemClicked,
@@ -298,18 +383,39 @@ void MainWindow::createMessageView() {
     chat_layout->addWidget(chat_target_label_);
 
     // 聊天显示区
-    chat_display_ = new QTextEdit;
-    chat_display_->setReadOnly(true);
-    chat_display_->setStyleSheet(R"(
-        QTextEdit {
+    chat_scroll_area_ = new QScrollArea;
+    chat_scroll_area_->setWidgetResizable(true);
+    chat_scroll_area_->setFrameShape(QFrame::NoFrame);
+    chat_scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    chat_scroll_area_->setStyleSheet(R"(
+        QScrollArea {
             background-color: #fafafa;
             border: none;
-            padding: 10px;
-            font-family: "Microsoft YaHei", sans-serif;
-            font-size: 14px;
+        }
+        QScrollBar:vertical {
+            background: transparent;
+            width: 8px;
+            margin: 4px 0;
+        }
+        QScrollBar::handle:vertical {
+            background: #d6d6d6;
+            border-radius: 4px;
+            min-height: 32px;
+        }
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {
+            height: 0;
         }
     )");
-    chat_layout->addWidget(chat_display_);
+
+    chat_messages_widget_ = new QWidget;
+    chat_messages_widget_->setStyleSheet("background-color: #fafafa;");
+    chat_messages_layout_ = new QVBoxLayout(chat_messages_widget_);
+    chat_messages_layout_->setContentsMargins(16, 12, 16, 12);
+    chat_messages_layout_->setSpacing(2);
+    chat_messages_layout_->addStretch();
+    chat_scroll_area_->setWidget(chat_messages_widget_);
+    chat_layout->addWidget(chat_scroll_area_);
 
     // 输入区
     QWidget* input_widget = new QWidget;
@@ -890,53 +996,63 @@ void MainWindow::updateConversationItem(const QString& peer_id) {
 }
 
 void MainWindow::renderChatMessages() {
-    chat_display_->clear();
-
-    for (const ChatViewMessage& message : current_messages_) {
-        QString background_color = message.is_mine ? "#95ec69" : "#eeeeee";
-        QString border_color = message.is_mine ? "#95ec69" : "#e2e2e2";
-        QString sender = message.is_mine ? "我" : message.from;
-        QString cell_align = message.is_mine ? "right" : "left";
-        QString spacer_cell = "<td width='30%'></td>";
-        QString status = statusText(message.status);
-        QString status_html = status.isEmpty()
-            ? QString()
-            : QString("<br/><span style='font-size: 12px; color: #888;'>%1</span>").arg(status.toHtmlEscaped());
-
-        QString message_cell = QString(
-            "<td width='70%' align='%1'>"
-            "<span style='font-size: 12px; color: #888;'>%2 %3</span><br/>"
-            "<table cellspacing='0' cellpadding='0' align='%1' style='margin-top: 4px;'>"
-            "<tr>"
-            "<td style='background-color: %4; color: #111111; border: 1px solid %5; "
-            "border-radius: 6px; padding: 8px 12px; line-height: 1.55;'>"
-            "%6"
-            "</td>"
-            "</tr>"
-            "</table>"
-            "%7"
-            "</td>"
-        ).arg(cell_align,
-              sender.toHtmlEscaped(),
-              message.time.toHtmlEscaped(),
-              background_color,
-              border_color,
-              messageHtml(message.content),
-              status_html);
-        QString row_cells = message.is_mine
-            ? QString("%1%2").arg(spacer_cell, message_cell)
-            : QString("%1%2").arg(message_cell, spacer_cell);
-
-        QString html = QString(
-            "<table width='100%' cellspacing='0' cellpadding='0' style='margin: 6px 0;'>"
-            "<tr>%1</tr>"
-            "</table>"
-        ).arg(row_cells);
-
-        chat_display_->append(html);
+    while (QLayoutItem* item = chat_messages_layout_->takeAt(0)) {
+        if (QWidget* widget = item->widget()) {
+            widget->deleteLater();
+        }
+        delete item;
     }
 
-    chat_display_->verticalScrollBar()->setValue(chat_display_->verticalScrollBar()->maximum());
+    const int viewport_width = chat_scroll_area_->viewport()
+        ? chat_scroll_area_->viewport()->width()
+        : chat_scroll_area_->width();
+    const int max_text_width = qMax(180, static_cast<int>(viewport_width * 0.55));
+
+    for (const ChatViewMessage& message : current_messages_) {
+        QWidget* row = new QWidget(chat_messages_widget_);
+        QHBoxLayout* row_layout = new QHBoxLayout(row);
+        row_layout->setContentsMargins(0, 4, 0, 4);
+        row_layout->setSpacing(8);
+
+        QWidget* message_column = new QWidget(row);
+        QVBoxLayout* column_layout = new QVBoxLayout(message_column);
+        column_layout->setContentsMargins(0, 0, 0, 0);
+        column_layout->setSpacing(4);
+
+        QLabel* meta_label = new QLabel(QString("%1 %2")
+                                            .arg(message.is_mine ? "我" : message.from,
+                                                 message.time),
+                                        message_column);
+        meta_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
+        meta_label->setAlignment(message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
+        column_layout->addWidget(meta_label);
+
+        MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, message_column);
+        column_layout->addWidget(bubble, 0, message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
+
+        QString status = statusText(message.status);
+        if (!status.isEmpty()) {
+            QLabel* status_label = new QLabel(status, message_column);
+            status_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
+            status_label->setAlignment(Qt::AlignRight);
+            column_layout->addWidget(status_label);
+        }
+
+        if (message.is_mine) {
+            row_layout->addStretch();
+            row_layout->addWidget(message_column, 0, Qt::AlignRight);
+        } else {
+            row_layout->addWidget(message_column, 0, Qt::AlignLeft);
+            row_layout->addStretch();
+        }
+
+        chat_messages_layout_->addWidget(row);
+    }
+
+    chat_messages_layout_->addStretch();
+    QTimer::singleShot(0, this, [this]() {
+        chat_scroll_area_->verticalScrollBar()->setValue(chat_scroll_area_->verticalScrollBar()->maximum());
+    });
 }
 
 QString MainWindow::statusText(const QString& status) const {
