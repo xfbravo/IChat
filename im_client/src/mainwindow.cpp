@@ -6,6 +6,7 @@
 #include "mainwindow.h"
 #include "addcontactdialog.h"
 #include <QStatusBar>
+#include <QAction>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
@@ -17,6 +18,7 @@
 #include <QTreeWidgetItem>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QMenu>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -31,6 +33,7 @@
 #include <QPen>
 #include <QSize>
 #include <QStringList>
+#include <QToolButton>
 #include <QTimer>
 #include <algorithm>
 
@@ -247,6 +250,8 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onOfflineMessageReceived);
     connect(tcp_client_, &TcpClient::messageAckReceived,
             this, &MainWindow::onMessageAckReceived);
+    connect(tcp_client_, &TcpClient::friendRemarkUpdateResult,
+            this, &MainWindow::onFriendRemarkUpdateResult);
 }
 
 void MainWindow::createNavigationBar() {
@@ -369,18 +374,62 @@ void MainWindow::createMessageView() {
     QVBoxLayout* chat_layout = new QVBoxLayout(chat_interface_panel_);
     chat_layout->setContentsMargins(0, 0, 0, 0);
 
-    // 聊天目标标签
-    chat_target_label_ = new QLabel("选择联系人开始聊天");
-    chat_target_label_->setStyleSheet(R"(
-        QLabel {
+    // 聊天标题栏
+    QWidget* chat_header = new QWidget;
+    chat_header->setFixedHeight(54);
+    chat_header->setStyleSheet(R"(
+        QWidget {
             background-color: #fafafa;
-            padding: 15px;
-            font-size: 16px;
-            font-weight: bold;
             border-bottom: 1px solid #e0e0e0;
         }
     )");
-    chat_layout->addWidget(chat_target_label_);
+    QHBoxLayout* chat_header_layout = new QHBoxLayout(chat_header);
+    chat_header_layout->setContentsMargins(15, 0, 12, 0);
+    chat_header_layout->setSpacing(8);
+
+    chat_target_label_ = new QLabel("选择联系人开始聊天");
+    chat_target_label_->setStyleSheet(R"(
+        QLabel {
+            background-color: transparent;
+            border: none;
+            font-size: 16px;
+            font-weight: bold;
+            color: #111111;
+        }
+    )");
+    chat_header_layout->addWidget(chat_target_label_, 1);
+
+    chat_more_button_ = new QToolButton;
+    chat_more_button_->setText("⋯");
+    chat_more_button_->setToolTip("更多");
+    chat_more_button_->setPopupMode(QToolButton::InstantPopup);
+    chat_more_button_->setEnabled(false);
+    chat_more_button_->setStyleSheet(R"(
+        QToolButton {
+            background-color: transparent;
+            border: none;
+            border-radius: 4px;
+            color: #333333;
+            font-size: 22px;
+            font-weight: bold;
+            min-width: 32px;
+            min-height: 32px;
+            padding-bottom: 4px;
+        }
+        QToolButton:hover {
+            background-color: #eeeeee;
+        }
+        QToolButton:disabled {
+            color: #bbbbbb;
+        }
+    )");
+    QMenu* chat_menu = new QMenu(chat_more_button_);
+    QAction* edit_remark_action = chat_menu->addAction("修改联系人备注");
+    connect(edit_remark_action, &QAction::triggered, this, &MainWindow::onEditContactRemark);
+    chat_more_button_->setMenu(chat_menu);
+    chat_header_layout->addWidget(chat_more_button_);
+
+    chat_layout->addWidget(chat_header);
 
     // 聊天显示区
     chat_scroll_area_ = new QScrollArea;
@@ -688,8 +737,10 @@ void MainWindow::onChatItemClicked(QListWidgetItem* item) {
 
 void MainWindow::switchToChatWith(const QString& user_id, const QString& nickname) {
     current_chat_target_ = user_id;
-    chat_target_label_->setText(nickname);
-    conversations_[user_id].title = nickname;
+    QString display_name = contact_remarks_.value(user_id, nickname);
+    chat_target_label_->setText(display_name);
+    chat_more_button_->setEnabled(true);
+    conversations_[user_id].title = display_name;
     conversations_[user_id].unread = 0;
     current_messages_ = conversations_[user_id].messages;
     message_index_by_id_.clear();
@@ -735,12 +786,18 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QJsonObject friend_obj = value.toObject();
         QString friend_id = friend_obj["friend_id"].toString();
         QString nickname = friend_obj["nickname"].toString();
+        QString remark = friend_obj["remark"].toString().trimmed();
+        QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
 
         // 添加到聊天列表
-        conversations_[friend_id].title = nickname;
+        conversations_[friend_id].title = display_name;
         QListWidgetItem* item = new QListWidgetItem(conversationTitle(friend_id));
         item->setData(Qt::UserRole, friend_id);
         chat_list_widget_->addItem(item);
+    }
+
+    if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_)) {
+        chat_target_label_->setText(conversations_[current_chat_target_].title);
     }
 
     // 更新联系人树（不再调用getFriendList，避免循环）
@@ -899,6 +956,46 @@ void MainWindow::onLogoutClicked() {
     emit logout();
 }
 
+void MainWindow::onEditContactRemark() {
+    if (current_chat_target_.isEmpty()) {
+        return;
+    }
+
+    const QString old_remark = conversations_.value(current_chat_target_).title;
+    bool ok = false;
+    QString new_remark = QInputDialog::getText(this,
+                                               "修改联系人备注",
+                                               "备注:",
+                                               QLineEdit::Normal,
+                                               old_remark,
+                                               &ok).trimmed();
+    if (!ok || new_remark.isEmpty()) {
+        return;
+    }
+
+    tcp_client_->updateFriendRemark(current_chat_target_, new_remark);
+}
+
+void MainWindow::onFriendRemarkUpdateResult(int code, const QString& message,
+                                            const QString& friend_id, const QString& remark) {
+    if (code != 0) {
+        QMessageBox::warning(this, "修改联系人备注", message.isEmpty() ? "修改备注失败" : message);
+        return;
+    }
+
+    if (friend_id.isEmpty()) {
+        return;
+    }
+
+    contact_remarks_[friend_id] = remark;
+    conversations_[friend_id].title = remark;
+    if (friend_id == current_chat_target_) {
+        chat_target_label_->setText(remark);
+    }
+    updateConversationItem(friend_id);
+    loadContacts();
+}
+
 void MainWindow::appendMessage(const QString& from, const QString& content, bool is_mine,
                                const QString& msg_id, const QString& status) {
     ChatViewMessage message;
@@ -1019,10 +1116,7 @@ void MainWindow::renderChatMessages() {
         column_layout->setContentsMargins(0, 0, 0, 0);
         column_layout->setSpacing(4);
 
-        QLabel* meta_label = new QLabel(QString("%1 %2")
-                                            .arg(message.is_mine ? "我" : message.from,
-                                                 message.time),
-                                        message_column);
+        QLabel* meta_label = new QLabel(message.time, message_column);
         meta_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
         meta_label->setAlignment(message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
         column_layout->addWidget(meta_label);

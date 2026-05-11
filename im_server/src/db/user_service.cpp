@@ -609,6 +609,70 @@ LoginResult UserService::delete_friend(const std::string& user_id, const std::st
     return result;
 }
 
+LoginResult UserService::update_friend_remark(const std::string& user_id,
+                                              const std::string& friend_id,
+                                              const std::string& remark) {
+    LoginResult result;
+
+    if (friend_id.empty()) {
+        result.code = 1;
+        result.message = "好友ID不能为空";
+        return result;
+    }
+
+    if (remark.size() > 128) {
+        result.code = 2;
+        result.message = "备注不能超过128个字符";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    std::ostringstream exists_sql;
+    exists_sql << "SELECT 1 FROM im_friend WHERE user_id = '" << sql_escape(mysql, user_id)
+               << "' AND friend_id = '" << sql_escape(mysql, friend_id)
+               << "' AND status = 1 LIMIT 1";
+
+    if (mysql_query(mysql, exists_sql.str().c_str())) {
+        result.code = 5001;
+        result.message = "查询好友关系失败";
+        return result;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    bool exists = res && mysql_num_rows(res) > 0;
+    if (res) mysql_free_result(res);
+    if (!exists) {
+        result.code = 3;
+        result.message = "好友不存在";
+        return result;
+    }
+
+    std::ostringstream sql;
+    sql << "UPDATE im_friend SET remark = '" << sql_escape(mysql, remark)
+        << "', update_time = NOW() "
+        << "WHERE user_id = '" << sql_escape(mysql, user_id)
+        << "' AND friend_id = '" << sql_escape(mysql, friend_id)
+        << "' AND status = 1";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        std::cerr << "[UserService] 修改好友备注失败: " << mysql_error(mysql) << std::endl;
+        result.code = 5001;
+        result.message = "修改备注失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "备注已更新";
+    return result;
+}
+
 bool UserService::save_message(const std::string& msg_id, int msg_type, int chat_type,
                                const std::string& from_user_id, const std::string& to_user_id,
                                const std::string& content_type, const std::string& content,

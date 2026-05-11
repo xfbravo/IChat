@@ -129,6 +129,13 @@ public:
     LoginResult delete_friend(const std::string& user_id, const std::string& friend_id);
 
     /**
+     * @brief 修改好友备注
+     */
+    LoginResult update_friend_remark(const std::string& user_id,
+                                     const std::string& friend_id,
+                                     const std::string& remark);
+
+    /**
      * @brief 保存消息到数据库
      */
     bool save_message(const std::string& msg_id, int msg_type, int chat_type,

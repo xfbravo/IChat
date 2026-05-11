@@ -454,6 +454,36 @@ void Server::register_default_handlers() {
         session->send(MsgType::FRIEND_REQUEST_RSP, json_response(result.code, result.message));
     });
 
+    // 修改好友备注
+    dispatcher_.register_handler(MsgType::UPDATE_FRIEND_REMARK, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到修改好友备注请求 from " << session->user_id() << ": " << msg.body << std::endl;
+
+        if (session->user_id().empty()) {
+            session->send(MsgType::UPDATE_FRIEND_REMARK_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string friend_id;
+        std::string remark;
+        try {
+            json::object req = parse_json_object(msg.body);
+            friend_id = json_string(req, "friend_id");
+            remark = json_string(req, "remark");
+        } catch (const std::exception& e) {
+            session->send(MsgType::UPDATE_FRIEND_REMARK_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        LoginResult result = user_service_.update_friend_remark(session->user_id(), friend_id, remark);
+
+        json::object rsp;
+        rsp["code"] = result.code;
+        rsp["message"] = result.message;
+        rsp["friend_id"] = friend_id;
+        rsp["remark"] = remark;
+        session->send(MsgType::UPDATE_FRIEND_REMARK_RSP, json::serialize(rsp));
+    });
+
     dispatcher_.register_handler(MsgType::OFFLINE_MESSAGE_ACK, [this](std::shared_ptr<Session> session, const Message& msg) {
         if (session->user_id().empty()) {
             session->send(MsgType::ERROR, json_response(401, "未登录"));

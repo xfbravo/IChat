@@ -219,6 +219,18 @@ void TcpClient::respondFriendRequest(const QString& request_id, bool accept) {
     sendMessage(MsgType::FRIEND_REQUEST_RSP, body);
 }
 
+void TcpClient::updateFriendRemark(const QString& friend_id, const QString& remark) {
+    if (state_ != ClientState::LoggedIn || friend_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["friend_id"] = friend_id;
+    obj["remark"] = remark;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::UPDATE_FRIEND_REMARK, body);
+}
+
 void TcpClient::getChatHistory(const QString& friend_id, int limit, int64_t before_time) {
     if (state_ != ClientState::LoggedIn) {
         return;
@@ -426,6 +438,18 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 int code = obj["code"].toInt();
                 QString message = obj["message"].toString();
                 emit friendRequestResult(code, message);
+            }
+            break;
+        }
+
+        case MsgType::UPDATE_FRIEND_REMARK_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit friendRemarkUpdateResult(obj["code"].toInt(),
+                                              obj["message"].toString(),
+                                              obj["friend_id"].toString(),
+                                              obj["remark"].toString());
             }
             break;
         }

@@ -120,6 +120,11 @@ public:
     void respondFriendRequest(const QString& request_id, bool accept);
 
     /**
+     * @brief 修改好友备注
+     */
+    void updateFriendRemark(const QString& friend_id, const QString& remark);
+
+    /**
      * @brief 获取聊天记录
      * @param friend_id 好友ID
      * @param limit 消息数量
@@ -213,6 +218,12 @@ signals:
      * @brief 好友请求结果信号
      */
     void friendRequestResult(int code, const QString& message);
+
+    /**
+     * @brief 修改好友备注结果信号
+     */
+    void friendRemarkUpdateResult(int code, const QString& message,
+                                  const QString& friend_id, const QString& remark);
 
     /**
      * @brief 好友列表信号

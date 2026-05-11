@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QScrollArea>
 #include <QStackedWidget>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QHash>
@@ -44,6 +45,8 @@ private slots:
     void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
     void onOfflineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
     void onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
+    void onFriendRemarkUpdateResult(int code, const QString& message,
+                                    const QString& friend_id, const QString& remark);
     void onLoadMoreMessages();
 
     // Contact functions
@@ -55,6 +58,7 @@ private slots:
     void onFriendRequestsReceived(const QString& json);
 
     void onLogoutClicked();
+    void onEditContactRemark();
 
 private:
     struct ChatViewMessage {
@@ -100,6 +104,7 @@ private:
     QListWidget* chat_list_widget_;
     QWidget* chat_interface_panel_;
     QLabel* chat_target_label_;
+    QToolButton* chat_more_button_;
     QScrollArea* chat_scroll_area_;
     QWidget* chat_messages_widget_;
     QVBoxLayout* chat_messages_layout_;
@@ -120,6 +125,7 @@ private:
 
     QVector<ChatViewMessage> current_messages_;
     QHash<QString, int> message_index_by_id_;
+    QHash<QString, QString> contact_remarks_;
 
     struct ConversationState {
         QString title;

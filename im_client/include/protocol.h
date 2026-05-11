@@ -33,6 +33,7 @@ enum class MsgType : uint16_t {
     GET_CHAT_HISTORY = 0x000F,  // 获取聊天记录
     GET_OFFLINE_MESSAGES = 0x0010, // 获取离线消息
     OFFLINE_MESSAGE_ACK = 0x0011,  // 离线消息确认
+    UPDATE_FRIEND_REMARK = 0x0012, // 修改好友备注
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应
@@ -43,6 +44,7 @@ enum class MsgType : uint16_t {
     FRIEND_LIST_UPDATE = 0x800C, // 好友列表更新通知
     CHAT_HISTORY_RSP = 0x8010,  // 聊天记录响应
     OFFLINE_MESSAGE   = 0x8011,  // 离线消息推送
+    UPDATE_FRIEND_REMARK_RSP = 0x8012, // 修改好友备注响应
 };
 
 /**
