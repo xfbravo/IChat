@@ -872,8 +872,17 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString nickname = friend_obj["nickname"].toString();
         QString remark = friend_obj["remark"].toString().trimmed();
         QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
+        QString last_message = friend_obj["last_msg_content"].toString();
+        QString last_time = friend_obj["last_msg_time"].toString();
+        qint64 last_timestamp = timestampFromText(last_time);
 
-        conversations_[friend_id].title = display_name;
+        ConversationState& conversation = conversations_[friend_id];
+        conversation.title = display_name;
+        if (!last_time.isEmpty()
+            && (last_timestamp > conversation.last_timestamp || conversation.last_timestamp <= 0)) {
+            conversation.last_message = last_message;
+            conversation.last_timestamp = last_timestamp;
+        }
     }
     refreshConversationList();
 
