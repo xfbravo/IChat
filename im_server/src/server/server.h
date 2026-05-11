@@ -34,6 +34,8 @@ namespace im {
  * @brief TCP 服务器类
  */
 class Server : public std::enable_shared_from_this<Server> {
+    friend class Session;
+
 public:
     using Ptr = std::shared_ptr<Server>;
 

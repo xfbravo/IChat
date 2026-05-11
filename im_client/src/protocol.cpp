@@ -9,6 +9,7 @@
 #include <QJsonObject>
 #include <QByteArray>
 #include <QDataStream>
+#include <QDateTime>
 #include <QIODevice>
 
 QByteArray Protocol::encode(MsgType type, const std::string& body) {
@@ -83,8 +84,13 @@ QString Protocol::makeLoginRequest(const QString& user_id, const QString& passwo
 
 QString Protocol::makeChatMessage(const QString& from, const QString& to,
                                   const QString& content_type, const QString& content) {
+    return makeChatMessage(generateMsgId(), from, to, content_type, content);
+}
+
+QString Protocol::makeChatMessage(const QString& msg_id, const QString& from, const QString& to,
+                                  const QString& content_type, const QString& content) {
     QJsonObject obj;
-    obj["msg_id"] = generateMsgId();
+    obj["msg_id"] = msg_id;
     obj["from_user_id"] = from;
     obj["to_user_id"] = to;
     obj["content_type"] = content_type;

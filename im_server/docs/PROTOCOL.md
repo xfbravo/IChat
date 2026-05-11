@@ -32,75 +32,52 @@
 
 ## 2. 包头设计
 
-### 2.1 固定包头（12字节）
+### 2.1 固定包头（6字节）
 
 ```
-+----------------+----------------+----------------+----------------+
-|  Version (1B) |   Type (2B)   |   Length (4B)  |  Reserved (5B) |
-+----------------+----------------+----------------+----------------+
-      1                2                4                  5
++----------------+----------------+----------------+
+|   Type (2B)    |   Length (4B)  |   Body (N)     |
++----------------+----------------+----------------+
+       2                 4                N
 ```
 
 | 字段 | 长度 | 类型 | 说明 |
 |------|------|------|------|
-| Version | 1 | uint8 | 协议版本，当前为 0x01 |
 | Type | 2 | uint16 | 消息类型（大端序） |
 | Length | 4 | uint32 | 包体长度（大端序），不包含包头 |
-| Reserved | 5 | bytes | 保留字段，用于扩展或校验 |
+
+当前正式协议版本为 **v1**。v1 的版本不写入包头，而由实现和文档共同约定；后续如需升级包头，应新增协议版本并提供迁移说明，不能静默改变这 6 字节格式。
 
 ### 2.2 消息类型定义
 
 ```cpp
 enum class MsgType : uint16_t {
-    // ===== 认证消息 (0x0001 - 0x00FF) =====
-    HEARTBEAT         = 0x0001,   // 心跳
-    LOGIN_REQ         = 0x0002,   // 登录请求
-    LOGIN_RSP         = 0x8002,   // 登录响应
-    REGISTER_REQ      = 0x0003,   // 注册请求
-    REGISTER_RSP      = 0x8003,   // 注册响应
-    LOGOUT            = 0x0004,   // 登出
-    TOKEN_REFRESH     = 0x0005,   // Token刷新
+    HEARTBEAT            = 0x0001,  // 心跳
+    LOGIN                = 0x0002,  // 登录请求
+    REGISTER_REQ         = 0x0003,  // 注册请求
+    LOGOUT               = 0x0004,  // 登出
+    CHAT_MESSAGE         = 0x0005,  // 统一聊天消息，content_type 区分 text/image/file/voice
+    TEXT                 = 0x0005,  // 旧名称，仅兼容
+    IMAGE                = 0x0006,  // 旧媒体类型，仅兼容；新实现使用 CHAT_MESSAGE + content_type=image
+    FILE                 = 0x0007,  // 旧媒体类型，仅兼容；新实现使用 CHAT_MESSAGE + content_type=file
+    VOICE                = 0x0008,  // 旧媒体类型，仅兼容；新实现使用 CHAT_MESSAGE + content_type=voice
+    ACK                  = 0x0009,  // 消息确认
+    FRIEND_REQUEST       = 0x000A,  // 发送好友请求
+    GET_FRIEND_LIST      = 0x000B,  // 获取好友列表
+    GET_FRIEND_REQUESTS  = 0x000C,  // 获取好友请求列表
+    FRIEND_REQUEST_RSP   = 0x000D,  // 响应好友请求
+    DELETE_FRIEND        = 0x000E,  // 删除好友
+    GET_CHAT_HISTORY     = 0x000F,  // 获取聊天记录
+    GET_OFFLINE_MESSAGES = 0x0010,  // 获取离线消息
 
-    // ===== 好友/群组消息 (0x0100 - 0x01FF) =====
-    FRIEND_LIST       = 0x0101,   // 好友列表请求
-    FRIEND_LIST_RSP   = 0x8101,   // 好友列表响应
-    GROUP_LIST        = 0x0102,   // 群组列表请求
-    GROUP_LIST_RSP    = 0x8102,   // 群组列表响应
-    ADD_FRIEND        = 0x0103,   // 添加好友
-    ADD_FRIEND_RSP    = 0x8103,   // 添加好友响应
-    CREATE_GROUP      = 0x0104,   // 创建群组
-    CREATE_GROUP_RSP   = 0x8104,   // 创建群组响应
-    JOIN_GROUP        = 0x0105,   // 加入群组
-    JOIN_GROUP_RSP    = 0x8105,   // 加入群组响应
-
-    // ===== 聊天消息 (0x0200 - 0x02FF) =====
-    P2P_MSG           = 0x0201,   // 单聊消息
-    P2P_MSG_ACK      = 0x8201,   // 单聊消息已收到确认
-    GROUP_MSG         = 0x0202,   // 群聊消息
-    GROUP_MSG_ACK    = 0x8202,   // 群聊消息已收到确认
-    MSG_RECALL        = 0x0203,   // 消息撤回
-    MSG_READ          = 0x0204,   // 消息已读
-
-    // ===== 文件/媒体消息 (0x0300 - 0x03FF) =====
-    FILE_TRANS_REQ    = 0x0301,   // 文件传输请求
-    FILE_TRANS_RSP    = 0x8301,   // 文件传输响应
-    FILE_TRANS_DATA   = 0x0302,   // 文件数据（分片）
-    FILE_TRANS_END    = 0x0303,   // 文件传输结束
-    IMAGE_MSG         = 0x0304,   // 图片消息（缩略图）
-    VOICE_MSG         = 0x0305,   // 语音消息
-    VIDEO_MSG         = 0x0306,   // 视频消息（metadata）
-
-    // ===== 音视频 (0x0400 - 0x04FF) =====
-    CALL_INVITE       = 0x0401,   // 呼叫邀请
-    CALL_RINGING      = 0x0402,   // 响铃
-    CALL_ACCEPT       = 0x0403,   // 接听
-    CALL_REJECT       = 0x0404,   // 拒绝
-    CALL_HANGUP       = 0x0405,   // 挂断
-    CALL_SDP          = 0x0406,   // SDP 交换（WebRTC）
-    CALL_ICE          = 0x0407,   // ICE 候选交换
-
-    // ===== 错误响应 (0x8000 - 0x8FFF) =====
-    ERROR             = 0x8000,   // 通用错误
+    LOGIN_RSP            = 0x8002,  // 登录响应
+    REGISTER_RSP         = 0x8003,  // 注册响应
+    FRIEND_LIST_RSP      = 0x800A,  // 好友列表响应
+    FRIEND_REQUEST_NEW   = 0x800B,  // 新好友请求通知
+    FRIEND_LIST_UPDATE   = 0x800C,  // 好友列表更新通知
+    ERROR                = 0x800F,  // 错误响应
+    CHAT_HISTORY_RSP     = 0x8010,  // 聊天记录响应
+    OFFLINE_MESSAGE      = 0x8011,  // 离线消息推送
 };
 ```
 
@@ -187,9 +164,9 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.4 单聊消息
+### 3.4 统一聊天消息
 
-**发送请求 (P2P_MSG)**:
+**发送请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
 {
     "msg_id": "uuid-msg-001",
@@ -202,7 +179,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-**已收到确认 (P2P_MSG_ACK)**:
+**已收到确认 (ACK / 0x0009)**:
 ```json
 {
     "msg_id": "uuid-msg-001",
@@ -230,9 +207,11 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.5 群聊消息
+### 3.5 群聊消息（规划）
 
-**发送请求 (GROUP_MSG)**:
+当前代码尚未实现群聊专用消息类型。后续实现时仍应复用 `CHAT_MESSAGE` 的正文结构，通过 `chat_type` 和 `group_id` 区分群聊，而不是新增与媒体类型绑定的包头类型。
+
+**建议请求体 (CHAT_MESSAGE / 0x0005)**:
 ```json
 {
     "msg_id": "uuid-msg-002",
@@ -264,9 +243,33 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.6 文件传输
+### 3.6 文件/媒体消息
 
-#### 3.6.1 文件传输请求
+图片、文件、语音、视频都通过 `CHAT_MESSAGE / 0x0005` 发送，`content_type` 决定内容类型。旧的 `IMAGE(0x0006)`、`FILE(0x0007)`、`VOICE(0x0008)` 仅用于兼容旧客户端，服务端会按统一聊天消息处理并以 `CHAT_MESSAGE` 转发。
+
+#### 3.6.1 文件消息
+
+**请求 (CHAT_MESSAGE / 0x0005)**:
+```json
+{
+    "msg_id": "uuid-msg-file-001",
+    "from_user_id": "user_001",
+    "to_user_id": "user_002",
+    "content_type": "file",
+    "content": "https://cdn.example.com/files/uuid-msg-file-001",
+    "file": {
+        "name": "document.pdf",
+        "size": 1048576,
+        "hash": "sha256_hash",
+        "mime_type": "application/pdf"
+    },
+    "client_time": 1713900000
+}
+```
+
+#### 3.6.2 大文件分片（规划）
+
+当前代码尚未实现独立文件分片协议；以下为规划接口，不能与当前正式 v1 代码混用。
 
 **请求 (FILE_TRANS_REQ)**:
 ```json
@@ -294,7 +297,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.6.2 文件分片数据
+#### 3.6.3 文件分片数据
 
 **请求 (FILE_TRANS_DATA)**:
 ```json
@@ -308,7 +311,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.6.3 传输完成
+#### 3.6.4 传输完成
 
 **请求 (FILE_TRANS_END)**:
 ```json
@@ -325,7 +328,7 @@ enum class MsgType : uint16_t {
 
 ### 3.7 图片消息
 
-**请求 (IMAGE_MSG)**:
+**请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
 {
     "msg_id": "uuid-msg-003",
@@ -356,7 +359,7 @@ enum class MsgType : uint16_t {
 
 ### 3.8 语音消息
 
-**请求 (VOICE_MSG)**:
+**请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
 {
     "msg_id": "uuid-msg-004",
@@ -491,13 +494,13 @@ enum class MsgType : uint16_t {
 ```
 用户A (user_001)                          用户B (user_002)
    |                                              |
-   |  1. 发送 P2P_MSG                            |
+   |  1. 发送 CHAT_MESSAGE                       |
    |     msg_id: "uuid-001"                      |
    |--------------------------------------------->|
    |                                              |
    |                         服务器转发消息给B    |
    |                                              |
-   |  2. 接收 P2P_MSG_ACK (msg_id确认)           |
+   |  2. 接收 ACK (msg_id确认)                   |
    |     code: 0                                  |
    |<---------------------------------------------|  (A 知道服务器已收到)
    |                                              |
@@ -510,7 +513,7 @@ enum class MsgType : uint16_t {
 **消息完整流转**:
 
 ```
-[客户端A] --P2P_MSG--> [服务器] --P2P_MSG--> [客户端B]
+[客户端A] --CHAT_MESSAGE--> [服务器] --CHAT_MESSAGE--> [客户端B]
                 |                    |
                 v                    v
          [存储消息到DB]        [推送通知]
@@ -527,7 +530,7 @@ enum class MsgType : uint16_t {
 ```
 用户A                                    服务器                           用户B, C, D
    |                                        |                                |
-   |  1. 发送 GROUP_MSG                     |                                |
+   |  1. 发送 CHAT_MESSAGE                  |                                |
    |     group_id: "group_001"             |                                |
    |--------------------------------------->|                                |
    |                                        |                                |
@@ -535,10 +538,10 @@ enum class MsgType : uint16_t {
    |                   3. 查询群成员列表    |                                |
    |                   4. 转发消息给每个成员 |                                |
    |                                        |                                |
-   |  5. GROUP_MSG_ACK                     |                                |
+   |  5. ACK                               |                                |
    |<---------------------------------------|                                |
    |                                        |                                |
-   |                              6. GROUP_MSG (转发给B, C, D)              |
+   |                              6. CHAT_MESSAGE (转发给B, C, D)           |
    |                             ------------------------------------------>|
 ```
 
@@ -547,32 +550,32 @@ enum class MsgType : uint16_t {
 ```
 发送方                                              服务器
    |                                                    |
-   |  1. 发送 FILE_TRANS_REQ                           |
+   |  1. 发送 CHAT_MESSAGE(content_type=file)           |
    |     file_name: "doc.pdf", size: 1048576           |
    |-------------------------------------------------->|
    |                                                    |
-   |                              2. 验证 & 创建传输任务                     |
-   |                              3. 返回 download_url                       |
+   |                              2. 保存文件消息元数据                      |
+   |                              3. 按 CHAT_MESSAGE 转发                    |
    |                                                    |
-   |  接收 FILE_TRANS_RSP                              |
-   |  { download_url: "https://cdn..." }                |
+   |  接收 CHAT_MESSAGE                                |
+   |  { content_type: "file", content: "https://cdn..." } |
    |<--------------------------------------------------|
    |                                                    |
-   |  4. 分片上传 FILE_TRANS_DATA                      |
+   |  4. 大文件分片上传为规划能力，当前 v1 未实现       |
    |     chunk_index: 0, data: "base64..."             |
    |-------------------------------------------------->|
    |  5. chunk_index: 1                                |
    |-------------------------------------------------->|
    |  ... (继续上传剩余分片)                           |
    |                                                    |
-   |  N. 发送 FILE_TRANS_END                          |
+   |  N. 发送文件完成通知（规划）                       |
    |     file_hash: "sha256..."                        |
    |-------------------------------------------------->|
    |                                                    |
    |                              验证 file_hash       |
    |                              生成 CDN URL          |
    |                                                    |
-   |  接收 FILE_TRANS_END_ACK                          |
+   |  接收 ACK（规划）                                  |
    |<--------------------------------------------------|
 ```
 
@@ -616,8 +619,8 @@ TCP 是流式协议，可能出现：
 
 ```
 ┌──────────┬────────────┬─────────────────────────┐
-│  Header  │   Length  │        Body            │
-│  12字节   │   4字节    │   Length 指定的字节数  │
+│   Type   │   Length  │        Body            │
+│   2字节   │   4字节    │   Length 指定的字节数  │
 └──────────┴────────────┴─────────────────────────┘
 ```
 
@@ -627,13 +630,13 @@ TCP 是流式协议，可能出现：
 ```
 1. 序列化消息体 (JSON)
 2. 计算长度
-3. 组装: [Version(1)] [Type(2)] [Length(4)] [Reserved(5)] [Body]
+3. 组装: [Type(2)] [Length(4)] [Body]
 4. 发送
 ```
 
 **接收端**:
 ```
-1. 读取 12 字节包头
+1. 读取 6 字节包头
 2. 解析 Type 和 Length
 3. 根据 Length 读取对应字节数
 4. 反序列化 Body
@@ -645,28 +648,28 @@ TCP 是流式协议，可能出现：
 
 假设发送两条消息：
 
-**消息1**: Type=0x0201 (P2P_MSG), Body=`{"content":"hi"}`
+**消息1**: Type=0x0005 (CHAT_MESSAGE), Body=`{"content":"hi"}`
 ```
-0x01 0x02 0x01 0x00 0x00 0x00 0x0D ...(13字节body)...
-[VER][  TYPE  ][     LENGTH     ][RESERVED][   BODY   ]
+0x00 0x05 0x00 0x00 0x00 0x10 ...(16字节body)...
+[ TYPE ][     LENGTH     ][   BODY   ]
 ```
 
-**消息2**: Type=0x0201 (P2P_MSG), Body=`{"content":"hello"}`
+**消息2**: Type=0x0005 (CHAT_MESSAGE), Body=`{"content":"hello"}`
 ```
-0x01 0x02 0x01 0x00 0x00 0x00 0x0F ...(15字节body)...
+0x00 0x05 0x00 0x00 0x00 0x13 ...(19字节body)...
 ```
 
 **接收端缓冲区状态**:
 ```
-[包头1][13字节body][包头2][15字节body]
-  12        13           12        15   = 53 字节
+[包头1][16字节body][包头2][19字节body]
+   6        16            6        19   = 47 字节
 ```
 
 接收端循环处理：
-1. 读取12字节 → 获取 Type=0x0201, Length=13
-2. 读取13字节 → 完整消息1
-3. 继续处理剩余数据 → 获取 Type=0x0201, Length=15
-4. 读取15字节 → 完整消息2
+1. 读取6字节 → 获取 Type=0x0005, Length=16
+2. 读取16字节 → 完整消息1
+3. 继续处理剩余数据 → 获取 Type=0x0005, Length=19
+4. 读取19字节 → 完整消息2
 
 ---
 
@@ -699,7 +702,7 @@ message LoginRsp {
     uint64 expires_in = 5;
 }
 
-message P2PMessage {
+message ChatMessage {
     string msg_id = 1;
     string from_user_id = 2;
     string to_user_id = 3;

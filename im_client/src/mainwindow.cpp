@@ -81,6 +81,8 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onChatHistoryReceived);
     connect(tcp_client_, &TcpClient::offlineMessageReceived,
             this, &MainWindow::onOfflineMessageReceived);
+    connect(tcp_client_, &TcpClient::messageAckReceived,
+            this, &MainWindow::onMessageAckReceived);
 }
 
 void MainWindow::createNavigationBar() {
@@ -368,27 +370,23 @@ void MainWindow::onSendClicked() {
         return;
     }
 
-    tcp_client_->sendChatMessage(current_chat_target_, "text", message);
-    appendMessage(user_nickname_, message, true);
+    QString msg_id = tcp_client_->sendChatMessage(current_chat_target_, "text", message);
+    if (msg_id.isEmpty()) {
+        appendMessage(user_nickname_, message, true, QString(), "failed");
+    } else {
+        appendMessage(user_nickname_, message, true, msg_id, "sending");
+    }
     message_input_->clear();
 }
 
-void MainWindow::onChatMessageReceived(const QString& from_user_id, const QString& content) {
-    // 更新聊天列表
-    bool found = false;
-    for (int i = 0; i < chat_list_widget_->count(); ++i) {
-        QListWidgetItem* item = chat_list_widget_->item(i);
-        QString item_id = item->data(Qt::UserRole).toString();
-        if (item_id == from_user_id) {
-            found = true;
-            break;
-        }
-    }
-
-    // 如果当前正在和该用户聊天，显示消息
-    if (from_user_id == current_chat_target_) {
-        appendMessage(from_user_id, content, false);
-    }
+void MainWindow::onChatMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id) {
+    ChatViewMessage message;
+    message.msg_id = msg_id;
+    message.from = from_user_id;
+    message.content = content;
+    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.is_mine = false;
+    addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
 }
 
 void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& history_json) {
@@ -407,16 +405,48 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
         QString content = msg["content"].toString();
         bool is_mine = (from_user_id == user_id_);
 
-        appendMessage(from_user_id, content, is_mine);
+        QString peer_id = is_mine ? target_id : from_user_id;
+        ChatViewMessage view_message;
+        view_message.msg_id = msg["msg_id"].toString();
+        view_message.from = from_user_id;
+        view_message.content = content;
+        view_message.time = msg["server_time"].toString();
+        view_message.is_mine = is_mine;
+        addMessageToConversation(peer_id, view_message, false);
     }
 }
 
-void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content) {
-    // 离线消息也显示在聊天界面
-    if (from_user_id == current_chat_target_) {
-        appendMessage(from_user_id, content, false);
+void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id) {
+    ChatViewMessage message;
+    message.msg_id = msg_id;
+    message.from = from_user_id;
+    message.content = content;
+    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.is_mine = false;
+    addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
+}
+
+void MainWindow::onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message) {
+    Q_UNUSED(code);
+    if (msg_id.isEmpty()) {
+        return;
     }
-    // 可以在这里添加通知
+
+    for (auto it = conversations_.begin(); it != conversations_.end(); ++it) {
+        for (ChatViewMessage& view_message : it->messages) {
+            if (view_message.msg_id != msg_id) continue;
+
+            view_message.status = status.isEmpty() ? "failed" : status;
+            if (view_message.status == "failed" && !message.isEmpty()) {
+                view_message.status = QString("failed:%1").arg(message);
+            }
+            if (it.key() == current_chat_target_) {
+                current_messages_ = it->messages;
+                renderChatMessages();
+            }
+            return;
+        }
+    }
 }
 
 void MainWindow::onLoadMoreMessages() {
@@ -429,14 +459,21 @@ void MainWindow::onLoadMoreMessages() {
 
 void MainWindow::onChatItemClicked(QListWidgetItem* item) {
     QString user_id = item->data(Qt::UserRole).toString();
-    QString nickname = item->text();
+    QString nickname = conversations_.contains(user_id) && !conversations_[user_id].title.isEmpty()
+        ? conversations_[user_id].title
+        : item->text();
     switchToChatWith(user_id, nickname);
 }
 
 void MainWindow::switchToChatWith(const QString& user_id, const QString& nickname) {
     current_chat_target_ = user_id;
     chat_target_label_->setText(nickname);
-    chat_display_->clear();
+    conversations_[user_id].title = nickname;
+    conversations_[user_id].unread = 0;
+    current_messages_ = conversations_[user_id].messages;
+    message_index_by_id_.clear();
+    renderChatMessages();
+    updateConversationItem(user_id);
     // 加载聊天记录
     tcp_client_->getChatHistory(user_id, 20, 0);
 }
@@ -445,6 +482,7 @@ void MainWindow::onDisconnected() {
     status_label_->setText("离线");
     message_input_->setEnabled(false);
     send_button_->setEnabled(false);
+    markSendingMessagesFailed("连接已断开");
 }
 
 void MainWindow::onAddContactClicked() {
@@ -478,7 +516,8 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString nickname = friend_obj["nickname"].toString();
 
         // 添加到聊天列表
-        QListWidgetItem* item = new QListWidgetItem(nickname);
+        conversations_[friend_id].title = nickname;
+        QListWidgetItem* item = new QListWidgetItem(conversationTitle(friend_id));
         item->setData(Qt::UserRole, friend_id);
         chat_list_widget_->addItem(item);
     }
@@ -492,7 +531,9 @@ void MainWindow::onFriendListReceived(const QString& json) {
     for (int i = 0; i < chat_list_widget_->count(); ++i) {
         QListWidgetItem* chatItem = chat_list_widget_->item(i);
         QString friend_id = chatItem->data(Qt::UserRole).toString();
-        QString nickname = chatItem->text();
+        QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
+            ? conversations_[friend_id].title
+            : chatItem->text();
 
         QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
         friendItem->setText(0, nickname);
@@ -637,22 +678,146 @@ void MainWindow::onLogoutClicked() {
     emit logout();
 }
 
-void MainWindow::appendMessage(const QString& from, const QString& content, bool is_mine) {
-    QString time = QDateTime::currentDateTime().toString("hh:mm:ss");
-    QString color = is_mine ? "#4CAF50" : "#2196F3";
-    QString align = is_mine ? "right" : "left";
+void MainWindow::appendMessage(const QString& from, const QString& content, bool is_mine,
+                               const QString& msg_id, const QString& status) {
+    ChatViewMessage message;
+    message.msg_id = msg_id;
+    message.from = from;
+    message.content = content;
+    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.status = status;
+    message.is_mine = is_mine;
 
-    QString html = QString(
-        "<div style='text-align: %1; margin: 5px 0;'>"
-        "<span style='font-size: 12px; color: #888;'>%2 %3</span>"
-        "<br/>"
-        "<span style='display: inline-block; padding: 8px 12px; "
-        "background-color: %4; color: white; border-radius: 8px; "
-        "max-width: 70%%; word-wrap: break-word;'>%5</span>"
-        "</div>"
-    ).arg(align, is_mine ? "我" : from, time, color, content.toHtmlEscaped());
+    QString peer_id = is_mine ? current_chat_target_ : from;
+    addMessageToConversation(peer_id, message, false);
+}
 
-    chat_display_->append(html);
+void MainWindow::addMessageToConversation(const QString& peer_id, const ChatViewMessage& message, bool count_unread) {
+    if (peer_id.isEmpty()) return;
+
+    ConversationState& conversation = conversations_[peer_id];
+    if (conversation.title.isEmpty()) {
+        conversation.title = peer_id;
+    }
+
+    if (!message.msg_id.isEmpty()) {
+        for (const ChatViewMessage& existing : conversation.messages) {
+            if (existing.msg_id == message.msg_id) {
+                updateConversationItem(peer_id);
+                return;
+            }
+        }
+    }
+
+    conversation.messages.append(message);
+    conversation.last_message = message.content;
+    if (count_unread) {
+        ++conversation.unread;
+    }
+
+    if (peer_id == current_chat_target_) {
+        conversation.unread = 0;
+        current_messages_ = conversation.messages;
+        message_index_by_id_.clear();
+        for (int i = 0; i < current_messages_.size(); ++i) {
+            if (!current_messages_[i].msg_id.isEmpty()) {
+                message_index_by_id_[current_messages_[i].msg_id] = i;
+            }
+        }
+        renderChatMessages();
+    }
+
+    updateConversationItem(peer_id);
+}
+
+QString MainWindow::conversationTitle(const QString& peer_id) const {
+    auto it = conversations_.constFind(peer_id);
+    if (it == conversations_.constEnd()) return peer_id;
+
+    const ConversationState& conversation = it.value();
+    QString title = conversation.title.isEmpty() ? peer_id : conversation.title;
+    if (conversation.unread > 0) {
+        title = QString("%1 (%2)").arg(title).arg(conversation.unread);
+    }
+    if (!conversation.last_message.isEmpty()) {
+        title = QString("%1\n%2").arg(title, conversation.last_message);
+    }
+    return title;
+}
+
+void MainWindow::updateConversationItem(const QString& peer_id) {
+    if (peer_id.isEmpty()) return;
+
+    for (int i = 0; i < chat_list_widget_->count(); ++i) {
+        QListWidgetItem* item = chat_list_widget_->item(i);
+        if (item->data(Qt::UserRole).toString() == peer_id) {
+            item->setText(conversationTitle(peer_id));
+            return;
+        }
+    }
+
+    QListWidgetItem* item = new QListWidgetItem(conversationTitle(peer_id));
+    item->setData(Qt::UserRole, peer_id);
+    chat_list_widget_->addItem(item);
+}
+
+void MainWindow::renderChatMessages() {
+    chat_display_->clear();
+
+    for (const ChatViewMessage& message : current_messages_) {
+        QString color = message.is_mine ? "#4CAF50" : "#2196F3";
+        QString align = message.is_mine ? "right" : "left";
+        QString status = statusText(message.status);
+        QString status_html = status.isEmpty()
+            ? QString()
+            : QString("<br/><span style='font-size: 12px; color: #888;'>%1</span>").arg(status.toHtmlEscaped());
+
+        QString html = QString(
+            "<div style='text-align: %1; margin: 5px 0;'>"
+            "<span style='font-size: 12px; color: #888;'>%2 %3</span>"
+            "<br/>"
+            "<span style='display: inline-block; padding: 8px 12px; "
+            "background-color: %4; color: white; border-radius: 8px; "
+            "max-width: 70%%; word-wrap: break-word;'>%5</span>"
+            "%6"
+            "</div>"
+        ).arg(align,
+              message.is_mine ? "我" : message.from,
+              message.time,
+              color,
+              message.content.toHtmlEscaped(),
+              status_html);
+
+        chat_display_->append(html);
+    }
+}
+
+QString MainWindow::statusText(const QString& status) const {
+    if (status == "sending") return "发送中";
+    if (status == "sent") return "已发送";
+    if (status == "delivered") return "已送达";
+    if (status == "read") return "已读";
+    if (status == "failed") return "发送失败";
+    if (status.startsWith("failed:")) return QString("发送失败：%1").arg(status.mid(7));
+    return QString();
+}
+
+void MainWindow::markSendingMessagesFailed(const QString& reason) {
+    bool changed = false;
+    for (auto it = conversations_.begin(); it != conversations_.end(); ++it) {
+        for (ChatViewMessage& message : it->messages) {
+            if (message.is_mine && message.status == "sending") {
+                message.status = reason.isEmpty() ? "failed" : QString("failed:%1").arg(reason);
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        if (!current_chat_target_.isEmpty()) {
+            current_messages_ = conversations_[current_chat_target_].messages;
+        }
+        renderChatMessages();
+    }
 }
 
 void MainWindow::loadChatList() {
@@ -670,7 +835,9 @@ void MainWindow::loadContacts() {
         for (int i = 0; i < chat_list_widget_->count(); ++i) {
             QListWidgetItem* chatItem = chat_list_widget_->item(i);
             QString friend_id = chatItem->data(Qt::UserRole).toString();
-            QString nickname = chatItem->text();
+            QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
+                ? conversations_[friend_id].title
+                : chatItem->text();
 
             QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
             friendItem->setText(0, nickname);

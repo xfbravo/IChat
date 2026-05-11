@@ -15,6 +15,8 @@
 #include <QLabel>
 #include <QStackedWidget>
 #include <QWidget>
+#include <QHash>
+#include <QVector>
 #include "tcpclient.h"
 
 class MainWindow : public QMainWindow {
@@ -35,11 +37,12 @@ private slots:
 
     // Chat functions
     void onSendClicked();
-    void onChatMessageReceived(const QString& from_user_id, const QString& content);
+    void onChatMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
     void onChatItemClicked(QListWidgetItem* item);
     void onDisconnected();
     void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
-    void onOfflineMessageReceived(const QString& from_user_id, const QString& content);
+    void onOfflineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
+    void onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
     void onLoadMoreMessages();
 
     // Contact functions
@@ -53,11 +56,27 @@ private slots:
     void onLogoutClicked();
 
 private:
+    struct ChatViewMessage {
+        QString msg_id;
+        QString from;
+        QString content;
+        QString time;
+        QString status;
+        bool is_mine = false;
+    };
+
     void createNavigationBar();
     void createMessageView();
     void createContactView();
     void createPlaceholderView(QWidget*& widget, const QString& text);
-    void appendMessage(const QString& from, const QString& content, bool is_mine);
+    void appendMessage(const QString& from, const QString& content, bool is_mine,
+                       const QString& msg_id = QString(), const QString& status = QString());
+    void renderChatMessages();
+    QString statusText(const QString& status) const;
+    void markSendingMessagesFailed(const QString& reason);
+    void addMessageToConversation(const QString& peer_id, const ChatViewMessage& message, bool count_unread);
+    void updateConversationItem(const QString& peer_id);
+    QString conversationTitle(const QString& peer_id) const;
     void loadChatList();
     void loadContacts();
     void switchToChatWith(const QString& user_id, const QString& nickname);
@@ -94,4 +113,15 @@ private:
 
     // Status
     QLabel* status_label_;
+
+    QVector<ChatViewMessage> current_messages_;
+    QHash<QString, int> message_index_by_id_;
+
+    struct ConversationState {
+        QString title;
+        QVector<ChatViewMessage> messages;
+        int unread = 0;
+        QString last_message;
+    };
+    QHash<QString, ConversationState> conversations_;
 };

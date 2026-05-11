@@ -8,8 +8,100 @@
 #include <thread>
 #include <chrono>
 #include <sstream>
+#include <ctime>
+#include <stdexcept>
+#include <vector>
+#include <boost/json.hpp>
 
 namespace im {
+
+namespace {
+
+namespace json = boost::json;
+
+json::object parse_json_object(const std::string& body) {
+    json::value value = json::parse(body);
+    if (!value.is_object()) {
+        throw std::runtime_error("JSON body must be an object");
+    }
+    return value.as_object();
+}
+
+std::string json_string(const json::object& obj, const char* key, const std::string& default_value = "") {
+    auto it = obj.find(key);
+    if (it == obj.end() || !it->value().is_string()) {
+        return default_value;
+    }
+
+    const auto& value = it->value().as_string();
+    return std::string(value.data(), value.size());
+}
+
+int64_t json_int64(const json::object& obj, const char* key, int64_t default_value = 0) {
+    auto it = obj.find(key);
+    if (it == obj.end()) {
+        return default_value;
+    }
+
+    const json::value& value = it->value();
+    if (value.is_int64()) return value.as_int64();
+    if (value.is_uint64()) return static_cast<int64_t>(value.as_uint64());
+    if (value.is_double()) return static_cast<int64_t>(value.as_double());
+    return default_value;
+}
+
+bool json_bool(const json::object& obj, const char* key, bool default_value = false) {
+    auto it = obj.find(key);
+    if (it == obj.end() || !it->value().is_bool()) {
+        return default_value;
+    }
+    return it->value().as_bool();
+}
+
+std::string json_response(int code, const std::string& message) {
+    json::object rsp;
+    rsp["code"] = code;
+    rsp["message"] = message;
+    return json::serialize(rsp);
+}
+
+std::string message_ack(const std::string& msg_id, const std::string& status,
+                        int code, const std::string& message) {
+    json::object rsp;
+    rsp["msg_id"] = msg_id;
+    rsp["status"] = status;
+    rsp["code"] = code;
+    rsp["message"] = message;
+    return json::serialize(rsp);
+}
+
+std::string sql_escape(MYSQL* mysql, const std::string& value) {
+    std::string escaped;
+    escaped.resize(value.size() * 2 + 1);
+    unsigned long length = mysql_real_escape_string(
+        mysql, escaped.data(), value.data(), static_cast<unsigned long>(value.size()));
+    escaped.resize(length);
+    return escaped;
+}
+
+int chat_content_type_code(const std::string& content_type) {
+    if (content_type == "image") return 2;
+    if (content_type == "file") return 3;
+    if (content_type == "voice") return 4;
+    if (content_type == "video") return 5;
+    return 1;
+}
+
+std::string default_content_type(MsgType type) {
+    switch (type) {
+        case MsgType::IMAGE: return "image";
+        case MsgType::FILE: return "file";
+        case MsgType::VOICE: return "voice";
+        default: return "text";
+    }
+}
+
+} // namespace
 
 Server::Server(uint16_t port, std::size_t thread_count, DbPool& db_pool)
     : port_(port)
@@ -80,14 +172,21 @@ void Server::stop() {
     boost::system::error_code ec;
     acceptor_.close(ec);
 
-    // 关闭所有会话
+    // 关闭所有会话。先移出 map，再逐个 close，避免 close() 回调 remove_session() 时自锁。
+    std::vector<Session::Ptr> sessions_to_close;
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
         for (auto& [user_id, session] : sessions_) {
-            session->close();
+            sessions_to_close.push_back(session);
+        }
+        for (auto& [endpoint, session] : endpoints_) {
+            sessions_to_close.push_back(session);
         }
         sessions_.clear();
         endpoints_.clear();
+    }
+    for (auto& session : sessions_to_close) {
+        session->close();
     }
 
     // 停止线程池
@@ -160,50 +259,28 @@ void Server::register_default_handlers() {
     dispatcher_.register_handler(MsgType::LOGIN, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到登录请求: " << msg.body << std::endl;
 
-        // 解析登录请求 JSON
-        // 格式: {"user_id":"xxx","password":"xxx"}
         std::string user_id, password;
-
-        // 简单解析 JSON（实际应用应使用 JSON 库）
-        std::string body = msg.body;
-
-        // 解析 user_id：先找 ":"user_id":" ，然后找值
-        size_t uid_pos = body.find("\"user_id\":");
-        if (uid_pos != std::string::npos) {
-            size_t value_start = body.find("\"", uid_pos + 10);  // 10 = strlen("\"user_id\":")
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    user_id = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
-        }
-
-        // 解析 password (LOGIN)
-        size_t pwd_pos = body.find("\"password\":");
-        if (pwd_pos != std::string::npos) {
-            size_t value_start = body.find("\"", pwd_pos + 11);  // "password": 是11个字符
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    password = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            user_id = json_string(req, "user_id");
+            password = json_string(req, "password");
+        } catch (const std::exception& e) {
+            session->send(MsgType::LOGIN_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         // 调用用户服务验证登录
         LoginResult login_result = user_service_.login(user_id, password);
 
-        // 构建响应 JSON
-        std::ostringstream rsp;
-        rsp << "{\"code\":" << login_result.code
-            << ",\"message\":\"" << login_result.message << "\"";
+        json::object rsp;
+        rsp["code"] = login_result.code;
+        rsp["message"] = login_result.message;
 
         if (login_result.code == 0) {
-            rsp << ",\"user_id\":\"" << login_result.user_id << "\""
-                << ",\"nickname\":\"" << login_result.nickname << "\""
-                << ",\"avatar_url\":\"" << login_result.avatar_url << "\""
-                << ",\"token\":\"" << login_result.token << "\"";
+            rsp["user_id"] = login_result.user_id;
+            rsp["nickname"] = login_result.nickname;
+            rsp["avatar_url"] = login_result.avatar_url;
+            rsp["token"] = login_result.token;
 
             // 注册会话
             {
@@ -221,6 +298,7 @@ void Server::register_default_handlers() {
             user_service_.update_login_info(login_result.user_id, "0.0.0.0");
 
             std::cout << "[Server] 用户登录成功: " << login_result.user_id << std::endl;
+            session->send(MsgType::LOGIN_RSP, json::serialize(rsp));
 
             // 发送离线消息
             std::string offline_msgs = user_service_.get_offline_messages(login_result.user_id);
@@ -228,79 +306,45 @@ void Server::register_default_handlers() {
                 std::cout << "[Server] 发送离线消息给: " << login_result.user_id << std::endl;
                 session->send(MsgType::OFFLINE_MESSAGE, offline_msgs);
             }
+            return;
         }
 
-        rsp << "}";
-
-        session->send(MsgType::LOGIN_RSP, rsp.str());
+        session->send(MsgType::LOGIN_RSP, json::serialize(rsp));
     });
 
     // 注册消息处理
     dispatcher_.register_handler(MsgType::REGISTER_REQ, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到注册请求: " << msg.body << std::endl;
 
-        // 解析注册请求 JSON
-        // 格式: {"phone":"xxx","nickname":"xxx","password":"xxx"}
         std::string phone, nickname, password;
-
-        std::string body = msg.body;
-
-        // 解析 phone
-        size_t phone_pos = body.find("\"phone\":");
-        if (phone_pos != std::string::npos) {
-            size_t value_start = body.find("\"", phone_pos + 8);  // "phone": 是8个字符
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    phone = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
-        }
-
-        // 解析 nickname
-        size_t name_pos = body.find("\"nickname\":");
-        if (name_pos != std::string::npos) {
-            size_t value_start = body.find("\"", name_pos + 10);  // "nickname": 是10个字符
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    nickname = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
-        }
-
-        // 解析 password
-        size_t pwd_pos = body.find("\"password\":");
-        if (pwd_pos != std::string::npos) {
-            size_t value_start = body.find("\"", pwd_pos + 11);  // "password": 是11个字符
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    password = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            phone = json_string(req, "phone");
+            nickname = json_string(req, "nickname");
+            password = json_string(req, "password");
+        } catch (const std::exception& e) {
+            session->send(MsgType::REGISTER_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         // 调用用户服务注册
         LoginResult reg_result = user_service_.register_user(phone, nickname, password);
 
-        // 构建响应 JSON
-        std::ostringstream rsp;
-        rsp << "{\"code\":" << reg_result.code
-            << ",\"message\":\"" << reg_result.message << "\"";
+        json::object rsp;
+        rsp["code"] = reg_result.code;
+        rsp["message"] = reg_result.message;
 
         if (reg_result.code == 0) {
-            rsp << ",\"user_id\":\"" << reg_result.user_id << "\"";
+            rsp["user_id"] = reg_result.user_id;
             std::cout << "[Server] 用户注册成功: " << reg_result.user_id << std::endl;
         }
 
-        rsp << "}";
-
-        session->send(MsgType::REGISTER_RSP, rsp.str());
+        session->send(MsgType::REGISTER_RSP, json::serialize(rsp));
     });
 
     // 获取好友列表
     dispatcher_.register_handler(MsgType::GET_FRIEND_LIST, [this](std::shared_ptr<Session> session, const Message& msg) {
+        (void)msg;
         std::cout << "[Server] 收到获取好友列表请求: " << session->user_id() << std::endl;
         std::string friend_list = user_service_.get_friend_list(session->user_id());
         session->send(MsgType::FRIEND_LIST_RSP, friend_list);
@@ -321,39 +365,14 @@ void Server::register_default_handlers() {
         std::string friend_id;
         int limit = 20;
         int64_t before_time = 0;
-
-        std::string body = msg.body;
-
-        // 解析 friend_id
-        size_t pos = body.find("\"friend_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 12;
-            size_t end = body.find("\"", pos);
-            if (end != std::string::npos) {
-                friend_id = body.substr(pos, end - pos);
-            }
-        }
-
-        // 解析 limit
-        pos = body.find("\"limit\":");
-        if (pos != std::string::npos) {
-            pos += 8;
-            size_t end = body.find(",", pos);
-            if (end == std::string::npos) end = body.find("}", pos);
-            if (end != std::string::npos) {
-                limit = std::stoi(body.substr(pos, end - pos));
-            }
-        }
-
-        // 解析 before_time
-        pos = body.find("\"before_time\":");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = body.find(",", pos);
-            if (end == std::string::npos) end = body.find("}", pos);
-            if (end != std::string::npos) {
-                before_time = std::stoll(body.substr(pos, end - pos));
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            friend_id = json_string(req, "friend_id");
+            limit = static_cast<int>(json_int64(req, "limit", limit));
+            before_time = json_int64(req, "before_time", before_time);
+        } catch (const std::exception& e) {
+            session->send(MsgType::CHAT_HISTORY_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         std::string history = user_service_.get_chat_history(session->user_id(), friend_id, limit, before_time);
@@ -364,30 +383,14 @@ void Server::register_default_handlers() {
     dispatcher_.register_handler(MsgType::FRIEND_REQUEST, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到好友请求 from " << session->user_id() << ": " << msg.body << std::endl;
 
-        // 解析请求: {"phone":"xxx","remark":"xxx"}
         std::string phone, remark;
-        std::string body = msg.body;
-
-        size_t pos = body.find("\"phone\":");
-        if (pos != std::string::npos) {
-            size_t value_start = body.find("\"", pos + 8);
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    phone = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
-        }
-
-        pos = body.find("\"remark\":");
-        if (pos != std::string::npos) {
-            size_t value_start = body.find("\"", pos + 8);
-            if (value_start != std::string::npos) {
-                size_t value_end = body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    remark = body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            phone = json_string(req, "phone");
+            remark = json_string(req, "remark");
+        } catch (const std::exception& e) {
+            session->send(MsgType::FRIEND_REQUEST_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         // 根据手机号查找目标用户
@@ -395,9 +398,7 @@ void Server::register_default_handlers() {
         UserInfo target_user = user_service_.get_user_by_phone(phone);
         std::cout << "[Server] 查找结果: user_id=" << target_user.user_id << std::endl;
         if (target_user.user_id.empty()) {
-            std::ostringstream rsp;
-            rsp << "{\"code\":1,\"message\":\"用户不存在\"}";
-            session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+            session->send(MsgType::FRIEND_REQUEST_RSP, json_response(1, "用户不存在"));
             return;
         }
 
@@ -410,69 +411,70 @@ void Server::register_default_handlers() {
             session->user_id(), target_user.user_id, remark, current_user.nickname);
 
         std::cout << "[Server] 添加结果: code=" << result.code << ", message=" << result.message << std::endl;
-        std::ostringstream rsp;
-        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
-        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+        session->send(MsgType::FRIEND_REQUEST_RSP, json_response(result.code, result.message));
     });
 
     // 响应好友请求（同意/拒绝）
     dispatcher_.register_handler(MsgType::FRIEND_REQUEST_RSP, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到好友请求响应 from " << session->user_id() << ": " << msg.body << std::endl;
 
-        // 解析: {"request_id":"xxx","accept":true/false}
         std::string request_id;
         bool accept = false;
-
-        size_t pos = msg.body.find("\"request_id\":");
-        if (pos != std::string::npos) {
-            size_t value_start = msg.body.find("\"", pos + 12);
-            if (value_start != std::string::npos) {
-                size_t value_end = msg.body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    request_id = msg.body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
-        }
-
-        pos = msg.body.find("\"accept\":");
-        if (pos != std::string::npos) {
-            size_t value_start = pos + 9;  // 跳过 "\"accept\":" 的 9 个字符
-            if (msg.body.find("true", value_start) == value_start) {
-                accept = true;
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            request_id = json_string(req, "request_id");
+            accept = json_bool(req, "accept");
+        } catch (const std::exception& e) {
+            session->send(MsgType::FRIEND_REQUEST_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         std::cout << "[Server] 解析结果: request_id=" << request_id << ", accept=" << accept << std::endl;
 
         LoginResult result = user_service_.handle_friend_request(request_id, accept, session->user_id());
 
-        std::ostringstream rsp;
-        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
-        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+        session->send(MsgType::FRIEND_REQUEST_RSP, json_response(result.code, result.message));
     });
 
     // 删除好友
     dispatcher_.register_handler(MsgType::DELETE_FRIEND, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到删除好友请求 from " << session->user_id() << ": " << msg.body << std::endl;
 
-        // 解析: {"friend_id":"xxx"}
         std::string friend_id;
-        size_t pos = msg.body.find("\"friend_id\":");
-        if (pos != std::string::npos) {
-            size_t value_start = msg.body.find("\"", pos + 10);
-            if (value_start != std::string::npos) {
-                size_t value_end = msg.body.find("\"", value_start + 1);
-                if (value_end != std::string::npos) {
-                    friend_id = msg.body.substr(value_start + 1, value_end - value_start - 1);
-                }
-            }
+        try {
+            json::object req = parse_json_object(msg.body);
+            friend_id = json_string(req, "friend_id");
+        } catch (const std::exception& e) {
+            session->send(MsgType::FRIEND_REQUEST_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
         }
 
         LoginResult result = user_service_.delete_friend(session->user_id(), friend_id);
 
-        std::ostringstream rsp;
-        rsp << "{\"code\":" << result.code << ",\"message\":\"" << result.message << "\"}";
-        session->send(MsgType::FRIEND_REQUEST_RSP, rsp.str());
+        session->send(MsgType::FRIEND_REQUEST_RSP, json_response(result.code, result.message));
+    });
+
+    dispatcher_.register_handler(MsgType::OFFLINE_MESSAGE_ACK, [this](std::shared_ptr<Session> session, const Message& msg) {
+        if (session->user_id().empty()) {
+            session->send(MsgType::ERROR, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string msg_id;
+        try {
+            json::object req = parse_json_object(msg.body);
+            msg_id = json_string(req, "msg_id");
+        } catch (const std::exception& e) {
+            session->send(MsgType::ERROR, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        if (msg_id.empty()) {
+            session->send(MsgType::ERROR, json_response(400, "缺少 msg_id"));
+            return;
+        }
+
+        user_service_.mark_offline_messages_pushed(session->user_id(), msg_id);
     });
 
     // 登出消息处理
@@ -489,128 +491,108 @@ void Server::register_default_handlers() {
         session->close();
     });
 
-    // 文本消息处理
-    dispatcher_.register_handler(MsgType::TEXT, [this](std::shared_ptr<Session> session, const Message& msg) {
-        std::cout << "[Server] 收到文本消息 from " << session->user_id() << ": " << msg.body << std::endl;
+    auto chat_handler = [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到聊天消息 type=0x" << std::hex
+                  << static_cast<uint16_t>(msg.type) << std::dec
+                  << " from " << session->user_id() << ": " << msg.body << std::endl;
 
-        // 解析 JSON
-        std::string msg_id, to_user_id, content, content_type = "text";
-        int64_t client_time = 0;
+        json::object payload;
+        try {
+            payload = parse_json_object(msg.body);
+        } catch (const std::exception& e) {
+            session->send(MsgType::ACK, message_ack("", "failed", 400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
 
-        std::string body = msg.body;
+        std::string msg_id = json_string(payload, "msg_id");
+        std::string to_user_id = json_string(payload, "to_user_id");
+        std::string content_type = json_string(payload, "content_type", default_content_type(msg.type));
+        std::string content = json_string(payload, "content");
+        int64_t client_time = json_int64(payload, "client_time", static_cast<int64_t>(time(nullptr)));
 
-        // 解析 msg_id
-        size_t pos = body.find("\"msg_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 9;
-            size_t end = body.find("\"", pos);
-            if (end != std::string::npos) {
-                msg_id = body.substr(pos, end - pos);
+        if (session->user_id().empty()) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 401, "未登录"));
+            return;
+        }
+
+        if (content.empty()) {
+            auto content_it = payload.find("content");
+            if (content_it != payload.end() && !content_it->value().is_null()) {
+                content = json::serialize(content_it->value());
+            } else {
+                content = json::serialize(payload);
             }
         }
 
-        // 解析 to_user_id
-        pos = body.find("\"to_user_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = body.find("\"", pos);
-            if (end != std::string::npos) {
-                to_user_id = body.substr(pos, end - pos);
-            }
+        if (msg_id.empty() || to_user_id.empty()) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 400, "缺少 msg_id 或 to_user_id"));
+            return;
         }
 
-        // 解析 content
-        pos = body.find("\"content\":\"");
-        if (pos != std::string::npos) {
-            pos += 11;
-            size_t end = body.find("\"", pos);
-            if (end != std::string::npos) {
-                content = body.substr(pos, end - pos);
-            }
+        if (!user_service_.user_exists(to_user_id)) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 404, "目标用户不存在"));
+            return;
         }
 
-        // 解析 client_time
-        pos = body.find("\"client_time\":");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = body.find(",", pos);
-            if (end == std::string::npos) end = body.find("}", pos);
-            if (end != std::string::npos) {
-                client_time = std::stoll(body.substr(pos, end - pos));
-            }
+        if (!user_service_.are_friends(session->user_id(), to_user_id)) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "只能给好友发送消息"));
+            return;
         }
 
-        if (!to_user_id.empty() && !msg_id.empty()) {
-            // 保存消息到数据库
-            user_service_.save_message(msg_id, 1, 1, session->user_id(), to_user_id, content_type, content, client_time);
+        if (user_service_.is_blocked(to_user_id, session->user_id())
+            || user_service_.is_blocked(session->user_id(), to_user_id)) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "消息被拦截"));
+            return;
+        }
 
-            // 转发消息到目标用户，如果在线的话
-            if (!send_to_user(to_user_id, MsgType::TEXT, msg.body)) {
-                // 用户不在线，保存离线消息
-                std::cout << "[Server] 用户不在线，保存离线消息: " << to_user_id << std::endl;
-                auto conn_guard = db_pool_.get_connection();
-                MYSQL* mysql = conn_guard.get();
-                if (mysql) {
-                    std::ostringstream sql;
-                    sql << "INSERT INTO im_offline_message (user_id, msg_id, msg_type, chat_type, "
-                        << "from_user_id, to_user_id, content, client_time, server_time) "
-                        << "VALUES ('" << to_user_id << "', '" << msg_id << "', 1, 1, "
-                        << "'" << session->user_id() << "', '" << to_user_id << "', "
-                        << "'" << content << "', FROM_UNIXTIME(" << client_time << "), NOW())";
-                    mysql_query(mysql, sql.str().c_str());
-                }
-            }
-        }
-    });
+        payload["from_user_id"] = session->user_id();
+        payload["content_type"] = content_type;
+        payload["client_time"] = client_time;
+        const std::string forward_body = json::serialize(payload);
+        const int msg_type_code = chat_content_type_code(content_type);
 
-    // 图片/文件/语音消息处理（类似文本消息）
-    dispatcher_.register_handler(MsgType::IMAGE, [this](std::shared_ptr<Session> session, const Message& msg) {
-        std::cout << "[Server] 收到图片消息 from " << session->user_id() << std::endl;
-        std::string to_user_id;
-        size_t pos = msg.body.find("\"to_user_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = msg.body.find("\"", pos);
-            if (end != std::string::npos) {
-                to_user_id = msg.body.substr(pos, end - pos);
-            }
+        if (!user_service_.save_message(
+                msg_id, msg_type_code, 1, session->user_id(), to_user_id, content_type, content, client_time)) {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 500, "消息保存失败"));
+            return;
         }
-        if (!to_user_id.empty()) {
-            send_to_user(to_user_id, MsgType::IMAGE, msg.body);
-        }
-    });
 
-    dispatcher_.register_handler(MsgType::FILE, [this](std::shared_ptr<Session> session, const Message& msg) {
-        std::cout << "[Server] 收到文件消息 from " << session->user_id() << std::endl;
-        std::string to_user_id;
-        size_t pos = msg.body.find("\"to_user_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = msg.body.find("\"", pos);
-            if (end != std::string::npos) {
-                to_user_id = msg.body.substr(pos, end - pos);
-            }
+        // 聊天消息统一使用 CHAT_MESSAGE(0x0005) 传输，具体媒体类型由 content_type 区分。
+        if (send_to_user(to_user_id, MsgType::CHAT_MESSAGE, forward_body)) {
+            session->send(MsgType::ACK, message_ack(msg_id, "delivered", 0, "消息已送达"));
+            return;
         }
-        if (!to_user_id.empty()) {
-            send_to_user(to_user_id, MsgType::FILE, msg.body);
-        }
-    });
 
-    dispatcher_.register_handler(MsgType::VOICE, [this](std::shared_ptr<Session> session, const Message& msg) {
-        std::cout << "[Server] 收到语音消息 from " << session->user_id() << std::endl;
-        std::string to_user_id;
-        size_t pos = msg.body.find("\"to_user_id\":\"");
-        if (pos != std::string::npos) {
-            pos += 14;
-            size_t end = msg.body.find("\"", pos);
-            if (end != std::string::npos) {
-                to_user_id = msg.body.substr(pos, end - pos);
+        std::cout << "[Server] 用户不在线，保存离线消息: " << to_user_id << std::endl;
+        auto conn_guard = db_pool_.get_connection();
+        MYSQL* mysql = conn_guard.get();
+        if (mysql) {
+            std::ostringstream sql;
+            sql << "INSERT IGNORE INTO im_offline_message (user_id, msg_id, msg_type, chat_type, "
+                << "from_user_id, to_user_id, content, client_time, server_time) "
+                << "VALUES ('" << sql_escape(mysql, to_user_id) << "', "
+                << "'" << sql_escape(mysql, msg_id) << "', " << msg_type_code << ", 1, "
+                << "'" << sql_escape(mysql, session->user_id()) << "', "
+                << "'" << sql_escape(mysql, to_user_id) << "', "
+                << "'" << sql_escape(mysql, content) << "', "
+                << "FROM_UNIXTIME(" << client_time << "), NOW())";
+            if (mysql_query(mysql, sql.str().c_str())) {
+                std::cerr << "[Server] 保存离线消息失败: " << mysql_error(mysql) << std::endl;
+                session->send(MsgType::ACK, message_ack(msg_id, "failed", 500, "离线消息保存失败"));
+                return;
             }
+        } else {
+            session->send(MsgType::ACK, message_ack(msg_id, "failed", 500, "数据库连接失败"));
+            return;
         }
-        if (!to_user_id.empty()) {
-            send_to_user(to_user_id, MsgType::VOICE, msg.body);
-        }
-    });
+
+        session->send(MsgType::ACK, message_ack(msg_id, "sent", 0, "已保存为离线消息"));
+    };
+
+    dispatcher_.register_handler(MsgType::CHAT_MESSAGE, chat_handler);
+    dispatcher_.register_handler(MsgType::IMAGE, chat_handler);
+    dispatcher_.register_handler(MsgType::FILE, chat_handler);
+    dispatcher_.register_handler(MsgType::VOICE, chat_handler);
 
     std::cout << "[Server] 消息处理器注册完成" << std::endl;
 }
@@ -640,9 +622,18 @@ bool Server::send_to_user(const std::string& user_id, MsgType type, const std::s
 void Server::remove_session(Session::Ptr session) {
     std::lock_guard<std::mutex> lock(session_mutex_);
     if (!session->user_id().empty()) {
-        sessions_.erase(session->user_id());
+        auto it = sessions_.find(session->user_id());
+        if (it != sessions_.end() && it->second == session) {
+            sessions_.erase(it);
+        }
     }
-    endpoints_.erase(session->remote_endpoint());
+    for (auto it = endpoints_.begin(); it != endpoints_.end(); ) {
+        if (it->second == session) {
+            it = endpoints_.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 } // namespace im

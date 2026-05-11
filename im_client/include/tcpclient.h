@@ -86,9 +86,14 @@ public:
      * @param content_type 内容类型
      * @param content 内容
      */
-    void sendChatMessage(const QString& to_user_id,
-                         const QString& content_type,
-                         const QString& content);
+    QString sendChatMessage(const QString& to_user_id,
+                            const QString& content_type,
+                            const QString& content);
+
+    /**
+     * @brief 确认已收到离线消息
+     */
+    void ackOfflineMessage(const QString& msg_id);
 
     /**
      * @brief 发送好友请求
@@ -186,7 +191,7 @@ signals:
      * @param from_user_id 发送者
      * @param content 内容
      */
-    void chatMessageReceived(const QString& from_user_id, const QString& content);
+    void chatMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
 
     /**
      * @brief 心跳响应信号
@@ -227,7 +232,12 @@ signals:
     /**
      * @brief 收到离线消息信号
      */
-    void offlineMessageReceived(const QString& from_user_id, const QString& content);
+    void offlineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
+
+    /**
+     * @brief 消息发送状态回执
+     */
+    void messageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
 
 private slots:
     /**

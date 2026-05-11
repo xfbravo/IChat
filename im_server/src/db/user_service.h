@@ -74,6 +74,16 @@ public:
     bool user_exists(const std::string& user_id);
 
     /**
+     * @brief 检查两个用户是否是有效好友
+     */
+    bool are_friends(const std::string& user_id, const std::string& friend_id);
+
+    /**
+     * @brief 检查 user_id 是否拉黑了 block_user_id
+     */
+    bool is_blocked(const std::string& user_id, const std::string& block_user_id);
+
+    /**
      * @brief 更新最后登录信息
      */
     void update_login_info(const std::string& user_id, const std::string& ip);

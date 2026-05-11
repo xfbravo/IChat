@@ -46,6 +46,8 @@ void Session::close() {
     std::cout << "[Session] 会话关闭: " << remote_endpoint() << std::endl;
     state_ = State::CLOSING;
 
+    server_.remove_session(shared_from_this());
+
     // 取消心跳定时器（返回被取消的异步操作数量）
     heartbeat_timer_.cancel();
 

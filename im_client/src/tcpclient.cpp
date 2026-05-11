@@ -156,15 +156,28 @@ void TcpClient::registerUser(const QString& phone, const QString& nickname, cons
     sendMessage(MsgType::REGISTER_REQ, body);
 }
 
-void TcpClient::sendChatMessage(const QString& to_user_id,
-                               const QString& content_type,
-                               const QString& content) {
+QString TcpClient::sendChatMessage(const QString& to_user_id,
+                                  const QString& content_type,
+                                  const QString& content) {
     if (state_ != ClientState::LoggedIn) {
+        return QString();
+    }
+
+    QString msg_id = Protocol::generateMsgId();
+    QString body = Protocol::makeChatMessage(msg_id, user_id_, to_user_id, content_type, content);
+    sendMessage(MsgType::CHAT_MESSAGE, body);
+    return msg_id;
+}
+
+void TcpClient::ackOfflineMessage(const QString& msg_id) {
+    if (state_ != ClientState::LoggedIn || msg_id.isEmpty()) {
         return;
     }
 
-    QString body = Protocol::makeChatMessage(user_id_, to_user_id, content_type, content);
-    sendMessage(MsgType::TEXT, body);
+    QJsonObject obj;
+    obj["msg_id"] = msg_id;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::OFFLINE_MESSAGE_ACK, body);
 }
 
 void TcpClient::sendFriendRequest(const QString& phone, const QString& remark) {
@@ -345,7 +358,7 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             break;
         }
 
-        case MsgType::TEXT:
+        case MsgType::CHAT_MESSAGE:
         case MsgType::IMAGE:
         case MsgType::FILE:
         case MsgType::VOICE: {
@@ -354,7 +367,8 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 QJsonObject obj = doc.object();
                 QString from_user_id = obj["from_user_id"].toString();
                 QString content = obj["content"].toString();
-                emit chatMessageReceived(from_user_id, content);
+                QString msg_id = obj["msg_id"].toString();
+                emit chatMessageReceived(from_user_id, content, msg_id);
             }
             break;
         }
@@ -363,6 +377,18 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             // 收到心跳响应，重置超时定时器
             heartbeat_timeout_timer_->stop();
             emit heartbeatResponse();
+            break;
+        }
+
+        case MsgType::ACK: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit messageAckReceived(obj["msg_id"].toString(),
+                                        obj["status"].toString(),
+                                        obj["code"].toInt(),
+                                        obj["message"].toString());
+            }
             break;
         }
 
@@ -418,9 +444,9 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     QJsonObject obj = value.toObject();
                     QString from_user_id = obj["from_user_id"].toString();
                     QString content = obj["content"].toString();
-                    emit offlineMessageReceived(from_user_id, content);
-                    // 同时触发普通消息接收，让聊天界面显示
-                    emit chatMessageReceived(from_user_id, content);
+                    QString msg_id = obj["msg_id"].toString();
+                    emit offlineMessageReceived(from_user_id, content, msg_id);
+                    ackOfflineMessage(msg_id);
                 }
             }
             break;

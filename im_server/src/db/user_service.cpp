@@ -10,8 +10,32 @@
 #include <random>
 #include <chrono>
 #include <cstring>
+#include <boost/json.hpp>
 
 namespace im {
+
+namespace {
+
+namespace json = boost::json;
+
+std::string row_string(MYSQL_ROW row, int index, const std::string& default_value = "") {
+    return row[index] ? row[index] : default_value;
+}
+
+int row_int(MYSQL_ROW row, int index, int default_value = 0) {
+    return row[index] ? std::stoi(row[index]) : default_value;
+}
+
+std::string sql_escape(MYSQL* mysql, const std::string& value) {
+    std::string escaped;
+    escaped.resize(value.size() * 2 + 1);
+    unsigned long length = mysql_real_escape_string(
+        mysql, escaped.data(), value.data(), static_cast<unsigned long>(value.size()));
+    escaped.resize(length);
+    return escaped;
+}
+
+} // namespace
 
 std::string UserService::generate_token(const std::string& user_id) {
     // 简单的 token 生成，实际应用应使用 JWT
@@ -84,9 +108,10 @@ LoginResult UserService::login(const std::string& user_id,
     }
 
     // 查询用户
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
     std::ostringstream sql;
     sql << "SELECT user_id, nickname, avatar_url, password_hash, salt, status "
-        << "FROM im_user WHERE user_id = '" << user_id << "' OR phone = '" << user_id << "'";
+        << "FROM im_user WHERE user_id = '" << escaped_user_id << "' OR phone = '" << escaped_user_id << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) {
         result.code = 5001;
@@ -161,8 +186,9 @@ LoginResult UserService::register_user(const std::string& phone,
     }
 
     // 检查手机号是否已注册
+    const std::string escaped_phone = sql_escape(mysql, phone);
     std::ostringstream check_sql;
-    check_sql << "SELECT user_id FROM im_user WHERE phone = '" << phone << "'";
+    check_sql << "SELECT user_id FROM im_user WHERE phone = '" << escaped_phone << "'";
 
     if (mysql_query(mysql, check_sql.str().c_str())) {
         result.code = 5001;
@@ -186,10 +212,14 @@ LoginResult UserService::register_user(const std::string& phone,
     std::string password_hash = hash_password(password, salt);
 
     // 插入用户
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
+    const std::string escaped_nickname = sql_escape(mysql, nickname);
+    const std::string escaped_password_hash = sql_escape(mysql, password_hash);
+    const std::string escaped_salt = sql_escape(mysql, salt);
     std::ostringstream insert_sql;
     insert_sql << "INSERT INTO im_user (user_id, phone, nickname, password_hash, salt, status) "
-               << "VALUES ('" << user_id << "', '" << phone << "', '" << nickname << "', '"
-               << password_hash << "', '" << salt << "', 1)";
+               << "VALUES ('" << escaped_user_id << "', '" << escaped_phone << "', '" << escaped_nickname << "', '"
+               << escaped_password_hash << "', '" << escaped_salt << "', 1)";
 
     if (mysql_query(mysql, insert_sql.str().c_str())) {
         result.code = 5001;
@@ -199,7 +229,7 @@ LoginResult UserService::register_user(const std::string& phone,
 
     // 初始化用户统计
     std::ostringstream stats_sql;
-    stats_sql << "INSERT INTO im_user_stats (user_id) VALUES ('" << user_id << "')";
+    stats_sql << "INSERT INTO im_user_stats (user_id) VALUES ('" << escaped_user_id << "')";
     mysql_query(mysql, stats_sql.str().c_str());
 
     result.code = 0;
@@ -223,7 +253,7 @@ UserInfo UserService::get_user_by_id(const std::string& user_id) {
 
     std::ostringstream sql;
     sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time "
-        << "FROM im_user WHERE user_id = '" << user_id << "'";
+        << "FROM im_user WHERE user_id = '" << sql_escape(mysql, user_id) << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) return info;
 
@@ -256,7 +286,7 @@ UserInfo UserService::get_user_by_phone(const std::string& phone) {
 
     std::ostringstream sql;
     sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time "
-        << "FROM im_user WHERE phone = '" << phone << "'";
+        << "FROM im_user WHERE phone = '" << sql_escape(mysql, phone) << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) return info;
 
@@ -286,7 +316,7 @@ bool UserService::user_exists(const std::string& user_id) {
     if (!mysql) return false;
 
     std::ostringstream sql;
-    sql << "SELECT 1 FROM im_user WHERE user_id = '" << user_id << "' LIMIT 1";
+    sql << "SELECT 1 FROM im_user WHERE user_id = '" << sql_escape(mysql, user_id) << "' LIMIT 1";
 
     if (mysql_query(mysql, sql.str().c_str())) return false;
 
@@ -297,6 +327,46 @@ bool UserService::user_exists(const std::string& user_id) {
     return exists;
 }
 
+bool UserService::are_friends(const std::string& user_id, const std::string& friend_id) {
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+
+    if (!mysql) return false;
+
+    std::ostringstream sql;
+    sql << "SELECT 1 FROM im_friend WHERE user_id = '" << sql_escape(mysql, user_id)
+        << "' AND friend_id = '" << sql_escape(mysql, friend_id)
+        << "' AND status = 1 LIMIT 1";
+
+    if (mysql_query(mysql, sql.str().c_str())) return false;
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    bool exists = res && mysql_num_rows(res) > 0;
+
+    if (res) mysql_free_result(res);
+    return exists;
+}
+
+bool UserService::is_blocked(const std::string& user_id, const std::string& block_user_id) {
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+
+    if (!mysql) return true;
+
+    std::ostringstream sql;
+    sql << "SELECT 1 FROM im_blacklist WHERE user_id = '" << sql_escape(mysql, user_id)
+        << "' AND block_user_id = '" << sql_escape(mysql, block_user_id)
+        << "' LIMIT 1";
+
+    if (mysql_query(mysql, sql.str().c_str())) return true;
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    bool blocked = res && mysql_num_rows(res) > 0;
+
+    if (res) mysql_free_result(res);
+    return blocked;
+}
+
 void UserService::update_login_info(const std::string& user_id,
                                     const std::string& ip) {
     auto conn_guard = db_pool_.get_connection();
@@ -305,101 +375,82 @@ void UserService::update_login_info(const std::string& user_id,
     if (!mysql) return;
 
     std::ostringstream sql;
-    sql << "UPDATE im_user SET last_login_time = NOW(), last_login_ip = '" << ip
-        << "' WHERE user_id = '" << user_id << "'";
+    sql << "UPDATE im_user SET last_login_time = NOW(), last_login_ip = '" << sql_escape(mysql, ip)
+        << "' WHERE user_id = '" << sql_escape(mysql, user_id) << "'";
 
     mysql_query(mysql, sql.str().c_str());
 }
 
 std::string UserService::get_friend_list(const std::string& user_id) {
-    std::ostringstream result;
-    result << "[";
+    json::array result;
 
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
-    if (!mysql) return result.str();
+    if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
     query << "SELECT f.friend_id, f.remark, f.friend_nickname, f.friend_avatar, u.status "
           << "FROM im_friend f "
           << "LEFT JOIN im_user u ON f.friend_id = u.user_id "
-          << "WHERE f.user_id = '" << user_id << "' AND f.status = 1 "
+          << "WHERE f.user_id = '" << sql_escape(mysql, user_id) << "' AND f.status = 1 "
           << "ORDER BY f.friend_nickname ASC";
 
     if (mysql_query(mysql, query.str().c_str())) {
-        return result.str();
+        return json::serialize(result);
     }
 
     MYSQL_RES* res = mysql_store_result(mysql);
-    if (!res) return result.str();
+    if (!res) return json::serialize(result);
 
-    bool first = true;
     MYSQL_ROW row;
     while ((row = mysql_fetch_row(res))) {
-        if (!first) result << ",";
-        first = false;
-        std::string friend_id = row[0] ? row[0] : "";
-        std::string remark = row[1] ? row[1] : "";
-        std::string nickname = row[2] ? row[2] : "";
-        std::string avatar = row[3] ? row[3] : "";
-        int status = row[4] ? std::stoi(row[4]) : 0;
-
-        result << "{\"friend_id\":\"" << friend_id << "\","
-               << "\"remark\":\"" << remark << "\","
-               << "\"nickname\":\"" << nickname << "\","
-               << "\"avatar_url\":\"" << avatar << "\","
-               << "\"status\":" << status << "}";
+        json::object item;
+        item["friend_id"] = row_string(row, 0);
+        item["remark"] = row_string(row, 1);
+        item["nickname"] = row_string(row, 2);
+        item["avatar_url"] = row_string(row, 3);
+        item["status"] = row_int(row, 4);
+        result.push_back(std::move(item));
     }
 
     mysql_free_result(res);
-    result << "]";
-    return result.str();
+    return json::serialize(result);
 }
 
 std::string UserService::get_friend_requests(const std::string& user_id, int status) {
-    std::ostringstream result;
-    result << "[";
+    json::array result;
 
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
-    if (!mysql) return result.str();
+    if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
     query << "SELECT request_id, from_user_id, from_nickname, from_avatar, remark, create_time "
           << "FROM im_friend_request "
-          << "WHERE to_user_id = '" << user_id << "' AND status = " << status
+          << "WHERE to_user_id = '" << sql_escape(mysql, user_id) << "' AND status = " << status
           << " ORDER BY create_time DESC";
 
     if (mysql_query(mysql, query.str().c_str())) {
-        return result.str();
+        return json::serialize(result);
     }
 
     MYSQL_RES* res = mysql_store_result(mysql);
-    if (!res) return result.str();
+    if (!res) return json::serialize(result);
 
-    bool first = true;
     MYSQL_ROW row;
     while ((row = mysql_fetch_row(res))) {
-        if (!first) result << ",";
-        first = false;
-        std::string request_id = row[0] ? row[0] : "";
-        std::string from_user_id = row[1] ? row[1] : "";
-        std::string from_nickname = row[2] ? row[2] : "";
-        std::string from_avatar = row[3] ? row[3] : "";
-        std::string remark = row[4] ? row[4] : "";
-        std::string create_time = row[5] ? row[5] : "";
-
-        result << "{\"request_id\":\"" << request_id << "\","
-               << "\"from_user_id\":\"" << from_user_id << "\","
-               << "\"from_nickname\":\"" << from_nickname << "\","
-               << "\"from_avatar\":\"" << from_avatar << "\","
-               << "\"remark\":\"" << remark << "\","
-               << "\"create_time\":\"" << create_time << "\"}";
+        json::object item;
+        item["request_id"] = row_string(row, 0);
+        item["from_user_id"] = row_string(row, 1);
+        item["from_nickname"] = row_string(row, 2);
+        item["from_avatar"] = row_string(row, 3);
+        item["remark"] = row_string(row, 4);
+        item["create_time"] = row_string(row, 5);
+        result.push_back(std::move(item));
     }
 
     mysql_free_result(res);
-    result << "]";
-    return result.str();
+    return json::serialize(result);
 }
 
 LoginResult UserService::add_friend_request(const std::string& from_user_id,
@@ -437,8 +488,9 @@ LoginResult UserService::add_friend_request(const std::string& from_user_id,
     // 插入好友请求
     std::ostringstream insert_sql;
     insert_sql << "INSERT INTO im_friend_request (request_id, from_user_id, from_nickname, to_user_id, remark, status, expire_time) "
-               << "VALUES ('" << request_id << "', '" << from_user_id << "', '" << from_nickname << "', '" << to_user_id
-               << "', '" << remark << "', 0, DATE_ADD(NOW(), INTERVAL 7 DAY))";
+               << "VALUES ('" << sql_escape(mysql, request_id) << "', '" << sql_escape(mysql, from_user_id)
+               << "', '" << sql_escape(mysql, from_nickname) << "', '" << sql_escape(mysql, to_user_id)
+               << "', '" << sql_escape(mysql, remark) << "', 0, DATE_ADD(NOW(), INTERVAL 7 DAY))";
 
     if (mysql_query(mysql, insert_sql.str().c_str())) {
         std::cerr << "[UserService] MySQL错误: " << mysql_error(mysql) << std::endl;
@@ -469,7 +521,8 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
     // 先查询请求信息
     std::ostringstream select_sql;
     select_sql << "SELECT from_user_id, to_user_id, from_nickname, remark FROM im_friend_request "
-               << "WHERE request_id = '" << request_id << "' AND to_user_id = '" << user_id << "' AND status = 0";
+               << "WHERE request_id = '" << sql_escape(mysql, request_id)
+               << "' AND to_user_id = '" << sql_escape(mysql, user_id) << "' AND status = 0";
 
     if (mysql_query(mysql, select_sql.str().c_str())) {
         result.code = 5001;
@@ -494,7 +547,7 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
     // 更新请求状态
     std::ostringstream update_sql;
     update_sql << "UPDATE im_friend_request SET status = " << (accept ? 1 : 2)
-               << ", handle_time = NOW() WHERE request_id = '" << request_id << "'";
+               << ", handle_time = NOW() WHERE request_id = '" << sql_escape(mysql, request_id) << "'";
     mysql_query(mysql, update_sql.str().c_str());
 
     if (accept) {
@@ -506,12 +559,15 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
         // A添加B，A的friend_id是B，B的friend_id是A
         std::ostringstream insert_sql1;
         insert_sql1 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
-                    << "VALUES ('" << from_user_id << "', '" << user_id << "', '" << remark << "', '" << to_user.nickname << "', '" << to_user.avatar_url << "')";
+                    << "VALUES ('" << sql_escape(mysql, from_user_id) << "', '" << sql_escape(mysql, user_id)
+                    << "', '" << sql_escape(mysql, remark) << "', '" << sql_escape(mysql, to_user.nickname)
+                    << "', '" << sql_escape(mysql, to_user.avatar_url) << "')";
         mysql_query(mysql, insert_sql1.str().c_str());
 
         std::ostringstream insert_sql2;
         insert_sql2 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
-                    << "VALUES ('" << user_id << "', '" << from_user_id << "', '', '" << from_nickname << "', '" << from_user.avatar_url << "')";
+                    << "VALUES ('" << sql_escape(mysql, user_id) << "', '" << sql_escape(mysql, from_user_id)
+                    << "', '', '" << sql_escape(mysql, from_nickname) << "', '" << sql_escape(mysql, from_user.avatar_url) << "')";
         mysql_query(mysql, insert_sql2.str().c_str());
 
         result.code = 0;
@@ -537,8 +593,10 @@ LoginResult UserService::delete_friend(const std::string& user_id, const std::st
 
     // 双向删除好友记录
     std::ostringstream sql;
-    sql << "DELETE FROM im_friend WHERE (user_id = '" << user_id << "' AND friend_id = '" << friend_id << "') "
-        << "OR (user_id = '" << friend_id << "' AND friend_id = '" << user_id << "')";
+    sql << "DELETE FROM im_friend WHERE (user_id = '" << sql_escape(mysql, user_id)
+        << "' AND friend_id = '" << sql_escape(mysql, friend_id) << "') "
+        << "OR (user_id = '" << sql_escape(mysql, friend_id)
+        << "' AND friend_id = '" << sql_escape(mysql, user_id) << "')";
 
     if (mysql_query(mysql, sql.str().c_str())) {
         result.code = 5001;
@@ -562,9 +620,9 @@ bool UserService::save_message(const std::string& msg_id, int msg_type, int chat
     std::ostringstream sql;
     sql << "INSERT INTO im_message (msg_id, msg_type, chat_type, from_user_id, to_user_id, "
         << "content_type, content, client_time, server_time, status) "
-        << "VALUES ('" << msg_id << "', " << msg_type << ", " << chat_type << ", "
-        << "'" << from_user_id << "', '" << to_user_id << "', "
-        << "'" << content_type << "', '" << content << "', "
+        << "VALUES ('" << sql_escape(mysql, msg_id) << "', " << msg_type << ", " << chat_type << ", "
+        << "'" << sql_escape(mysql, from_user_id) << "', '" << sql_escape(mysql, to_user_id) << "', "
+        << "'" << sql_escape(mysql, content_type) << "', '" << sql_escape(mysql, content) << "', "
         << "FROM_UNIXTIME(" << client_time << "), NOW(), 1)";
 
     if (mysql_query(mysql, sql.str().c_str())) {
@@ -575,52 +633,40 @@ bool UserService::save_message(const std::string& msg_id, int msg_type, int chat
 }
 
 std::string UserService::get_offline_messages(const std::string& user_id) {
-    std::ostringstream result;
-    result << "[";
+    json::array result;
 
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
-    if (!mysql) return result.str();
+    if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
     query << "SELECT msg_id, msg_type, chat_type, from_user_id, content, client_time, server_time "
           << "FROM im_offline_message "
-          << "WHERE user_id = '" << user_id << "' AND is_pushed = 0 "
+          << "WHERE user_id = '" << sql_escape(mysql, user_id) << "' AND is_pushed = 0 "
           << "ORDER BY create_time ASC LIMIT 100";
 
     if (mysql_query(mysql, query.str().c_str())) {
-        return result.str();
+        return json::serialize(result);
     }
 
     MYSQL_RES* res = mysql_store_result(mysql);
-    if (!res) return result.str();
+    if (!res) return json::serialize(result);
 
-    bool first = true;
     MYSQL_ROW row;
     while ((row = mysql_fetch_row(res))) {
-        if (!first) result << ",";
-        first = false;
-
-        std::string msg_id = row[0] ? row[0] : "";
-        std::string msg_type = row[1] ? row[1] : "1";
-        std::string chat_type = row[2] ? row[2] : "1";
-        std::string from_user_id = row[3] ? row[3] : "";
-        std::string content = row[4] ? row[4] : "";
-        std::string client_time = row[5] ? row[5] : "";
-        std::string server_time = row[6] ? row[6] : "";
-
-        result << "{\"msg_id\":\"" << msg_id << "\","
-               << "\"msg_type\":" << msg_type << ","
-               << "\"chat_type\":" << chat_type << ","
-               << "\"from_user_id\":\"" << from_user_id << "\","
-               << "\"content\":\"" << content << "\","
-               << "\"client_time\":\"" << client_time << "\","
-               << "\"server_time\":\"" << server_time << "\"}";
+        json::object item;
+        item["msg_id"] = row_string(row, 0);
+        item["msg_type"] = row_int(row, 1, 1);
+        item["chat_type"] = row_int(row, 2, 1);
+        item["from_user_id"] = row_string(row, 3);
+        item["content"] = row_string(row, 4);
+        item["client_time"] = row_string(row, 5);
+        item["server_time"] = row_string(row, 6);
+        result.push_back(std::move(item));
     }
 
     mysql_free_result(res);
-    result << "]";
-    return result.str();
+    return json::serialize(result);
 }
 
 void UserService::mark_offline_messages_pushed(const std::string& user_id, const std::string& msg_id) {
@@ -630,26 +676,28 @@ void UserService::mark_offline_messages_pushed(const std::string& user_id, const
 
     std::ostringstream sql;
     sql << "UPDATE im_offline_message SET is_pushed = 1, push_time = NOW() "
-        << "WHERE user_id = '" << user_id << "' AND msg_id = '" << msg_id << "'";
+        << "WHERE user_id = '" << sql_escape(mysql, user_id)
+        << "' AND msg_id = '" << sql_escape(mysql, msg_id) << "'";
 
     mysql_query(mysql, sql.str().c_str());
 }
 
 std::string UserService::get_chat_history(const std::string& user_id, const std::string& friend_id,
                                         int limit, int64_t before_time) {
-    std::ostringstream result;
-    result << "[";
+    json::array result;
 
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
-    if (!mysql) return result.str();
+    if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
     query << "SELECT msg_id, msg_type, chat_type, from_user_id, to_user_id, content_type, content, "
           << "client_time, server_time, status "
           << "FROM im_message "
-          << "WHERE ((from_user_id = '" << user_id << "' AND to_user_id = '" << friend_id << "') "
-          << "OR (from_user_id = '" << friend_id << "' AND to_user_id = '" << user_id << "')) ";
+          << "WHERE ((from_user_id = '" << sql_escape(mysql, user_id)
+          << "' AND to_user_id = '" << sql_escape(mysql, friend_id) << "') "
+          << "OR (from_user_id = '" << sql_escape(mysql, friend_id)
+          << "' AND to_user_id = '" << sql_escape(mysql, user_id) << "')) ";
 
     if (before_time > 0) {
         query << "AND server_time < FROM_UNIXTIME(" << before_time << ") ";
@@ -658,44 +706,30 @@ std::string UserService::get_chat_history(const std::string& user_id, const std:
     query << "ORDER BY server_time DESC LIMIT " << limit;
 
     if (mysql_query(mysql, query.str().c_str())) {
-        return result.str();
+        return json::serialize(result);
     }
 
     MYSQL_RES* res = mysql_store_result(mysql);
-    if (!res) return result.str();
+    if (!res) return json::serialize(result);
 
-    bool first = true;
     MYSQL_ROW row;
     while ((row = mysql_fetch_row(res))) {
-        if (!first) result << ",";
-        first = false;
-
-        std::string msg_id = row[0] ? row[0] : "";
-        std::string msg_type = row[1] ? row[1] : "1";
-        std::string chat_type = row[2] ? row[2] : "1";
-        std::string from_user_id = row[3] ? row[3] : "";
-        std::string to_user_id = row[4] ? row[4] : "";
-        std::string content_type = row[5] ? row[5] : "text";
-        std::string content = row[6] ? row[6] : "";
-        std::string client_time = row[7] ? row[7] : "";
-        std::string server_time = row[8] ? row[8] : "";
-        std::string status = row[9] ? row[9] : "1";
-
-        result << "{\"msg_id\":\"" << msg_id << "\","
-               << "\"msg_type\":" << msg_type << ","
-               << "\"chat_type\":" << chat_type << ","
-               << "\"from_user_id\":\"" << from_user_id << "\","
-               << "\"to_user_id\":\"" << to_user_id << "\","
-               << "\"content_type\":\"" << content_type << "\","
-               << "\"content\":\"" << content << "\","
-               << "\"client_time\":\"" << client_time << "\","
-               << "\"server_time\":\"" << server_time << "\","
-               << "\"status\":" << status << "}";
+        json::object item;
+        item["msg_id"] = row_string(row, 0);
+        item["msg_type"] = row_int(row, 1, 1);
+        item["chat_type"] = row_int(row, 2, 1);
+        item["from_user_id"] = row_string(row, 3);
+        item["to_user_id"] = row_string(row, 4);
+        item["content_type"] = row_string(row, 5, "text");
+        item["content"] = row_string(row, 6);
+        item["client_time"] = row_string(row, 7);
+        item["server_time"] = row_string(row, 8);
+        item["status"] = row_int(row, 9, 1);
+        result.push_back(std::move(item));
     }
 
     mysql_free_result(res);
-    result << "]";
-    return result.str();
+    return json::serialize(result);
 }
 
 } // namespace im

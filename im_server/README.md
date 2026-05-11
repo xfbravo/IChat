@@ -59,13 +59,13 @@ im_server/
 |------|-----|------|------|
 | HEARTBEAT | 0x0001 | 双向 | 心跳包 |
 | LOGIN | 0x0002 | C→S | 登录请求 |
-| LOGOUT | 0x0003 | C→S | 登出请求 |
+| REGISTER_REQ | 0x0003 | C→S | 注册请求 |
+| LOGOUT | 0x0004 | C→S | 登出请求 |
+| CHAT_MESSAGE | 0x0005 | 双向 | 统一聊天消息，使用 content_type 区分 text/image/file/voice |
 | LOGIN_RSP | 0x8002 | S→C | 登录响应 |
-| TEXT | 0x0004 | 双向 | 文本消息 |
-| IMAGE | 0x0005 | 双向 | 图片消息 |
-| FILE | 0x0006 | 双向 | 文件消息 |
-| VOICE | 0x0007 | 双向 | 语音消息 |
-| ACK | 0x0008 | 双向 | 消息确认 |
+| REGISTER_RSP | 0x8003 | S→C | 注册响应 |
+| IMAGE/FILE/VOICE | 0x0006/0x0007/0x0008 | C→S | 旧媒体消息类型，仅兼容；新实现请用 CHAT_MESSAGE |
+| ACK | 0x0009 | 双向 | 消息确认 |
 | ERROR | 0x800F | S→C | 错误响应 |
 
 ## 编译

@@ -19,10 +19,11 @@ enum class MsgType : uint16_t {
     LOGIN            = 0x0002,  // 登录请求
     REGISTER_REQ     = 0x0003,  // 注册请求
     LOGOUT           = 0x0004,  // 登出请求
-    TEXT             = 0x0005,  // 文本消息
-    IMAGE            = 0x0006,  // 图片消息
-    FILE             = 0x0007,  // 文件消息
-    VOICE            = 0x0008,  // 语音消息
+    CHAT_MESSAGE     = 0x0005,  // 统一聊天消息，content_type 区分 text/image/file/voice
+    TEXT             = 0x0005,  // 兼容旧名称
+    IMAGE            = 0x0006,  // 兼容旧媒体消息类型，请改用 CHAT_MESSAGE + content_type=image
+    FILE             = 0x0007,  // 兼容旧媒体消息类型，请改用 CHAT_MESSAGE + content_type=file
+    VOICE            = 0x0008,  // 兼容旧媒体消息类型，请改用 CHAT_MESSAGE + content_type=voice
     ACK              = 0x0009,  // 消息确认
     FRIEND_REQUEST   = 0x000A,  // 发送好友请求
     GET_FRIEND_LIST   = 0x000B,  // 获取好友列表
@@ -31,6 +32,7 @@ enum class MsgType : uint16_t {
     DELETE_FRIEND     = 0x000E,  // 删除好友
     GET_CHAT_HISTORY = 0x000F,  // 获取聊天记录
     GET_OFFLINE_MESSAGES = 0x0010, // 获取离线消息
+    OFFLINE_MESSAGE_ACK = 0x0011,  // 离线消息确认
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应
@@ -124,6 +126,8 @@ public:
      * @brief 创建聊天消息JSON
      */
     static QString makeChatMessage(const QString& from, const QString& to,
+                                   const QString& content_type, const QString& content);
+    static QString makeChatMessage(const QString& msg_id, const QString& from, const QString& to,
                                    const QString& content_type, const QString& content);
 
     /**
