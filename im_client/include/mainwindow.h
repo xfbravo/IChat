@@ -82,6 +82,8 @@ private:
     void markSendingMessagesFailed(const QString& reason);
     void addMessageToConversation(const QString& peer_id, const ChatViewMessage& message, bool count_unread);
     void updateConversationItem(const QString& peer_id);
+    void refreshConversationList();
+    void refreshConversationSelectionStyles();
     QString conversationTitle(const QString& peer_id) const;
     void loadChatList();
     void loadContacts();
@@ -132,6 +134,7 @@ private:
         QVector<ChatViewMessage> messages;
         int unread = 0;
         QString last_message;
+        qint64 last_timestamp = 0;
     };
     QHash<QString, ConversationState> conversations_;
 };

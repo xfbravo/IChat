@@ -146,6 +146,71 @@ private:
     QColor border_;
 };
 
+class ConversationListItemWidget : public QWidget {
+public:
+    ConversationListItemWidget(const QString& title,
+                               const QString& last_message,
+                               int unread,
+                               QWidget* parent = nullptr)
+        : QWidget(parent)
+    {
+        setAttribute(Qt::WA_StyledBackground, true);
+        setStyleSheet("background: transparent;");
+
+        title_label_ = new QLabel(title, this);
+        title_label_->setTextFormat(Qt::PlainText);
+        title_label_->setWordWrap(false);
+
+        last_message_label_ = new QLabel(last_message, this);
+        last_message_label_->setTextFormat(Qt::PlainText);
+        last_message_label_->setWordWrap(false);
+
+        badge_label_ = new QLabel(unread > 99 ? "99+" : QString::number(unread), this);
+        badge_label_->setAlignment(Qt::AlignCenter);
+        badge_label_->setFixedSize(unread > 99 ? QSize(30, 22) : QSize(22, 22));
+
+        QVBoxLayout* text_layout = new QVBoxLayout;
+        text_layout->setContentsMargins(0, 0, 0, 0);
+        text_layout->setSpacing(4);
+        text_layout->addWidget(title_label_);
+        text_layout->addWidget(last_message_label_);
+
+        QHBoxLayout* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(15, 10, 15, 10);
+        layout->setSpacing(10);
+        layout->addLayout(text_layout, 1);
+        layout->addWidget(badge_label_, 0, Qt::AlignRight | Qt::AlignVCenter);
+
+        badge_label_->setVisible(unread > 0);
+        setSelected(false);
+    }
+
+    void setSelected(bool selected) {
+        const QString title_color = selected ? "#ffffff" : "#111111";
+        const QString summary_color = selected ? "#eaf7ea" : "#666666";
+        title_label_->setStyleSheet(QString(
+            "QLabel { color: %1; font-size: 14px; font-weight: 600; background: transparent; }"
+        ).arg(title_color));
+        last_message_label_->setStyleSheet(QString(
+            "QLabel { color: %1; font-size: 12px; background: transparent; }"
+        ).arg(summary_color));
+        badge_label_->setStyleSheet(R"(
+            QLabel {
+                color: #ffffff;
+                background-color: #f44336;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        )");
+    }
+
+private:
+    QLabel* title_label_;
+    QLabel* last_message_label_;
+    QLabel* badge_label_;
+};
+
 QIcon navIcon(const QString& type) {
     const QColor color("#ecf0f1");
     QPixmap pixmap(32, 32);
@@ -350,7 +415,7 @@ void MainWindow::createMessageView() {
             outline: none;
         }
         QListWidget::item {
-            padding: 12px 15px;
+            padding: 0;
             border-bottom: 1px solid #e0e0e0;
             color: #111111;
         }
@@ -368,6 +433,8 @@ void MainWindow::createMessageView() {
     )");
     connect(chat_list_widget_, &QListWidget::itemClicked,
             this, &MainWindow::onChatItemClicked);
+    connect(chat_list_widget_, &QListWidget::itemSelectionChanged,
+            this, &MainWindow::refreshConversationSelectionStyles);
 
     // 聊天界面面板 (右侧)
     chat_interface_panel_ = new QWidget;
@@ -799,9 +866,6 @@ void MainWindow::onFriendListReceived(const QString& json) {
 
     QJsonArray friends = doc.array();
 
-    // 更新聊天列表
-    chat_list_widget_->clear();
-
     for (const QJsonValue& value : friends) {
         QJsonObject friend_obj = value.toObject();
         QString friend_id = friend_obj["friend_id"].toString();
@@ -809,12 +873,9 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString remark = friend_obj["remark"].toString().trimmed();
         QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
 
-        // 添加到聊天列表
         conversations_[friend_id].title = display_name;
-        QListWidgetItem* item = new QListWidgetItem(conversationTitle(friend_id));
-        item->setData(Qt::UserRole, friend_id);
-        chat_list_widget_->addItem(item);
     }
+    refreshConversationList();
 
     if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_)) {
         chat_target_label_->setText(conversations_[current_chat_target_].title);
@@ -1062,6 +1123,9 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
     conversation.last_message = conversation.messages.isEmpty()
         ? QString()
         : conversation.messages.last().content;
+    conversation.last_timestamp = conversation.messages.isEmpty()
+        ? 0
+        : conversation.messages.last().timestamp;
     if (count_unread) {
         ++conversation.unread;
     }
@@ -1086,30 +1150,65 @@ QString MainWindow::conversationTitle(const QString& peer_id) const {
     if (it == conversations_.constEnd()) return peer_id;
 
     const ConversationState& conversation = it.value();
-    QString title = conversation.title.isEmpty() ? peer_id : conversation.title;
-    if (conversation.unread > 0) {
-        title = QString("%1 (%2)").arg(title).arg(conversation.unread);
-    }
-    if (!conversation.last_message.isEmpty()) {
-        title = QString("%1\n%2").arg(title, conversation.last_message);
-    }
-    return title;
+    return conversation.title.isEmpty() ? peer_id : conversation.title;
 }
 
 void MainWindow::updateConversationItem(const QString& peer_id) {
     if (peer_id.isEmpty()) return;
 
-    for (int i = 0; i < chat_list_widget_->count(); ++i) {
-        QListWidgetItem* item = chat_list_widget_->item(i);
-        if (item->data(Qt::UserRole).toString() == peer_id) {
-            item->setText(conversationTitle(peer_id));
-            return;
+    refreshConversationList();
+}
+
+void MainWindow::refreshConversationList() {
+    QString selected_peer = current_chat_target_;
+    if (chat_list_widget_->currentItem()) {
+        selected_peer = chat_list_widget_->currentItem()->data(Qt::UserRole).toString();
+    }
+
+    QList<QString> peer_ids = conversations_.keys();
+    std::stable_sort(peer_ids.begin(), peer_ids.end(),
+                     [this](const QString& left, const QString& right) {
+                         const ConversationState& left_conversation = conversations_[left];
+                         const ConversationState& right_conversation = conversations_[right];
+                         if (left_conversation.last_timestamp != right_conversation.last_timestamp) {
+                             return left_conversation.last_timestamp > right_conversation.last_timestamp;
+                         }
+                         return conversationTitle(left).localeAwareCompare(conversationTitle(right)) < 0;
+                     });
+
+    chat_list_widget_->clear();
+
+    for (const QString& peer_id : peer_ids) {
+        const ConversationState& conversation = conversations_[peer_id];
+        QListWidgetItem* item = new QListWidgetItem(conversationTitle(peer_id));
+        item->setData(Qt::UserRole, peer_id);
+        item->setSizeHint(QSize(0, 64));
+        chat_list_widget_->addItem(item);
+
+        ConversationListItemWidget* item_widget = new ConversationListItemWidget(
+            conversationTitle(peer_id),
+            conversation.last_message,
+            conversation.unread,
+            chat_list_widget_);
+        chat_list_widget_->setItemWidget(item, item_widget);
+
+        if (peer_id == selected_peer) {
+            chat_list_widget_->setCurrentItem(item);
         }
     }
 
-    QListWidgetItem* item = new QListWidgetItem(conversationTitle(peer_id));
-    item->setData(Qt::UserRole, peer_id);
-    chat_list_widget_->addItem(item);
+    refreshConversationSelectionStyles();
+}
+
+void MainWindow::refreshConversationSelectionStyles() {
+    for (int i = 0; i < chat_list_widget_->count(); ++i) {
+        QListWidgetItem* item = chat_list_widget_->item(i);
+        ConversationListItemWidget* item_widget =
+            static_cast<ConversationListItemWidget*>(chat_list_widget_->itemWidget(item));
+        if (item_widget) {
+            item_widget->setSelected(item->isSelected());
+        }
+    }
 }
 
 void MainWindow::renderChatMessages() {
