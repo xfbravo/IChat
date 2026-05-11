@@ -422,8 +422,28 @@ void MainWindow::createMessageView() {
         QToolButton:disabled {
             color: #bbbbbb;
         }
+        QToolButton::menu-indicator {
+            image: none;
+            width: 0;
+        }
     )");
     QMenu* chat_menu = new QMenu(chat_more_button_);
+    chat_menu->setStyleSheet(R"(
+        QMenu {
+            background-color: #ffffff;
+            border: 1px solid #dddddd;
+            padding: 6px 0;
+        }
+        QMenu::item {
+            min-height: 32px;
+            padding: 8px 28px 8px 18px;
+            color: #111111;
+            font-size: 14px;
+        }
+        QMenu::item:selected {
+            background-color: #f0f0f0;
+        }
+    )");
     QAction* edit_remark_action = chat_menu->addAction("修改联系人备注");
     connect(edit_remark_action, &QAction::triggered, this, &MainWindow::onEditContactRemark);
     chat_more_button_->setMenu(chat_menu);
