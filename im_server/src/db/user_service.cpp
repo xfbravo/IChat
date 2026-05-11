@@ -10,6 +10,7 @@
 #include <random>
 #include <chrono>
 #include <cstring>
+#include <cstdint>
 #include <boost/json.hpp>
 
 namespace im {
@@ -24,6 +25,10 @@ std::string row_string(MYSQL_ROW row, int index, const std::string& default_valu
 
 int row_int(MYSQL_ROW row, int index, int default_value = 0) {
     return row[index] ? std::stoi(row[index]) : default_value;
+}
+
+int64_t row_int64(MYSQL_ROW row, int index, int64_t default_value = 0) {
+    return row[index] ? std::stoll(row[index]) : default_value;
 }
 
 std::string sql_escape(MYSQL* mysql, const std::string& value) {
@@ -398,11 +403,15 @@ std::string UserService::get_friend_list(const std::string& user_id) {
           << "(SELECT DATE_FORMAT(m.server_time, '%Y-%m-%d %H:%i:%s') FROM im_message m "
           << " WHERE ((m.from_user_id = '" << escaped_user_id << "' AND m.to_user_id = f.friend_id) "
           << " OR (m.from_user_id = f.friend_id AND m.to_user_id = '" << escaped_user_id << "')) "
-          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_time "
+          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_time, "
+          << "(SELECT CAST(UNIX_TIMESTAMP(m.server_time) * 1000 AS UNSIGNED) FROM im_message m "
+          << " WHERE ((m.from_user_id = '" << escaped_user_id << "' AND m.to_user_id = f.friend_id) "
+          << " OR (m.from_user_id = f.friend_id AND m.to_user_id = '" << escaped_user_id << "')) "
+          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_timestamp "
           << "FROM im_friend f "
           << "LEFT JOIN im_user u ON f.friend_id = u.user_id "
           << "WHERE f.user_id = '" << escaped_user_id << "' AND f.status = 1 "
-          << "ORDER BY last_msg_time DESC, f.friend_nickname ASC";
+          << "ORDER BY last_msg_timestamp DESC, f.friend_nickname ASC";
 
     if (mysql_query(mysql, query.str().c_str())) {
         return json::serialize(result);
@@ -421,6 +430,7 @@ std::string UserService::get_friend_list(const std::string& user_id) {
         item["status"] = row_int(row, 4);
         item["last_msg_content"] = row_string(row, 5);
         item["last_msg_time"] = row_string(row, 6);
+        item["last_msg_timestamp"] = row_int64(row, 7);
         result.push_back(std::move(item));
     }
 
@@ -715,7 +725,8 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
     if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
-    query << "SELECT msg_id, msg_type, chat_type, from_user_id, content, client_time, server_time "
+    query << "SELECT msg_id, msg_type, chat_type, from_user_id, content, client_time, server_time, "
+          << "CAST(UNIX_TIMESTAMP(server_time) * 1000 AS UNSIGNED) "
           << "FROM im_offline_message "
           << "WHERE user_id = '" << sql_escape(mysql, user_id) << "' AND is_pushed = 0 "
           << "ORDER BY create_time ASC LIMIT 100";
@@ -737,6 +748,7 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
         item["content"] = row_string(row, 4);
         item["client_time"] = row_string(row, 5);
         item["server_time"] = row_string(row, 6);
+        item["server_timestamp"] = row_int64(row, 7);
         result.push_back(std::move(item));
     }
 
@@ -767,7 +779,7 @@ std::string UserService::get_chat_history(const std::string& user_id, const std:
 
     std::ostringstream query;
     query << "SELECT msg_id, msg_type, chat_type, from_user_id, to_user_id, content_type, content, "
-          << "client_time, server_time, status "
+          << "client_time, server_time, status, CAST(UNIX_TIMESTAMP(server_time) * 1000 AS UNSIGNED) "
           << "FROM im_message "
           << "WHERE ((from_user_id = '" << sql_escape(mysql, user_id)
           << "' AND to_user_id = '" << sql_escape(mysql, friend_id) << "') "
@@ -800,6 +812,7 @@ std::string UserService::get_chat_history(const std::string& user_id, const std:
         item["client_time"] = row_string(row, 7);
         item["server_time"] = row_string(row, 8);
         item["status"] = row_int(row, 9, 1);
+        item["server_timestamp"] = row_int64(row, 10);
         result.push_back(std::move(item));
     }
 

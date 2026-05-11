@@ -469,7 +469,10 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     QString from_user_id = obj["from_user_id"].toString();
                     QString content = obj["content"].toString();
                     QString msg_id = obj["msg_id"].toString();
-                    emit offlineMessageReceived(from_user_id, content, msg_id);
+                    QString server_time = obj["server_time"].toString();
+                    qint64 server_timestamp = obj["server_timestamp"].toInteger();
+                    emit offlineMessageReceived(from_user_id, content, msg_id,
+                                                server_timestamp, server_time);
                     ackOfflineMessage(msg_id);
                 }
             }

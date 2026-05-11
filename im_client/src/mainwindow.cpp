@@ -40,7 +40,7 @@
 namespace {
 qint64 timestampFromText(const QString& time_text) {
     if (time_text.isEmpty()) {
-        return QDateTime::currentMSecsSinceEpoch();
+        return 0;
     }
 
     const QStringList formats = {
@@ -67,7 +67,7 @@ qint64 timestampFromText(const QString& time_text) {
         return dt.toMSecsSinceEpoch();
     }
 
-    return QDateTime::currentMSecsSinceEpoch();
+    return 0;
 }
 
 class MessageBubble : public QWidget {
@@ -766,19 +766,31 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
         view_message.from = from_user_id;
         view_message.content = content;
         view_message.time = msg["server_time"].toString();
-        view_message.timestamp = timestampFromText(view_message.time);
+        view_message.timestamp = msg["server_timestamp"].toInteger();
+        if (view_message.timestamp <= 0) {
+            view_message.timestamp = timestampFromText(view_message.time);
+        }
         view_message.is_mine = is_mine;
         addMessageToConversation(peer_id, view_message, false);
     }
 }
 
-void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id) {
+void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content,
+                                          const QString& msg_id, qint64 server_timestamp,
+                                          const QString& server_time) {
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = from_user_id;
     message.content = content;
-    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
-    message.timestamp = QDateTime::currentMSecsSinceEpoch();
+    message.time = server_time.isEmpty()
+        ? QDateTime::currentDateTime().toString("hh:mm:ss")
+        : server_time;
+    message.timestamp = server_timestamp > 0
+        ? server_timestamp
+        : timestampFromText(message.time);
+    if (message.timestamp <= 0) {
+        message.timestamp = QDateTime::currentMSecsSinceEpoch();
+    }
     message.is_mine = false;
     addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
 }
@@ -874,11 +886,14 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
         QString last_message = friend_obj["last_msg_content"].toString();
         QString last_time = friend_obj["last_msg_time"].toString();
-        qint64 last_timestamp = timestampFromText(last_time);
+        qint64 last_timestamp = friend_obj["last_msg_timestamp"].toInteger();
+        if (last_timestamp <= 0) {
+            last_timestamp = timestampFromText(last_time);
+        }
 
         ConversationState& conversation = conversations_[friend_id];
         conversation.title = display_name;
-        if (!last_time.isEmpty()
+        if (last_timestamp > 0
             && (last_timestamp > conversation.last_timestamp || conversation.last_timestamp <= 0)) {
             conversation.last_message = last_message;
             conversation.last_timestamp = last_timestamp;

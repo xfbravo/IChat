@@ -43,7 +43,9 @@ private slots:
     void onChatItemClicked(QListWidgetItem* item);
     void onDisconnected();
     void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
-    void onOfflineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
+    void onOfflineMessageReceived(const QString& from_user_id, const QString& content,
+                                  const QString& msg_id, qint64 server_timestamp,
+                                  const QString& server_time);
     void onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
     void onFriendRemarkUpdateResult(int code, const QString& message,
                                     const QString& friend_id, const QString& remark);

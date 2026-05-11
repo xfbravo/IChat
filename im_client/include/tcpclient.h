@@ -243,7 +243,9 @@ signals:
     /**
      * @brief 收到离线消息信号
      */
-    void offlineMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
+    void offlineMessageReceived(const QString& from_user_id, const QString& content,
+                                const QString& msg_id, qint64 server_timestamp,
+                                const QString& server_time);
 
     /**
      * @brief 消息发送状态回执
