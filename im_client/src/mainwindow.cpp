@@ -10,6 +10,7 @@
 #include <QHBoxLayout>
 #include <QSplitter>
 #include <QHeaderView>
+#include <QDate>
 #include <QDateTime>
 #include <QStyle>
 #include <QTreeWidgetItem>
@@ -20,7 +21,48 @@
 #include <QJsonArray>
 #include <QDialog>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QStringList>
 #include <QTimer>
+#include <algorithm>
+
+namespace {
+qint64 timestampFromText(const QString& time_text) {
+    if (time_text.isEmpty()) {
+        return QDateTime::currentMSecsSinceEpoch();
+    }
+
+    const QStringList formats = {
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd hh:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddThh:mm:ss",
+        "hh:mm:ss",
+        "HH:mm:ss"
+    };
+
+    for (const QString& format : formats) {
+        QDateTime dt = QDateTime::fromString(time_text, format);
+        if (!dt.isValid()) continue;
+
+        if (format == "hh:mm:ss" || format == "HH:mm:ss") {
+            dt.setDate(QDate::currentDate());
+        }
+        return dt.toMSecsSinceEpoch();
+    }
+
+    QDateTime dt = QDateTime::fromString(time_text, Qt::ISODate);
+    if (dt.isValid()) {
+        return dt.toMSecsSinceEpoch();
+    }
+
+    return QDateTime::currentMSecsSinceEpoch();
+}
+
+QString messageHtml(const QString& text) {
+    return text.toHtmlEscaped().replace("\n", "<br/>");
+}
+}
 
 MainWindow::MainWindow(TcpClient* tcp_client,
                       const QString& user_id,
@@ -385,6 +427,7 @@ void MainWindow::onChatMessageReceived(const QString& from_user_id, const QStrin
     message.from = from_user_id;
     message.content = content;
     message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.timestamp = QDateTime::currentMSecsSinceEpoch();
     message.is_mine = false;
     addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
 }
@@ -398,8 +441,7 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
 
     QString target_id = friend_id.isEmpty() ? current_chat_target_ : friend_id;
 
-    // 倒序显示消息（从旧到新）
-    for (int i = messages.size() - 1; i >= 0; --i) {
+    for (int i = 0; i < messages.size(); ++i) {
         QJsonObject msg = messages[i].toObject();
         QString from_user_id = msg["from_user_id"].toString();
         QString content = msg["content"].toString();
@@ -411,6 +453,7 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
         view_message.from = from_user_id;
         view_message.content = content;
         view_message.time = msg["server_time"].toString();
+        view_message.timestamp = timestampFromText(view_message.time);
         view_message.is_mine = is_mine;
         addMessageToConversation(peer_id, view_message, false);
     }
@@ -422,6 +465,7 @@ void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QSt
     message.from = from_user_id;
     message.content = content;
     message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.timestamp = QDateTime::currentMSecsSinceEpoch();
     message.is_mine = false;
     addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
 }
@@ -685,6 +729,7 @@ void MainWindow::appendMessage(const QString& from, const QString& content, bool
     message.from = from;
     message.content = content;
     message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.timestamp = QDateTime::currentMSecsSinceEpoch();
     message.status = status;
     message.is_mine = is_mine;
 
@@ -709,8 +754,20 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
         }
     }
 
-    conversation.messages.append(message);
-    conversation.last_message = message.content;
+    ChatViewMessage sorted_message = message;
+    if (sorted_message.timestamp <= 0) {
+        sorted_message.timestamp = timestampFromText(sorted_message.time);
+    }
+
+    conversation.messages.append(sorted_message);
+    std::stable_sort(conversation.messages.begin(), conversation.messages.end(),
+                     [](const ChatViewMessage& left, const ChatViewMessage& right) {
+                         return left.timestamp < right.timestamp;
+                     });
+
+    conversation.last_message = conversation.messages.isEmpty()
+        ? QString()
+        : conversation.messages.last().content;
     if (count_unread) {
         ++conversation.unread;
     }
@@ -766,30 +823,42 @@ void MainWindow::renderChatMessages() {
 
     for (const ChatViewMessage& message : current_messages_) {
         QString color = message.is_mine ? "#4CAF50" : "#2196F3";
-        QString align = message.is_mine ? "right" : "left";
+        QString sender = message.is_mine ? "我" : message.from;
+        QString cell_align = message.is_mine ? "right" : "left";
         QString status = statusText(message.status);
         QString status_html = status.isEmpty()
             ? QString()
             : QString("<br/><span style='font-size: 12px; color: #888;'>%1</span>").arg(status.toHtmlEscaped());
 
-        QString html = QString(
-            "<div style='text-align: %1; margin: 5px 0;'>"
-            "<span style='font-size: 12px; color: #888;'>%2 %3</span>"
-            "<br/>"
+        QString message_cell = QString(
+            "<td width='80%' align='%1'>"
+            "<span style='font-size: 12px; color: #888;'>%2 %3</span><br/>"
             "<span style='display: inline-block; padding: 8px 12px; "
             "background-color: %4; color: white; border-radius: 8px; "
-            "max-width: 70%%; word-wrap: break-word;'>%5</span>"
+            "max-width: 70%; word-wrap: break-word;'>%5</span>"
             "%6"
-            "</div>"
-        ).arg(align,
-              message.is_mine ? "我" : message.from,
-              message.time,
+            "</td>"
+        ).arg(cell_align,
+              sender.toHtmlEscaped(),
+              message.time.toHtmlEscaped(),
               color,
-              message.content.toHtmlEscaped(),
+              messageHtml(message.content),
               status_html);
+        QString empty_cell = "<td width='20%'></td>";
+        QString row_cells = message.is_mine
+            ? QString("%1%2").arg(empty_cell, message_cell)
+            : QString("%1%2").arg(message_cell, empty_cell);
+
+        QString html = QString(
+            "<table width='100%' cellspacing='0' cellpadding='0' style='margin: 6px 0;'>"
+            "<tr>%1</tr>"
+            "</table>"
+        ).arg(row_cells);
 
         chat_display_->append(html);
     }
+
+    chat_display_->verticalScrollBar()->setValue(chat_display_->verticalScrollBar()->maximum());
 }
 
 QString MainWindow::statusText(const QString& status) const {

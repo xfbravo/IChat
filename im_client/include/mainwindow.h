@@ -62,6 +62,7 @@ private:
         QString content;
         QString time;
         QString status;
+        qint64 timestamp = 0;
         bool is_mine = false;
     };
 
