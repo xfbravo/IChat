@@ -19,6 +19,11 @@ namespace {
 
 namespace json = boost::json;
 
+int64_t current_time_millis() {
+    const auto now = std::chrono::system_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+}
+
 json::object parse_json_object(const std::string& body) {
     json::value value = json::parse(body);
     if (!value.is_object()) {
@@ -575,9 +580,11 @@ void Server::register_default_handlers() {
             return;
         }
 
+        const int64_t server_timestamp = current_time_millis();
         payload["from_user_id"] = session->user_id();
         payload["content_type"] = content_type;
         payload["client_time"] = client_time;
+        payload["server_timestamp"] = server_timestamp;
         const std::string forward_body = json::serialize(payload);
         const int msg_type_code = chat_content_type_code(content_type);
 

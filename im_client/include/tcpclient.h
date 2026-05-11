@@ -196,7 +196,9 @@ signals:
      * @param from_user_id 发送者
      * @param content 内容
      */
-    void chatMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id);
+    void chatMessageReceived(const QString& from_user_id, const QString& content,
+                             const QString& msg_id, qint64 server_timestamp,
+                             const QString& server_time);
 
     /**
      * @brief 心跳响应信号

@@ -734,13 +734,22 @@ void MainWindow::onSendClicked() {
     message_input_->clear();
 }
 
-void MainWindow::onChatMessageReceived(const QString& from_user_id, const QString& content, const QString& msg_id) {
+void MainWindow::onChatMessageReceived(const QString& from_user_id, const QString& content,
+                                       const QString& msg_id, qint64 server_timestamp,
+                                       const QString& server_time) {
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = from_user_id;
     message.content = content;
-    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
-    message.timestamp = QDateTime::currentMSecsSinceEpoch();
+    message.time = server_time.isEmpty()
+        ? QDateTime::currentDateTime().toString("hh:mm:ss")
+        : server_time;
+    message.timestamp = server_timestamp > 0
+        ? server_timestamp
+        : timestampFromText(message.time);
+    if (message.timestamp <= 0) {
+        message.timestamp = QDateTime::currentMSecsSinceEpoch();
+    }
     message.is_mine = false;
     addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
 }

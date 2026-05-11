@@ -396,22 +396,23 @@ std::string UserService::get_friend_list(const std::string& user_id) {
     std::ostringstream query;
     const std::string escaped_user_id = sql_escape(mysql, user_id);
     query << "SELECT f.friend_id, f.remark, f.friend_nickname, f.friend_avatar, u.status, "
-          << "(SELECT m.content FROM im_message m "
-          << " WHERE ((m.from_user_id = '" << escaped_user_id << "' AND m.to_user_id = f.friend_id) "
-          << " OR (m.from_user_id = f.friend_id AND m.to_user_id = '" << escaped_user_id << "')) "
-          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_content, "
-          << "(SELECT DATE_FORMAT(m.server_time, '%Y-%m-%d %H:%i:%s') FROM im_message m "
-          << " WHERE ((m.from_user_id = '" << escaped_user_id << "' AND m.to_user_id = f.friend_id) "
-          << " OR (m.from_user_id = f.friend_id AND m.to_user_id = '" << escaped_user_id << "')) "
-          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_time, "
-          << "(SELECT CAST(UNIX_TIMESTAMP(m.server_time) * 1000 AS UNSIGNED) FROM im_message m "
-          << " WHERE ((m.from_user_id = '" << escaped_user_id << "' AND m.to_user_id = f.friend_id) "
-          << " OR (m.from_user_id = f.friend_id AND m.to_user_id = '" << escaped_user_id << "')) "
-          << " ORDER BY m.server_time DESC LIMIT 1) AS last_msg_timestamp "
+          << "lm.msg_id AS last_msg_id, lm.content AS last_msg_content, "
+          << "DATE_FORMAT(lm.server_time, '%Y-%m-%d %H:%i:%s') AS last_msg_time, "
+          << "CAST(UNIX_TIMESTAMP(lm.server_time) * 1000 AS UNSIGNED) AS last_msg_timestamp "
           << "FROM im_friend f "
           << "LEFT JOIN im_user u ON f.friend_id = u.user_id "
+          << "LEFT JOIN im_message lm ON ("
+          << " ((lm.from_user_id = '" << escaped_user_id << "' AND lm.to_user_id = f.friend_id) "
+          << " OR (lm.from_user_id = f.friend_id AND lm.to_user_id = '" << escaped_user_id << "')) "
+          << " AND NOT EXISTS ("
+          << "   SELECT 1 FROM im_message newer "
+          << "   WHERE ((newer.from_user_id = '" << escaped_user_id << "' AND newer.to_user_id = f.friend_id) "
+          << "   OR (newer.from_user_id = f.friend_id AND newer.to_user_id = '" << escaped_user_id << "')) "
+          << "   AND (newer.server_time > lm.server_time "
+          << "   OR (newer.server_time = lm.server_time AND newer.msg_id > lm.msg_id))"
+          << " )) "
           << "WHERE f.user_id = '" << escaped_user_id << "' AND f.status = 1 "
-          << "ORDER BY last_msg_timestamp DESC, f.friend_nickname ASC";
+          << "ORDER BY last_msg_timestamp IS NULL ASC, last_msg_timestamp DESC, f.friend_nickname ASC";
 
     if (mysql_query(mysql, query.str().c_str())) {
         return json::serialize(result);
@@ -428,9 +429,10 @@ std::string UserService::get_friend_list(const std::string& user_id) {
         item["nickname"] = row_string(row, 2);
         item["avatar_url"] = row_string(row, 3);
         item["status"] = row_int(row, 4);
-        item["last_msg_content"] = row_string(row, 5);
-        item["last_msg_time"] = row_string(row, 6);
-        item["last_msg_timestamp"] = row_int64(row, 7);
+        item["last_msg_id"] = row_string(row, 5);
+        item["last_msg_content"] = row_string(row, 6);
+        item["last_msg_time"] = row_string(row, 7);
+        item["last_msg_timestamp"] = row_int64(row, 8);
         result.push_back(std::move(item));
     }
 
