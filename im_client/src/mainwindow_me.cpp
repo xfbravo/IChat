@@ -35,6 +35,7 @@
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QSize>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QToolButton>
 #include <QTimer>
@@ -196,6 +197,7 @@ void MainWindow::createMeView() {
     auto createPanel = [](QWidget* parent, const QString& object_name) -> QFrame* {
         QFrame* panel = new QFrame(parent);
         panel->setObjectName(object_name);
+        panel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         return panel;
     };
 
@@ -265,8 +267,9 @@ void MainWindow::createMeView() {
         button->setIconSize(QSize(24, 24));
         button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         button->setCursor(Qt::PointingHandCursor);
+        button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         connect(button, &QToolButton::clicked, this, handler);
-        layout->addWidget(button);
+        layout->addWidget(button, 0, Qt::AlignTop);
         return button;
     };
 
@@ -308,6 +311,7 @@ void MainWindow::createMeView() {
 
     QWidget* home_content = new QWidget(home_scroll_area);
     home_content->setObjectName("mePage");
+    home_content->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     QVBoxLayout* home_layout = new QVBoxLayout(home_content);
     home_layout->setContentsMargins(36, 30, 36, 30);
     home_layout->setSpacing(18);
@@ -321,10 +325,11 @@ void MainWindow::createMeView() {
     me_profile_button_->setIconSize(QSize(72, 72));
     me_profile_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     me_profile_button_->setCursor(Qt::PointingHandCursor);
+    me_profile_button_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     connect(me_profile_button_, &QToolButton::clicked, this, [showPage, profile_page]() {
         showPage(profile_page);
     });
-    home_layout->addWidget(me_profile_button_);
+    home_layout->addWidget(me_profile_button_, 0, Qt::AlignTop);
 
     QFrame* entry_panel = createPanel(home_content, "mePanel");
     QVBoxLayout* entry_layout = new QVBoxLayout(entry_panel);
