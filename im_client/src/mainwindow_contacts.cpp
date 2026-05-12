@@ -27,6 +27,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QListView>
+#include <QAbstractItemView>
 #include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
@@ -50,6 +51,65 @@
 
 using namespace mainwindow_detail;
 
+namespace {
+
+class ContactListItemWidget : public QWidget {
+public:
+    ContactListItemWidget(const QString& title,
+                          const QString& subtitle,
+                          const QString& avatar_url,
+                          QWidget* parent = nullptr)
+        : QWidget(parent)
+    {
+        setAttribute(Qt::WA_StyledBackground, true);
+        setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        setStyleSheet("background: transparent;");
+
+        constexpr int avatar_size = 44;
+        QLabel* avatar_label = new QLabel(this);
+        avatar_label->setFixedSize(avatar_size, avatar_size);
+        avatar_label->setPixmap(avatarPixmapFromValue(avatar_url, title, avatar_size));
+        avatar_label->setAlignment(Qt::AlignCenter);
+
+        QLabel* title_label = new QLabel(title, this);
+        title_label->setTextFormat(Qt::PlainText);
+        title_label->setWordWrap(false);
+        title_label->setStyleSheet(R"(
+            QLabel {
+                color: #111111;
+                font-size: 15px;
+                font-weight: 600;
+                background: transparent;
+            }
+        )");
+
+        QLabel* subtitle_label = new QLabel(subtitle, this);
+        subtitle_label->setTextFormat(Qt::PlainText);
+        subtitle_label->setWordWrap(false);
+        subtitle_label->setStyleSheet(R"(
+            QLabel {
+                color: #777777;
+                font-size: 12px;
+                background: transparent;
+            }
+        )");
+
+        QVBoxLayout* text_layout = new QVBoxLayout;
+        text_layout->setContentsMargins(0, 0, 0, 0);
+        text_layout->setSpacing(4);
+        text_layout->addWidget(title_label);
+        text_layout->addWidget(subtitle_label);
+
+        QHBoxLayout* layout = new QHBoxLayout(this);
+        layout->setContentsMargins(16, 10, 16, 10);
+        layout->setSpacing(12);
+        layout->addWidget(avatar_label, 0, Qt::AlignVCenter);
+        layout->addLayout(text_layout, 1);
+    }
+};
+
+} // namespace
+
 void MainWindow::createContactView() {
     contact_view_ = new QWidget;
 
@@ -60,6 +120,20 @@ void MainWindow::createContactView() {
     QWidget* top_widget = new QWidget;
     top_widget->setFixedHeight(60);
     QHBoxLayout* top_layout = new QHBoxLayout(top_widget);
+    top_layout->setContentsMargins(20, 0, 16, 0);
+    top_layout->setSpacing(10);
+
+    QLabel* title_label = new QLabel("联系人", top_widget);
+    title_label->setStyleSheet(R"(
+        QLabel {
+            color: #111111;
+            font-family: "SimHei", "Microsoft YaHei", sans-serif;
+            font-size: 20px;
+            font-weight: 700;
+            background: transparent;
+        }
+    )");
+    top_layout->addWidget(title_label);
     top_layout->addStretch();
 
     add_contact_button_ = new QPushButton("添加联系人");
@@ -104,18 +178,34 @@ void MainWindow::createContactView() {
 
     // 联系人树
     contact_tree_widget_ = new QTreeWidget;
+    contact_tree_widget_->setColumnCount(1);
     contact_tree_widget_->setHeaderHidden(true);
+    contact_tree_widget_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    contact_tree_widget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    contact_tree_widget_->setRootIsDecorated(false);
+    contact_tree_widget_->setIndentation(0);
+    contact_tree_widget_->setFocusPolicy(Qt::NoFocus);
+    contact_tree_widget_->setSelectionMode(QAbstractItemView::SingleSelection);
+    contact_tree_widget_->setCursor(Qt::PointingHandCursor);
     contact_tree_widget_->setStyleSheet(R"(
         QTreeWidget {
             border: none;
             background-color: white;
             font-size: 14px;
+            outline: none;
         }
         QTreeWidget::item {
-            padding: 10px;
+            padding: 0;
+            border-bottom: 1px solid #eeeeee;
         }
         QTreeWidget::item:hover {
             background-color: #f5f5f5;
+        }
+        QTreeWidget::item:selected,
+        QTreeWidget::item:selected:active,
+        QTreeWidget::item:selected:!active {
+            background-color: #e8f5e9;
+            color: #111111;
         }
     )");
     connect(contact_tree_widget_, &QTreeWidget::itemDoubleClicked,
@@ -141,6 +231,62 @@ void MainWindow::onContactItemDoubleClicked(QTreeWidgetItem* item, int column) {
     }
 }
 
+void MainWindow::rebuildContactList() {
+    if (!contact_tree_widget_) return;
+
+    contact_tree_widget_->clear();
+
+    QList<QString> contact_ids;
+    if (chat_list_widget_) {
+        for (int i = 0; i < chat_list_widget_->count(); ++i) {
+            QListWidgetItem* chat_item = chat_list_widget_->item(i);
+            const QString friend_id = chat_item ? chat_item->data(Qt::UserRole).toString() : QString();
+            if (!friend_id.isEmpty()) {
+                contact_ids.append(friend_id);
+            }
+        }
+    }
+
+    if (contact_ids.isEmpty()) {
+        contact_ids = conversations_.keys();
+        std::stable_sort(contact_ids.begin(), contact_ids.end(),
+                         [this](const QString& left, const QString& right) {
+                             return conversationTitle(left).localeAwareCompare(conversationTitle(right)) < 0;
+                         });
+    }
+
+    for (const QString& friend_id : contact_ids) {
+        if (friend_id.isEmpty()) continue;
+
+        const QString saved_remark = contact_remarks_.value(friend_id).trimmed();
+        const QString nickname = contact_nicknames_.value(friend_id).trimmed();
+        QString title = saved_remark.isEmpty() ? nickname : saved_remark;
+        if (title.isEmpty()) {
+            title = conversationTitle(friend_id);
+        }
+        if (title.isEmpty()) {
+            title = friend_id;
+        }
+
+        const QString subtitle = !saved_remark.isEmpty() && !nickname.isEmpty() && nickname != saved_remark
+            ? QString("昵称: %1").arg(nickname)
+            : QString("账号: %1").arg(friend_id);
+
+        QTreeWidgetItem* friend_item = new QTreeWidgetItem(contact_tree_widget_);
+        friend_item->setText(0, title);
+        friend_item->setData(0, Qt::UserRole, friend_id);
+        friend_item->setData(0, Qt::AccessibleTextRole, title);
+        friend_item->setSizeHint(0, QSize(0, 68));
+
+        ContactListItemWidget* item_widget = new ContactListItemWidget(
+            title,
+            subtitle,
+            contact_avatars_.value(friend_id),
+            contact_tree_widget_);
+        contact_tree_widget_->setItemWidget(friend_item, 0, item_widget);
+    }
+}
+
 void MainWindow::onFriendListReceived(const QString& json) {
     QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
     if (!doc.isArray()) return;
@@ -154,7 +300,19 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString nickname = friend_obj["nickname"].toString();
         QString remark = friend_obj["remark"].toString().trimmed();
         QString avatar_url = friend_obj["avatar_url"].toString();
-        QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
+        if (!nickname.isEmpty()) {
+            contact_nicknames_[friend_id] = nickname;
+        }
+        if (remark.isEmpty()) {
+            contact_remarks_.remove(friend_id);
+        } else {
+            contact_remarks_[friend_id] = remark;
+        }
+        const QString fallback_nickname = nickname.isEmpty() ? contact_nicknames_.value(friend_id) : nickname;
+        QString display_name = contact_remarks_.value(friend_id, fallback_nickname);
+        if (display_name.isEmpty()) {
+            display_name = friend_id;
+        }
         QString last_message = friend_obj["last_msg_content"].toString();
         QString last_time = friend_obj["last_msg_time"].toString();
         qint64 last_timestamp = friend_obj["last_msg_timestamp"].toInteger();
@@ -178,26 +336,8 @@ void MainWindow::onFriendListReceived(const QString& json) {
         renderChatMessages(false);
     }
 
-    // 更新联系人树（不再调用 getFriendList，避免收到列表后再次请求形成循环）。
-    contact_tree_widget_->clear();
-    QTreeWidgetItem* contactGroup = new QTreeWidgetItem(contact_tree_widget_);
-    contactGroup->setText(0, "联系人");
-    contactGroup->setData(0, Qt::UserRole, QString());
-
-    for (int i = 0; i < chat_list_widget_->count(); ++i) {
-        QListWidgetItem* chatItem = chat_list_widget_->item(i);
-        QString friend_id = chatItem->data(Qt::UserRole).toString();
-        QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
-            ? conversations_[friend_id].title
-            : friend_id;
-
-        QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
-        friendItem->setText(0, nickname);
-        friendItem->setData(0, Qt::UserRole, friend_id);
-        contactGroup->addChild(friendItem);
-    }
-
-    contact_tree_widget_->expandAll();
+    // 更新联系人列表（不再调用 getFriendList，避免收到列表后再次请求形成循环）。
+    rebuildContactList();
 }
 
 void MainWindow::onFriendRequestReceived(const QString& from_user_id,
@@ -341,37 +481,28 @@ void MainWindow::onFriendRemarkUpdateResult(int code, const QString& message,
     }
 
     // 备注更新成功后立即同步到本地缓存、会话标题和联系人树。
-    contact_remarks_[friend_id] = remark;
-    conversations_[friend_id].title = remark;
+    const QString trimmed_remark = remark.trimmed();
+    const QString fallback_nickname = contact_nicknames_.value(friend_id).trimmed();
+    const QString display_name = trimmed_remark.isEmpty()
+        ? (fallback_nickname.isEmpty() ? friend_id : fallback_nickname)
+        : trimmed_remark;
+    if (trimmed_remark.isEmpty()) {
+        contact_remarks_.remove(friend_id);
+    } else {
+        contact_remarks_[friend_id] = trimmed_remark;
+    }
+    conversations_[friend_id].title = display_name;
     if (friend_id == current_chat_target_) {
-        chat_target_label_->setText(remark);
+        chat_target_label_->setText(display_name);
     }
     updateConversationItem(friend_id);
-    loadContacts();
+    rebuildContactList();
 }
 
 void MainWindow::loadContacts() {
     // 如果聊天列表已有数据，直接从 conversations_ 构造联系人树，减少一次网络请求。
     if (chat_list_widget_->count() > 0) {
-        contact_tree_widget_->clear();
-        QTreeWidgetItem* contactGroup = new QTreeWidgetItem(contact_tree_widget_);
-        contactGroup->setText(0, "联系人");
-        contactGroup->setData(0, Qt::UserRole, QString());
-
-        for (int i = 0; i < chat_list_widget_->count(); ++i) {
-            QListWidgetItem* chatItem = chat_list_widget_->item(i);
-            QString friend_id = chatItem->data(Qt::UserRole).toString();
-            QString nickname = conversations_.contains(friend_id) && !conversations_[friend_id].title.isEmpty()
-                ? conversations_[friend_id].title
-                : friend_id;
-
-            QTreeWidgetItem* friendItem = new QTreeWidgetItem(contactGroup);
-            friendItem->setText(0, nickname);
-            friendItem->setData(0, Qt::UserRole, friend_id);
-            contactGroup->addChild(friendItem);
-        }
-
-        contact_tree_widget_->expandAll();
+        rebuildContactList();
     } else {
         // 否则请求服务器获取好友列表
         tcp_client_->getFriendList();

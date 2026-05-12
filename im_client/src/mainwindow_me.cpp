@@ -316,10 +316,6 @@ void MainWindow::createMeView() {
     home_layout->setContentsMargins(36, 30, 36, 30);
     home_layout->setSpacing(18);
 
-    QLabel* title = new QLabel("我", home_content);
-    title->setObjectName("meTitle");
-    home_layout->addWidget(title);
-
     me_profile_button_ = new QToolButton(home_content);
     me_profile_button_->setObjectName("profileSummaryButton");
     me_profile_button_->setIconSize(QSize(72, 72));

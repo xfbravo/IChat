@@ -123,6 +123,7 @@ private:
     void refreshConversationList();
     void refreshConversationSelectionStyles();
     QString conversationTitle(const QString& peer_id) const;
+    void rebuildContactList();
     void loadChatList();
     void loadContacts();
     void switchToChatWith(const QString& user_id, const QString& nickname);
@@ -188,6 +189,7 @@ private:
 
     // 好友备注缓存，优先级高于服务端返回的昵称。
     QHash<QString, QString> contact_remarks_;
+    QHash<QString, QString> contact_nicknames_;
     QHash<QString, QString> contact_avatars_;
 
     /**
