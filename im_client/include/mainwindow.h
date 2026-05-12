@@ -2,7 +2,7 @@
  * @file mainwindow.h
  * @brief 客户端主窗口的状态与页面入口声明
  *
- * MainWindow 负责协调导航、消息、联系人、朋友圈和设置四类页面。
+ * MainWindow 负责协调导航、消息、联系人、朋友圈和“我”四类页面。
  * 具体页面实现拆分在 mainwindow_*.cpp 中，但共享状态仍保留在这里，
  * 避免不同页面之间复制会话列表、当前聊天对象和用户资料。
  */
@@ -100,7 +100,7 @@ private:
     void createSettingsView();
     void createMomentsView();
 
-    // 设置页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
+    // “我”页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
     QString encodeAvatarFile(const QString& file_path);
     void updateAvatarPreview();
 
@@ -160,7 +160,9 @@ private:
     QWidget* moments_view_;
     QWidget* settings_view_;
 
-    // Settings View
+    // Me View
+    QStackedWidget* settings_stack_ = nullptr;
+    QLabel* me_avatar_label_ = nullptr;
     QLabel* settings_avatar_label_ = nullptr;
     QLabel* settings_avatar_status_label_ = nullptr;
     QPushButton* upload_avatar_button_ = nullptr;

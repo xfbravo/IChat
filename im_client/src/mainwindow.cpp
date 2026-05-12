@@ -79,7 +79,7 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     content_stacked_->addWidget(message_view_);      // 0 - 消息
     content_stacked_->addWidget(contact_view_);     // 1 - 联系人
     content_stacked_->addWidget(moments_view_);     // 2 - 朋友圈
-    content_stacked_->addWidget(settings_view_);    // 3 - 设置
+    content_stacked_->addWidget(settings_view_);    // 3 - 我
     content_stacked_->setCurrentIndex(0);
 
     // 主布局：导航栏 + 内容区
@@ -188,7 +188,7 @@ void MainWindow::createNavigationBar() {
         {"message", "消息"},
         {"contacts", "联系人"},
         {"moments", "朋友圈"},
-        {"settings", "设置"}
+        {"me", "我"}
     };
     for (const auto& item : nav_items) {
         QListWidgetItem* nav_item = new QListWidgetItem(navIcon(item.first), item.second);
@@ -220,13 +220,27 @@ void MainWindow::onNavigationItemClicked(int index) {
         case 2: // 朋友圈
             content_stacked_->setCurrentWidget(moments_view_);
             break;
-        case 3: // 设置
+        case 3: // 我
             content_stacked_->setCurrentWidget(settings_view_);
+            if (settings_stack_) {
+                settings_stack_->setCurrentIndex(0);
+            }
+            updateAvatarPreview();
             break;
     }
 }
 
 void MainWindow::onLogoutClicked() {
+    const QMessageBox::StandardButton choice = QMessageBox::question(
+        this,
+        "退出登录",
+        "确定要退出当前账号吗？",
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (choice != QMessageBox::Yes) {
+        return;
+    }
+
     tcp_client_->disconnectFromServer();
     emit logout();
 }

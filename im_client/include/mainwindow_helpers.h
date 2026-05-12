@@ -231,16 +231,10 @@ inline QIcon navIcon(const QString& type) {
         painter.drawEllipse(QRectF(13, 3, 6, 6));
         painter.drawEllipse(QRectF(23, 16, 6, 6));
         painter.drawEllipse(QRectF(5, 21, 6, 6));
-    } else if (type == "settings") {
-        painter.drawEllipse(QRectF(11, 11, 10, 10));
-        for (int i = 0; i < 8; ++i) {
-            painter.save();
-            painter.translate(16, 16);
-            painter.rotate(i * 45);
-            painter.drawLine(QPointF(0, -13), QPointF(0, -10));
-            painter.restore();
-        }
-        painter.drawEllipse(QRectF(5, 5, 22, 22));
+    } else if (type == "me" || type == "settings") {
+        painter.drawEllipse(QRectF(11, 6, 10, 10));
+        painter.drawArc(QRectF(7, 17, 18, 13), 20 * 16, 140 * 16);
+        painter.drawRoundedRect(QRectF(5, 4, 22, 24), 8, 8);
     }
 
     return QIcon(pixmap);
