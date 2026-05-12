@@ -590,9 +590,28 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     meta_label->setAlignment(message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
     column_layout->addWidget(meta_label);
 
+    QWidget* bubble_row = new QWidget(message_column);
+    QHBoxLayout* bubble_row_layout = new QHBoxLayout(bubble_row);
+    bubble_row_layout->setContentsMargins(0, 0, 0, 0);
+    bubble_row_layout->setSpacing(8);
+
+    QLabel* avatar_label = new QLabel(bubble_row);
+    avatar_label->setFixedSize(avatar_size, avatar_size);
+    avatar_label->setPixmap(avatarPixmapFromValue(avatar_value, display_name, avatar_size));
+    avatar_label->setAlignment(Qt::AlignCenter);
+
     // 后续媒体消息可以在这里按 content_type 切换为图片、视频或文件卡片组件。
-    MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, message_column);
-    column_layout->addWidget(bubble, 0, message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
+    MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row);
+    if (message.is_mine) {
+        bubble_row_layout->addStretch();
+        bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);
+        bubble_row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
+    } else {
+        bubble_row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
+        bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);
+        bubble_row_layout->addStretch();
+    }
+    column_layout->addWidget(bubble_row);
 
     QString status = statusText(message.status);
     if (!status.isEmpty()) {
@@ -603,17 +622,10 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
         column_layout->addWidget(status_label);
     }
 
-    QLabel* avatar_label = new QLabel(row);
-    avatar_label->setFixedSize(avatar_size, avatar_size);
-    avatar_label->setPixmap(avatarPixmapFromValue(avatar_value, display_name, avatar_size));
-    avatar_label->setAlignment(Qt::AlignCenter);
-
     if (message.is_mine) {
         row_layout->addStretch();
         row_layout->addWidget(message_column, 0, Qt::AlignRight);
-        row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
     } else {
-        row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
         row_layout->addWidget(message_column, 0, Qt::AlignLeft);
         row_layout->addStretch();
     }
