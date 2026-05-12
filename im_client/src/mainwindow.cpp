@@ -1713,6 +1713,13 @@ void MainWindow::refreshConversationSelectionStyles() {
 void MainWindow::renderChatMessages(bool scroll_to_bottom) {
     QScrollBar* scroll_bar = chat_scroll_area_->verticalScrollBar();
     const int previous_scroll_value = scroll_bar ? scroll_bar->value() : 0;
+    QWidget* viewport = chat_scroll_area_->viewport();
+
+    chat_scroll_area_->setUpdatesEnabled(false);
+    if (viewport) {
+        viewport->setUpdatesEnabled(false);
+    }
+    chat_messages_widget_->setUpdatesEnabled(false);
 
     while (QLayoutItem* item = chat_messages_layout_->takeAt(0)) {
         if (QWidget* widget = item->widget()) {
@@ -1767,6 +1774,7 @@ void MainWindow::renderChatMessages(bool scroll_to_bottom) {
     chat_messages_layout_->addStretch();
     chat_messages_widget_->adjustSize();
     chat_messages_widget_->updateGeometry();
+    chat_messages_layout_->activate();
 
     auto apply_scroll = [this, scroll_to_bottom, previous_scroll_value]() {
         QScrollBar* bar = chat_scroll_area_->verticalScrollBar();
@@ -1774,7 +1782,17 @@ void MainWindow::renderChatMessages(bool scroll_to_bottom) {
         bar->setValue(scroll_to_bottom ? bar->maximum() : previous_scroll_value);
     };
 
-    QTimer::singleShot(0, this, apply_scroll);
+    apply_scroll();
+    QTimer::singleShot(0, this, [this, apply_scroll]() {
+        apply_scroll();
+        chat_messages_widget_->setUpdatesEnabled(true);
+        if (QWidget* current_viewport = chat_scroll_area_->viewport()) {
+            current_viewport->setUpdatesEnabled(true);
+            current_viewport->update();
+        }
+        chat_scroll_area_->setUpdatesEnabled(true);
+        chat_scroll_area_->update();
+    });
     QTimer::singleShot(50, this, apply_scroll);
     QTimer::singleShot(150, this, apply_scroll);
 }
