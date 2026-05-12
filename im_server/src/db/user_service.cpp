@@ -40,6 +40,68 @@ std::string sql_escape(MYSQL* mysql, const std::string& value) {
     return escaped;
 }
 
+bool ensure_large_text_column(MYSQL* mysql,
+                              const std::string& table,
+                              const std::string& column,
+                              const std::string& column_definition,
+                              std::string& error_message) {
+    std::ostringstream query;
+    query << "SELECT DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS "
+          << "WHERE TABLE_SCHEMA = DATABASE() "
+          << "AND TABLE_NAME = '" << sql_escape(mysql, table) << "' "
+          << "AND COLUMN_NAME = '" << sql_escape(mysql, column) << "' "
+          << "LIMIT 1";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (!row) {
+        mysql_free_result(res);
+        error_message = table + "." + column + " 字段不存在";
+        return false;
+    }
+
+    const std::string data_type = row_string(row, 0);
+    mysql_free_result(res);
+
+    if (data_type == "mediumtext" || data_type == "longtext") {
+        return true;
+    }
+
+    std::ostringstream alter_sql;
+    alter_sql << "ALTER TABLE `" << table << "` MODIFY COLUMN `"
+              << column << "` " << column_definition;
+
+    if (mysql_query(mysql, alter_sql.str().c_str())) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    return true;
+}
+
+bool ensure_avatar_columns(MYSQL* mysql, std::string& error_message) {
+    return ensure_large_text_column(mysql,
+                                    "im_user",
+                                    "avatar_url",
+                                    "MEDIUMTEXT COMMENT '头像URL或data URL'",
+                                    error_message)
+        && ensure_large_text_column(mysql,
+                                    "im_friend",
+                                    "friend_avatar",
+                                    "MEDIUMTEXT COMMENT '好友头像'",
+                                    error_message);
+}
+
 } // namespace
 
 std::string UserService::generate_token(const std::string& user_id) {
@@ -833,6 +895,14 @@ LoginResult UserService::update_avatar(const std::string& user_id,
     if (!mysql) {
         result.code = 5001;
         result.message = "数据库连接失败";
+        return result;
+    }
+
+    std::string schema_error;
+    if (!ensure_avatar_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 头像字段迁移失败: " << schema_error << std::endl;
+        result.code = 5002;
+        result.message = "头像字段迁移失败: " + schema_error;
         return result;
     }
 

@@ -565,6 +565,14 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
         ? chat_scroll_area_->viewport()->width()
         : chat_scroll_area_->width();
     const int max_text_width = qMax(180, static_cast<int>(viewport_width * 0.55));
+    constexpr int avatar_size = 36;
+
+    const QString display_name = message.is_mine
+        ? user_nickname_
+        : conversationTitle(message.from);
+    const QString avatar_value = message.is_mine
+        ? current_avatar_url_
+        : contact_avatars_.value(message.from);
 
     QWidget* row = new QWidget(chat_messages_widget_);
     row->setProperty("msg_id", message.msg_id);
@@ -595,10 +603,17 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
         column_layout->addWidget(status_label);
     }
 
+    QLabel* avatar_label = new QLabel(row);
+    avatar_label->setFixedSize(avatar_size, avatar_size);
+    avatar_label->setPixmap(avatarPixmapFromValue(avatar_value, display_name, avatar_size));
+    avatar_label->setAlignment(Qt::AlignCenter);
+
     if (message.is_mine) {
         row_layout->addStretch();
         row_layout->addWidget(message_column, 0, Qt::AlignRight);
+        row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
     } else {
+        row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
         row_layout->addWidget(message_column, 0, Qt::AlignLeft);
         row_layout->addStretch();
     }

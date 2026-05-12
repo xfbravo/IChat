@@ -179,6 +179,7 @@ private:
 
     // 好友备注缓存，优先级高于服务端返回的昵称。
     QHash<QString, QString> contact_remarks_;
+    QHash<QString, QString> contact_avatars_;
 
     /**
      * @brief 单个会话的本地 UI 状态

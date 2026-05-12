@@ -153,6 +153,7 @@ void MainWindow::onFriendListReceived(const QString& json) {
         QString friend_id = friend_obj["friend_id"].toString();
         QString nickname = friend_obj["nickname"].toString();
         QString remark = friend_obj["remark"].toString().trimmed();
+        QString avatar_url = friend_obj["avatar_url"].toString();
         QString display_name = contact_remarks_.value(friend_id, remark.isEmpty() ? nickname : remark);
         QString last_message = friend_obj["last_msg_content"].toString();
         QString last_time = friend_obj["last_msg_time"].toString();
@@ -163,6 +164,7 @@ void MainWindow::onFriendListReceived(const QString& json) {
 
         ConversationState& conversation = conversations_[friend_id];
         conversation.title = display_name;
+        contact_avatars_[friend_id] = avatar_url;
         if (last_timestamp > 0
             && (last_timestamp > conversation.last_timestamp || conversation.last_timestamp <= 0)) {
             conversation.last_message = last_message;
@@ -173,6 +175,7 @@ void MainWindow::onFriendListReceived(const QString& json) {
 
     if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_)) {
         chat_target_label_->setText(conversations_[current_chat_target_].title);
+        renderChatMessages(false);
     }
 
     // 更新联系人树（不再调用 getFriendList，避免收到列表后再次请求形成循环）。

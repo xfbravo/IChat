@@ -375,6 +375,9 @@ void MainWindow::onAvatarUpdateResult(int code, const QString& message, const QS
         current_avatar_url_ = avatar_url;
     }
     updateAvatarPreview();
+    if (!current_messages_.isEmpty()) {
+        renderChatMessages(false);
+    }
     if (settings_avatar_status_label_) {
         settings_avatar_status_label_->setText("头像已同步");
     }
