@@ -686,11 +686,26 @@ void MainWindow::onSaveProfileClicked() {
     if (save_profile_button_) {
         save_profile_button_->setEnabled(false);
     }
+    profile_save_pending_ = true;
     showProfileStatus("正在保存...");
     tcp_client_->updateProfile(nickname);
+
+    QTimer::singleShot(10000, this, [this]() {
+        if (!profile_save_pending_) {
+            return;
+        }
+        profile_save_pending_ = false;
+        if (save_profile_button_) {
+            save_profile_button_->setEnabled(true);
+        }
+        if (profile_status_label_) {
+            profile_status_label_->setText("保存超时，请确认服务端已更新");
+        }
+    });
 }
 
 void MainWindow::onProfileUpdateResult(int code, const QString& message, const QString& nickname) {
+    profile_save_pending_ = false;
     if (save_profile_button_) {
         save_profile_button_->setEnabled(true);
     }

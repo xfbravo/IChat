@@ -171,6 +171,7 @@ private:
     QLineEdit* profile_nickname_edit_ = nullptr;
     QLabel* profile_status_label_ = nullptr;
     QPushButton* save_profile_button_ = nullptr;
+    bool profile_save_pending_ = false;
     QPushButton* upload_avatar_button_ = nullptr;
     QLineEdit* old_password_edit_ = nullptr;
     QLineEdit* new_password_edit_ = nullptr;
