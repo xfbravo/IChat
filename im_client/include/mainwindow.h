@@ -21,6 +21,8 @@
 #include <QVector>
 #include "tcpclient.h"
 
+class QPropertyAnimation;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -90,6 +92,11 @@ private:
     void appendMessage(const QString& from, const QString& content, bool is_mine,
                        const QString& msg_id = QString(), const QString& status = QString());
     void renderChatMessages(bool scroll_to_bottom = false);
+    QWidget* createMessageRow(const ChatViewMessage& message);
+    void appendMessageRow(const ChatViewMessage& message);
+    void scrollToBottomAnimated();
+    void rebuildMessageIndex();
+    bool updateRenderedMessageStatus(const QString& msg_id, const QString& status);
     QString statusText(const QString& status) const;
     void markSendingMessagesFailed(const QString& reason);
     void addMessageToConversation(const QString& peer_id, const ChatViewMessage& message, bool count_unread);
@@ -125,6 +132,7 @@ private:
     QVBoxLayout* chat_messages_layout_;
     QLineEdit* message_input_;
     QPushButton* send_button_;
+    QPropertyAnimation* chat_scroll_animation_ = nullptr;
 
     // Contact View
     QWidget* contact_view_;

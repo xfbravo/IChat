@@ -32,6 +32,8 @@
 #include <QPainterPath>
 #include <QPixmap>
 #include <QPen>
+#include <QPropertyAnimation>
+#include <QEasingCurve>
 #include <QSize>
 #include <QStringList>
 #include <QToolButton>
@@ -1154,7 +1156,10 @@ void MainWindow::onMessageAckReceived(const QString& msg_id, const QString& stat
             }
             if (it.key() == current_chat_target_) {
                 current_messages_ = it->messages;
-                renderChatMessages(false);
+                rebuildMessageIndex();
+                if (!updateRenderedMessageStatus(msg_id, view_message.status)) {
+                    renderChatMessages(false);
+                }
             }
             return;
         }
@@ -1630,14 +1635,19 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
 
     if (peer_id == current_chat_target_) {
         conversation.unread = 0;
+        const bool can_append_to_current_view =
+            conversation.messages.size() == current_messages_.size() + 1 &&
+            !conversation.messages.isEmpty() &&
+            conversation.messages.last().msg_id == sorted_message.msg_id;
+
         current_messages_ = conversation.messages;
-        message_index_by_id_.clear();
-        for (int i = 0; i < current_messages_.size(); ++i) {
-            if (!current_messages_[i].msg_id.isEmpty()) {
-                message_index_by_id_[current_messages_[i].msg_id] = i;
-            }
+        rebuildMessageIndex();
+
+        if (can_append_to_current_view) {
+            appendMessageRow(current_messages_.last());
+        } else {
+            renderChatMessages(true);
         }
-        renderChatMessages(true);
     }
 
     updateConversationItem(peer_id);
@@ -1710,6 +1720,127 @@ void MainWindow::refreshConversationSelectionStyles() {
     }
 }
 
+QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
+    const int viewport_width = chat_scroll_area_->viewport()
+        ? chat_scroll_area_->viewport()->width()
+        : chat_scroll_area_->width();
+    const int max_text_width = qMax(180, static_cast<int>(viewport_width * 0.55));
+
+    QWidget* row = new QWidget(chat_messages_widget_);
+    row->setProperty("msg_id", message.msg_id);
+    QHBoxLayout* row_layout = new QHBoxLayout(row);
+    row_layout->setContentsMargins(0, 4, 0, 4);
+    row_layout->setSpacing(8);
+
+    QWidget* message_column = new QWidget(row);
+    QVBoxLayout* column_layout = new QVBoxLayout(message_column);
+    column_layout->setContentsMargins(0, 0, 0, 0);
+    column_layout->setSpacing(4);
+
+    QLabel* meta_label = new QLabel(message.time, message_column);
+    meta_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
+    meta_label->setAlignment(message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
+    column_layout->addWidget(meta_label);
+
+    MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, message_column);
+    column_layout->addWidget(bubble, 0, message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
+
+    QString status = statusText(message.status);
+    if (!status.isEmpty()) {
+        QLabel* status_label = new QLabel(status, message_column);
+        status_label->setObjectName("message_status_label");
+        status_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
+        status_label->setAlignment(Qt::AlignRight);
+        column_layout->addWidget(status_label);
+    }
+
+    if (message.is_mine) {
+        row_layout->addStretch();
+        row_layout->addWidget(message_column, 0, Qt::AlignRight);
+    } else {
+        row_layout->addWidget(message_column, 0, Qt::AlignLeft);
+        row_layout->addStretch();
+    }
+
+    return row;
+}
+
+void MainWindow::appendMessageRow(const ChatViewMessage& message) {
+    const int insert_index = qMax(0, chat_messages_layout_->count() - 1);
+    chat_messages_layout_->insertWidget(insert_index, createMessageRow(message));
+    chat_messages_widget_->adjustSize();
+    chat_messages_widget_->updateGeometry();
+    chat_messages_layout_->activate();
+    scrollToBottomAnimated();
+}
+
+void MainWindow::scrollToBottomAnimated() {
+    QTimer::singleShot(0, this, [this]() {
+        QScrollBar* bar = chat_scroll_area_->verticalScrollBar();
+        if (!bar) return;
+
+        const int end_value = bar->maximum();
+        const int start_value = bar->value();
+        if (start_value >= end_value) {
+            bar->setValue(end_value);
+            return;
+        }
+
+        if (chat_scroll_animation_) {
+            chat_scroll_animation_->stop();
+            chat_scroll_animation_->deleteLater();
+            chat_scroll_animation_ = nullptr;
+        }
+
+        QPropertyAnimation* animation = new QPropertyAnimation(bar, "value", this);
+        chat_scroll_animation_ = animation;
+        animation->setDuration(220);
+        animation->setEasingCurve(QEasingCurve::OutCubic);
+        animation->setStartValue(start_value);
+        animation->setEndValue(end_value);
+        connect(animation, &QPropertyAnimation::finished, this, [this, animation, bar]() {
+            if (chat_scroll_animation_ == animation) {
+                chat_scroll_animation_ = nullptr;
+            }
+            bar->setValue(bar->maximum());
+            animation->deleteLater();
+        });
+        animation->start();
+    });
+}
+
+void MainWindow::rebuildMessageIndex() {
+    message_index_by_id_.clear();
+    for (int i = 0; i < current_messages_.size(); ++i) {
+        if (!current_messages_[i].msg_id.isEmpty()) {
+            message_index_by_id_[current_messages_[i].msg_id] = i;
+        }
+    }
+}
+
+bool MainWindow::updateRenderedMessageStatus(const QString& msg_id, const QString& status) {
+    if (msg_id.isEmpty()) return false;
+
+    const QString text = statusText(status);
+    for (int i = 0; i < chat_messages_layout_->count(); ++i) {
+        QLayoutItem* item = chat_messages_layout_->itemAt(i);
+        QWidget* row = item ? item->widget() : nullptr;
+        if (!row || row->property("msg_id").toString() != msg_id) {
+            continue;
+        }
+
+        QLabel* status_label = row->findChild<QLabel*>("message_status_label");
+        if (status_label) {
+            status_label->setText(text);
+            status_label->setVisible(!text.isEmpty());
+            return true;
+        }
+        return text.isEmpty();
+    }
+
+    return false;
+}
+
 void MainWindow::renderChatMessages(bool scroll_to_bottom) {
     QScrollBar* scroll_bar = chat_scroll_area_->verticalScrollBar();
     const int previous_scroll_value = scroll_bar ? scroll_bar->value() : 0;
@@ -1728,47 +1859,8 @@ void MainWindow::renderChatMessages(bool scroll_to_bottom) {
         delete item;
     }
 
-    const int viewport_width = chat_scroll_area_->viewport()
-        ? chat_scroll_area_->viewport()->width()
-        : chat_scroll_area_->width();
-    const int max_text_width = qMax(180, static_cast<int>(viewport_width * 0.55));
-
     for (const ChatViewMessage& message : current_messages_) {
-        QWidget* row = new QWidget(chat_messages_widget_);
-        QHBoxLayout* row_layout = new QHBoxLayout(row);
-        row_layout->setContentsMargins(0, 4, 0, 4);
-        row_layout->setSpacing(8);
-
-        QWidget* message_column = new QWidget(row);
-        QVBoxLayout* column_layout = new QVBoxLayout(message_column);
-        column_layout->setContentsMargins(0, 0, 0, 0);
-        column_layout->setSpacing(4);
-
-        QLabel* meta_label = new QLabel(message.time, message_column);
-        meta_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
-        meta_label->setAlignment(message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
-        column_layout->addWidget(meta_label);
-
-        MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, message_column);
-        column_layout->addWidget(bubble, 0, message.is_mine ? Qt::AlignRight : Qt::AlignLeft);
-
-        QString status = statusText(message.status);
-        if (!status.isEmpty()) {
-            QLabel* status_label = new QLabel(status, message_column);
-            status_label->setStyleSheet("QLabel { color: #888888; font-size: 12px; }");
-            status_label->setAlignment(Qt::AlignRight);
-            column_layout->addWidget(status_label);
-        }
-
-        if (message.is_mine) {
-            row_layout->addStretch();
-            row_layout->addWidget(message_column, 0, Qt::AlignRight);
-        } else {
-            row_layout->addWidget(message_column, 0, Qt::AlignLeft);
-            row_layout->addStretch();
-        }
-
-        chat_messages_layout_->addWidget(row);
+        chat_messages_layout_->addWidget(createMessageRow(message));
     }
 
     chat_messages_layout_->addStretch();
