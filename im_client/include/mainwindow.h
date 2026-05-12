@@ -1,6 +1,10 @@
 /**
  * @file mainwindow.h
- * @brief 主窗口
+ * @brief 客户端主窗口的状态与页面入口声明
+ *
+ * MainWindow 负责协调导航、消息、联系人、朋友圈和设置四类页面。
+ * 具体页面实现拆分在 mainwindow_*.cpp 中，但共享状态仍保留在这里，
+ * 避免不同页面之间复制会话列表、当前聊天对象和用户资料。
  */
 
 #pragma once
@@ -72,6 +76,13 @@ private slots:
     void onPasswordChangeResult(int code, const QString& message);
 
 private:
+    /**
+     * @brief 聊天区渲染用的消息模型
+     *
+     * 这里保存的是 UI 层需要的字段，不直接暴露协议 JSON。
+     * 后续支持图片、语音、视频时，应优先扩展 content_type/媒体元数据，
+     * 再让渲染层根据类型选择不同消息气泡。
+     */
     struct ChatViewMessage {
         QString msg_id;
         QString from;
@@ -82,13 +93,18 @@ private:
         bool is_mine = false;
     };
 
+    // 页面创建入口，具体实现分别位于 mainwindow*.cpp。
     void createNavigationBar();
     void createMessageView();
     void createContactView();
     void createSettingsView();
-    void createPlaceholderView(QWidget*& widget, const QString& text);
+    void createMomentsView();
+
+    // 设置页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
     QString encodeAvatarFile(const QString& file_path);
     void updateAvatarPreview();
+
+    // 消息页工具：维护 conversations_ 与当前聊天窗口的同步。
     void appendMessage(const QString& from, const QString& content, bool is_mine,
                        const QString& msg_id = QString(), const QString& status = QString());
     void renderChatMessages(bool scroll_to_bottom = false);
@@ -109,6 +125,7 @@ private:
     void switchToChatWith(const QString& user_id, const QString& nickname);
 
 private:
+    // 登录态和当前用户资料。TcpClient 仍然是唯一网络入口。
     TcpClient* tcp_client_;
     QString user_id_;
     QString user_nickname_;
@@ -156,10 +173,19 @@ private:
     // Status
     QLabel* status_label_;
 
+    // 当前右侧聊天窗口正在展示的消息，以及 msg_id 到下标的快速索引。
     QVector<ChatViewMessage> current_messages_;
     QHash<QString, int> message_index_by_id_;
+
+    // 好友备注缓存，优先级高于服务端返回的昵称。
     QHash<QString, QString> contact_remarks_;
 
+    /**
+     * @brief 单个会话的本地 UI 状态
+     *
+     * 会话列表、未读数、最近消息和聊天历史都从这里生成。
+     * 服务端返回好友列表或聊天记录后，也会合并回这个结构。
+     */
     struct ConversationState {
         QString title;
         QVector<ChatViewMessage> messages;
