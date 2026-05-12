@@ -89,7 +89,7 @@ private:
     void updateAvatarPreview();
     void appendMessage(const QString& from, const QString& content, bool is_mine,
                        const QString& msg_id = QString(), const QString& status = QString());
-    void renderChatMessages();
+    void renderChatMessages(bool scroll_to_bottom = false);
     QString statusText(const QString& status) const;
     void markSendingMessagesFailed(const QString& reason);
     void addMessageToConversation(const QString& peer_id, const ChatViewMessage& message, bool count_unread);

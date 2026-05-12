@@ -1154,7 +1154,7 @@ void MainWindow::onMessageAckReceived(const QString& msg_id, const QString& stat
             }
             if (it.key() == current_chat_target_) {
                 current_messages_ = it->messages;
-                renderChatMessages();
+                renderChatMessages(false);
             }
             return;
         }
@@ -1186,7 +1186,7 @@ void MainWindow::switchToChatWith(const QString& user_id, const QString& nicknam
     conversations_[user_id].unread = 0;
     current_messages_ = conversations_[user_id].messages;
     message_index_by_id_.clear();
-    renderChatMessages();
+    renderChatMessages(true);
     updateConversationItem(user_id);
     // 加载聊天记录
     tcp_client_->getChatHistory(user_id, 20, 0);
@@ -1637,7 +1637,7 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
                 message_index_by_id_[current_messages_[i].msg_id] = i;
             }
         }
-        renderChatMessages();
+        renderChatMessages(true);
     }
 
     updateConversationItem(peer_id);
@@ -1710,7 +1710,10 @@ void MainWindow::refreshConversationSelectionStyles() {
     }
 }
 
-void MainWindow::renderChatMessages() {
+void MainWindow::renderChatMessages(bool scroll_to_bottom) {
+    QScrollBar* scroll_bar = chat_scroll_area_->verticalScrollBar();
+    const int previous_scroll_value = scroll_bar ? scroll_bar->value() : 0;
+
     while (QLayoutItem* item = chat_messages_layout_->takeAt(0)) {
         if (QWidget* widget = item->widget()) {
             widget->deleteLater();
@@ -1762,9 +1765,18 @@ void MainWindow::renderChatMessages() {
     }
 
     chat_messages_layout_->addStretch();
-    QTimer::singleShot(0, this, [this]() {
-        chat_scroll_area_->verticalScrollBar()->setValue(chat_scroll_area_->verticalScrollBar()->maximum());
-    });
+    chat_messages_widget_->adjustSize();
+    chat_messages_widget_->updateGeometry();
+
+    auto apply_scroll = [this, scroll_to_bottom, previous_scroll_value]() {
+        QScrollBar* bar = chat_scroll_area_->verticalScrollBar();
+        if (!bar) return;
+        bar->setValue(scroll_to_bottom ? bar->maximum() : previous_scroll_value);
+    };
+
+    QTimer::singleShot(0, this, apply_scroll);
+    QTimer::singleShot(50, this, apply_scroll);
+    QTimer::singleShot(150, this, apply_scroll);
 }
 
 QString MainWindow::statusText(const QString& status) const {
@@ -1791,7 +1803,7 @@ void MainWindow::markSendingMessagesFailed(const QString& reason) {
         if (!current_chat_target_.isEmpty()) {
             current_messages_ = conversations_[current_chat_target_].messages;
         }
-        renderChatMessages();
+        renderChatMessages(false);
     }
 }
 
