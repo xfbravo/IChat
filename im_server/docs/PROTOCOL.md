@@ -72,6 +72,8 @@ enum class MsgType : uint16_t {
     OFFLINE_MESSAGE_ACK  = 0x0011,  // 离线消息确认
     UPDATE_FRIEND_REMARK = 0x0012,  // 修改好友备注
     UPDATE_AVATAR        = 0x0013,  // 更新头像
+    CHANGE_PASSWORD      = 0x0014,  // 修改密码
+    UPDATE_PROFILE       = 0x0015,  // 更新个人信息
 
     LOGIN_RSP            = 0x8002,  // 登录响应
     REGISTER_RSP         = 0x8003,  // 注册响应
@@ -83,6 +85,8 @@ enum class MsgType : uint16_t {
     OFFLINE_MESSAGE      = 0x8011,  // 离线消息推送
     UPDATE_FRIEND_REMARK_RSP = 0x8012, // 修改好友备注响应
     UPDATE_AVATAR_RSP    = 0x8013,  // 更新头像响应
+    CHANGE_PASSWORD_RSP  = 0x8014,  // 修改密码响应
+    UPDATE_PROFILE_RSP   = 0x8015,  // 更新个人信息响应
 };
 ```
 
@@ -169,7 +173,7 @@ enum class MsgType : uint16_t {
 
 ### 3.4 更新头像
 
-客户端在设置页选择本地图片后，将图片裁剪压缩为 JPEG data URL，再同步到服务端。服务端会保存到用户资料中，并在后续 `LOGIN_RSP` 的 `avatar_url` 中返回。
+客户端在“我”页选择本地图片后，将图片裁剪压缩为 JPEG data URL，再同步到服务端。服务端会保存到用户资料中，并在后续 `LOGIN_RSP` 的 `avatar_url` 中返回。
 
 **请求 (UPDATE_AVATAR / 0x0013)**:
 ```json
@@ -189,7 +193,27 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.5 统一聊天消息
+### 3.5 更新个人信息
+
+**请求 (UPDATE_PROFILE / 0x0015)**:
+```json
+{
+    "nickname": "张三"
+}
+```
+
+**响应 (UPDATE_PROFILE_RSP / 0x8015)**:
+```json
+{
+    "code": 0,
+    "message": "资料已保存",
+    "nickname": "张三"
+}
+```
+
+---
+
+### 3.6 统一聊天消息
 
 **发送请求 (CHAT_MESSAGE / 0x0005)**:
 ```json

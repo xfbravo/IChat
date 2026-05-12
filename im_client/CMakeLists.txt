@@ -26,7 +26,7 @@ set(SOURCES
     src/mainwindow.cpp
     src/mainwindow_messages.cpp
     src/mainwindow_contacts.cpp
-    src/mainwindow_settings.cpp
+    src/mainwindow_me.cpp
     src/mainwindow_moments.cpp
     src/loginwindow.cpp
     src/tcpclient.cpp

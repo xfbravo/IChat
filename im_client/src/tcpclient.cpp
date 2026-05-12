@@ -244,6 +244,17 @@ void TcpClient::updateAvatar(const QString& avatar_url) {
     sendMessage(MsgType::UPDATE_AVATAR, body);
 }
 
+void TcpClient::updateProfile(const QString& nickname) {
+    if (state_ != ClientState::LoggedIn) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["nickname"] = nickname;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::UPDATE_PROFILE, body);
+}
+
 void TcpClient::changePassword(const QString& old_password, const QString& new_password) {
     if (state_ != ClientState::LoggedIn) {
         return;
@@ -497,6 +508,23 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 emit avatarUpdateResult(code,
                                         obj["message"].toString(),
                                         avatar_url);
+            }
+            break;
+        }
+
+        case MsgType::UPDATE_PROFILE_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                const int code = obj["code"].toInt();
+                const QString nickname = obj["nickname"].toString();
+                if (code == 0 && !nickname.isEmpty()) {
+                    user_nickname_ = nickname;
+                    saveCredentials();
+                }
+                emit profileUpdateResult(code,
+                                         obj["message"].toString(),
+                                         nickname);
             }
             break;
         }

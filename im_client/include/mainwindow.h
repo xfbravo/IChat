@@ -72,6 +72,8 @@ private slots:
     void onEditContactRemark();
     void onUploadAvatarClicked();
     void onAvatarUpdateResult(int code, const QString& message, const QString& avatar_url);
+    void onSaveProfileClicked();
+    void onProfileUpdateResult(int code, const QString& message, const QString& nickname);
     void onChangePasswordClicked();
     void onPasswordChangeResult(int code, const QString& message);
 
@@ -97,12 +99,13 @@ private:
     void createNavigationBar();
     void createMessageView();
     void createContactView();
-    void createSettingsView();
+    void createMeView();
     void createMomentsView();
 
     // “我”页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
     QString encodeAvatarFile(const QString& file_path);
     void updateAvatarPreview();
+    void updateMeProfileText();
 
     // 消息页工具：维护 conversations_ 与当前聊天窗口的同步。
     void appendMessage(const QString& from, const QString& content, bool is_mine,
@@ -156,15 +159,18 @@ private:
     QTreeWidget* contact_tree_widget_;
     QPushButton* add_contact_button_;
 
-    // Placeholder views
+    // Top-level views
     QWidget* moments_view_;
-    QWidget* settings_view_;
+    QWidget* me_view_;
 
     // Me View
-    QStackedWidget* settings_stack_ = nullptr;
-    QLabel* me_avatar_label_ = nullptr;
-    QLabel* settings_avatar_label_ = nullptr;
-    QLabel* settings_avatar_status_label_ = nullptr;
+    QStackedWidget* me_stack_ = nullptr;
+    QToolButton* me_profile_button_ = nullptr;
+    QLabel* profile_avatar_label_ = nullptr;
+    QLabel* avatar_status_label_ = nullptr;
+    QLineEdit* profile_nickname_edit_ = nullptr;
+    QLabel* profile_status_label_ = nullptr;
+    QPushButton* save_profile_button_ = nullptr;
     QPushButton* upload_avatar_button_ = nullptr;
     QLineEdit* old_password_edit_ = nullptr;
     QLineEdit* new_password_edit_ = nullptr;

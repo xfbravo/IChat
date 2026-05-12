@@ -72,14 +72,14 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     createMessageView();
     createContactView();
     createMomentsView();
-    createSettingsView();
+    createMeView();
 
     // StackedWidget 的索引必须与左侧 nav_items 顺序保持一致。
     content_stacked_ = new QStackedWidget;
     content_stacked_->addWidget(message_view_);      // 0 - 消息
     content_stacked_->addWidget(contact_view_);     // 1 - 联系人
     content_stacked_->addWidget(moments_view_);     // 2 - 朋友圈
-    content_stacked_->addWidget(settings_view_);    // 3 - 我
+    content_stacked_->addWidget(me_view_);          // 3 - 我
     content_stacked_->setCurrentIndex(0);
 
     // 主布局：导航栏 + 内容区
@@ -121,6 +121,8 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onFriendRemarkUpdateResult);
     connect(tcp_client_, &TcpClient::avatarUpdateResult,
             this, &MainWindow::onAvatarUpdateResult);
+    connect(tcp_client_, &TcpClient::profileUpdateResult,
+            this, &MainWindow::onProfileUpdateResult);
     connect(tcp_client_, &TcpClient::passwordChangeResult,
             this, &MainWindow::onPasswordChangeResult);
 }
@@ -221,11 +223,12 @@ void MainWindow::onNavigationItemClicked(int index) {
             content_stacked_->setCurrentWidget(moments_view_);
             break;
         case 3: // 我
-            content_stacked_->setCurrentWidget(settings_view_);
-            if (settings_stack_) {
-                settings_stack_->setCurrentIndex(0);
+            content_stacked_->setCurrentWidget(me_view_);
+            if (me_stack_) {
+                me_stack_->setCurrentIndex(0);
             }
             updateAvatarPreview();
+            updateMeProfileText();
             break;
     }
 }

@@ -130,6 +130,11 @@ public:
     void updateAvatar(const QString& avatar_url);
 
     /**
+     * @brief 更新当前用户个人信息
+     */
+    void updateProfile(const QString& nickname);
+
+    /**
      * @brief 修改当前用户密码
      */
     void changePassword(const QString& old_password, const QString& new_password);
@@ -246,6 +251,11 @@ signals:
      * @brief 更新头像结果信号
      */
     void avatarUpdateResult(int code, const QString& message, const QString& avatar_url);
+
+    /**
+     * @brief 更新个人信息结果信号
+     */
+    void profileUpdateResult(int code, const QString& message, const QString& nickname);
 
     /**
      * @brief 修改密码结果信号

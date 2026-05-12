@@ -203,9 +203,8 @@ private:
     QLabel* badge_label_;
 };
 
-inline QIcon navIcon(const QString& type) {
-    // 导航栏图标用 QPainter 生成，避免额外资源文件；新增页面时在这里补图标类型。
-    const QColor color("#ecf0f1");
+inline QIcon lineIcon(const QString& type, const QColor& color) {
+    // 图标用 QPainter 生成，避免额外资源文件；新增页面时在这里补图标类型。
     QPixmap pixmap(32, 32);
     pixmap.fill(Qt::transparent);
 
@@ -231,13 +230,44 @@ inline QIcon navIcon(const QString& type) {
         painter.drawEllipse(QRectF(13, 3, 6, 6));
         painter.drawEllipse(QRectF(23, 16, 6, 6));
         painter.drawEllipse(QRectF(5, 21, 6, 6));
-    } else if (type == "me" || type == "settings") {
+    } else if (type == "me") {
         painter.drawEllipse(QRectF(11, 6, 10, 10));
         painter.drawArc(QRectF(7, 17, 18, 13), 20 * 16, 140 * 16);
         painter.drawRoundedRect(QRectF(5, 4, 22, 24), 8, 8);
+    } else if (type == "favorite") {
+        QPainterPath bookmark;
+        bookmark.moveTo(9, 6);
+        bookmark.lineTo(23, 6);
+        bookmark.lineTo(23, 26);
+        bookmark.lineTo(16, 21);
+        bookmark.lineTo(9, 26);
+        bookmark.closeSubpath();
+        painter.drawPath(bookmark);
+    } else if (type == "account") {
+        painter.drawEllipse(QRectF(11, 11, 10, 10));
+        for (int i = 0; i < 8; ++i) {
+            painter.save();
+            painter.translate(16, 16);
+            painter.rotate(i * 45);
+            painter.drawLine(QPointF(0, -13), QPointF(0, -10));
+            painter.restore();
+        }
+        painter.drawEllipse(QRectF(5, 5, 22, 22));
+    } else if (type == "password") {
+        painter.drawRoundedRect(QRectF(8, 14, 16, 12), 3, 3);
+        painter.drawArc(QRectF(10, 6, 12, 13), 0, 180 * 16);
+    } else if (type == "logout") {
+        painter.drawRoundedRect(QRectF(6, 7, 13, 18), 3, 3);
+        painter.drawLine(QPointF(15, 16), QPointF(27, 16));
+        painter.drawLine(QPointF(23, 12), QPointF(27, 16));
+        painter.drawLine(QPointF(23, 20), QPointF(27, 16));
     }
 
     return QIcon(pixmap);
+}
+
+inline QIcon navIcon(const QString& type) {
+    return lineIcon(type, QColor("#ecf0f1"));
 }
 
 inline QPixmap circularAvatarPixmap(const QPixmap& source, int size) {
@@ -268,7 +298,7 @@ inline QPixmap circularAvatarPixmap(const QPixmap& source, int size) {
 
 inline QPixmap defaultAvatarPixmap(const QString& display_name, int size) {
     const QString trimmed_name = display_name.trimmed();
-    // 没有头像时使用昵称首字母，保证联系人和设置页始终有稳定头像。
+    // 没有头像时使用昵称首字母，保证联系人和“我”页始终有稳定头像。
     const QString initial = trimmed_name.isEmpty() ? "I" : trimmed_name.left(1).toUpper();
 
     QPixmap result(size, size);

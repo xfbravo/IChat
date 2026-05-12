@@ -31,6 +31,15 @@ int64_t row_int64(MYSQL_ROW row, int index, int64_t default_value = 0) {
     return row[index] ? std::stoll(row[index]) : default_value;
 }
 
+std::string trim_copy(const std::string& value) {
+    const std::size_t begin = value.find_first_not_of(" \t\r\n");
+    if (begin == std::string::npos) {
+        return "";
+    }
+    const std::size_t end = value.find_last_not_of(" \t\r\n");
+    return value.substr(begin, end - begin + 1);
+}
+
 std::string sql_escape(MYSQL* mysql, const std::string& value) {
     std::string escaped;
     escaped.resize(value.size() * 2 + 1);
@@ -923,6 +932,67 @@ LoginResult UserService::update_avatar(const std::string& user_id,
     result.message = "头像已同步";
     result.user_id = user_id;
     result.avatar_url = avatar_url;
+    return result;
+}
+
+LoginResult UserService::update_profile(const std::string& user_id,
+                                        const std::string& nickname) {
+    LoginResult result;
+    const std::string clean_nickname = trim_copy(nickname);
+
+    if (user_id.empty()) {
+        result.code = 401;
+        result.message = "未登录";
+        return result;
+    }
+
+    if (clean_nickname.empty()) {
+        result.code = 1;
+        result.message = "昵称不能为空";
+        return result;
+    }
+
+    if (clean_nickname.size() > 64) {
+        result.code = 2;
+        result.message = "昵称长度不能超过64个字符";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
+    const std::string escaped_nickname = sql_escape(mysql, clean_nickname);
+
+    std::ostringstream sql;
+    sql << "UPDATE im_user SET nickname = '" << escaped_nickname
+        << "', update_time = NOW() "
+        << "WHERE user_id = '" << escaped_user_id
+        << "' AND status = 1";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        std::cerr << "[UserService] 更新个人信息失败: " << mysql_error(mysql) << std::endl;
+        result.code = 5001;
+        result.message = "资料保存失败";
+        return result;
+    }
+
+    std::ostringstream friend_sql;
+    friend_sql << "UPDATE im_friend SET friend_nickname = '" << escaped_nickname
+               << "' WHERE friend_id = '" << escaped_user_id << "'";
+    if (mysql_query(mysql, friend_sql.str().c_str())) {
+        std::cerr << "[UserService] 同步好友昵称失败: " << mysql_error(mysql) << std::endl;
+    }
+
+    result.code = 0;
+    result.message = "资料已保存";
+    result.user_id = user_id;
+    result.nickname = clean_nickname;
     return result;
 }
 

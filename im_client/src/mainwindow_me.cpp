@@ -1,6 +1,6 @@
 /**
- * @file mainwindow_settings.cpp
- * @brief MainWindow 设置页、头像和密码管理
+ * @file mainwindow_me.cpp
+ * @brief MainWindow “我”页、头像、个人信息和账号管理
  */
 
 #include "mainwindow.h"
@@ -49,11 +49,11 @@
 
 using namespace mainwindow_detail;
 
-void MainWindow::createSettingsView() {
-    settings_view_ = new QWidget;
-    settings_view_->setObjectName("settingsRoot");
-    settings_view_->setStyleSheet(R"(
-        QWidget#settingsRoot {
+void MainWindow::createMeView() {
+    me_view_ = new QWidget;
+    me_view_->setObjectName("meRoot");
+    me_view_->setStyleSheet(R"(
+        QWidget#meRoot {
             background-color: #f7f8fa;
             font-family: "Microsoft YaHei", sans-serif;
         }
@@ -67,41 +67,39 @@ void MainWindow::createSettingsView() {
         QWidget#mePage {
             background-color: #f7f8fa;
         }
-        QFrame#profileSummaryPanel,
         QFrame#mePanel,
         QFrame#profilePanel,
-        QFrame#passwordPanel {
+        QFrame#passwordPanel,
+        QFrame#placeholderPanel {
             background-color: #ffffff;
             border: 1px solid #e5e7eb;
             border-radius: 6px;
         }
-        QLabel#settingsTitle {
+        QLabel#meTitle {
             color: #111827;
             font-size: 24px;
             font-weight: 700;
         }
-        QLabel#settingsSectionTitle {
+        QLabel#meSectionTitle {
             color: #111827;
             font-size: 16px;
             font-weight: 700;
         }
-        QLabel#settingsName {
+        QLabel#meName {
             color: #111827;
             font-size: 18px;
             font-weight: 600;
         }
-        QLabel#settingsMeta {
+        QLabel#meMeta {
             color: #6b7280;
             font-size: 13px;
         }
-        QLabel#settingsStatus {
-            color: #6b7280;
-            font-size: 12px;
-        }
+        QLabel#meStatus,
         QLabel#passwordStatus {
             color: #6b7280;
             font-size: 12px;
         }
+        QLineEdit#profileInput,
         QLineEdit#passwordInput {
             min-height: 34px;
             max-width: 340px;
@@ -112,34 +110,37 @@ void MainWindow::createSettingsView() {
             border-radius: 4px;
             font-size: 14px;
         }
+        QLineEdit#profileInput:focus,
         QLineEdit#passwordInput:focus {
             border-color: #4CAF50;
         }
-        QPushButton#meRowButton,
-        QPushButton#disabledRowButton,
-        QPushButton#dangerRowButton {
-            min-height: 44px;
-            padding: 0 14px;
+        QToolButton#profileSummaryButton,
+        QToolButton#meEntryButton,
+        QToolButton#dangerEntryButton {
+            min-height: 54px;
+            padding: 0 18px;
             color: #111827;
             background-color: #ffffff;
             border: 1px solid #e5e7eb;
             border-radius: 4px;
-            font-size: 14px;
+            font-size: 15px;
             text-align: left;
         }
-        QPushButton#meRowButton:hover {
+        QToolButton#profileSummaryButton {
+            min-height: 108px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        QToolButton#profileSummaryButton:hover,
+        QToolButton#meEntryButton:hover {
             background-color: #f3f4f6;
             border-color: #d1d5db;
         }
-        QPushButton#disabledRowButton {
-            color: #9ca3af;
-            background-color: #f9fafb;
-        }
-        QPushButton#dangerRowButton {
+        QToolButton#dangerEntryButton {
             color: #dc2626;
             font-weight: 600;
         }
-        QPushButton#dangerRowButton:hover {
+        QToolButton#dangerEntryButton:hover {
             background-color: #fef2f2;
             border-color: #fecaca;
         }
@@ -155,7 +156,8 @@ void MainWindow::createSettingsView() {
         QPushButton#backButton:hover {
             background-color: #f3f4f6;
         }
-        QPushButton#avatarUploadButton {
+        QPushButton#avatarUploadButton,
+        QPushButton#profileSaveButton {
             min-width: 96px;
             padding: 9px 18px;
             color: #ffffff;
@@ -165,10 +167,12 @@ void MainWindow::createSettingsView() {
             font-size: 14px;
             font-weight: 600;
         }
-        QPushButton#avatarUploadButton:hover {
+        QPushButton#avatarUploadButton:hover,
+        QPushButton#profileSaveButton:hover {
             background-color: #45a049;
         }
-        QPushButton#avatarUploadButton:disabled {
+        QPushButton#avatarUploadButton:disabled,
+        QPushButton#profileSaveButton:disabled {
             background-color: #c9d7ca;
         }
         QPushButton#passwordChangeButton {
@@ -195,32 +199,39 @@ void MainWindow::createSettingsView() {
         return panel;
     };
 
-    auto addSectionTitle = [](QVBoxLayout* layout, QWidget* parent, const QString& text) {
-        QLabel* label = new QLabel(text, parent);
-        label->setObjectName("settingsSectionTitle");
-        layout->addWidget(label);
-    };
+    QVBoxLayout* root_layout = new QVBoxLayout(me_view_);
+    root_layout->setContentsMargins(0, 0, 0, 0);
+    root_layout->setSpacing(0);
 
-    auto addRowButton = [this](QVBoxLayout* layout,
-                               QWidget* parent,
-                               const QString& title,
-                               const QString& suffix,
-                               const QString& object_name,
-                               bool enabled,
-                               auto handler) -> QPushButton* {
-        QPushButton* button = new QPushButton(parent);
-        button->setObjectName(object_name);
-        button->setText(suffix.isEmpty() ? title : QString("%1    %2").arg(title, suffix));
-        button->setCursor(enabled ? Qt::PointingHandCursor : Qt::ArrowCursor);
-        button->setEnabled(enabled);
-        if (enabled) {
-            connect(button, &QPushButton::clicked, this, handler);
+    me_stack_ = new QStackedWidget(me_view_);
+    me_stack_->setObjectName("meStack");
+    root_layout->addWidget(me_stack_);
+
+    QWidget* home_page = new QWidget(me_stack_);
+    home_page->setObjectName("mePage");
+    QWidget* profile_page = new QWidget(me_stack_);
+    profile_page->setObjectName("mePage");
+    QWidget* favorite_page = new QWidget(me_stack_);
+    favorite_page->setObjectName("mePage");
+    QWidget* account_page = new QWidget(me_stack_);
+    account_page->setObjectName("mePage");
+    QWidget* password_page = new QWidget(me_stack_);
+    password_page->setObjectName("mePage");
+    QWidget* moments_page = new QWidget(me_stack_);
+    moments_page->setObjectName("mePage");
+
+    auto showPage = [this](QWidget* page) {
+        if (me_stack_ && page) {
+            me_stack_->setCurrentWidget(page);
         }
-        layout->addWidget(button);
-        return button;
+        updateAvatarPreview();
+        updateMeProfileText();
     };
 
-    auto addPageHeader = [this](QVBoxLayout* layout, QWidget* parent, const QString& title_text) {
+    auto addPageHeader = [this, showPage](QVBoxLayout* layout,
+                                          QWidget* parent,
+                                          const QString& title_text,
+                                          QWidget* back_page) {
         QWidget* header = new QWidget(parent);
         QHBoxLayout* header_layout = new QHBoxLayout(header);
         header_layout->setContentsMargins(0, 0, 0, 0);
@@ -229,37 +240,61 @@ void MainWindow::createSettingsView() {
         QPushButton* back_button = new QPushButton("返回", header);
         back_button->setObjectName("backButton");
         back_button->setCursor(Qt::PointingHandCursor);
-        connect(back_button, &QPushButton::clicked, this, [this]() {
-            if (settings_stack_) {
-                settings_stack_->setCurrentIndex(0);
-            }
-            updateAvatarPreview();
+        connect(back_button, &QPushButton::clicked, this, [showPage, back_page]() {
+            showPage(back_page);
         });
         header_layout->addWidget(back_button, 0, Qt::AlignLeft);
 
         QLabel* title = new QLabel(title_text, header);
-        title->setObjectName("settingsTitle");
+        title->setObjectName("meTitle");
         header_layout->addWidget(title, 1);
 
         layout->addWidget(header);
     };
 
-    QVBoxLayout* root_layout = new QVBoxLayout(settings_view_);
-    root_layout->setContentsMargins(0, 0, 0, 0);
-    root_layout->setSpacing(0);
+    auto addEntryButton = [this](QVBoxLayout* layout,
+                                 QWidget* parent,
+                                 const QString& icon_type,
+                                 const QString& text,
+                                 const QString& object_name,
+                                 auto handler) -> QToolButton* {
+        QToolButton* button = new QToolButton(parent);
+        button->setObjectName(object_name);
+        button->setText(text);
+        button->setIcon(lineIcon(icon_type, QColor(object_name == "dangerEntryButton" ? "#dc2626" : "#4b5563")));
+        button->setIconSize(QSize(24, 24));
+        button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        button->setCursor(Qt::PointingHandCursor);
+        connect(button, &QToolButton::clicked, this, handler);
+        layout->addWidget(button);
+        return button;
+    };
 
-    settings_stack_ = new QStackedWidget(settings_view_);
-    settings_stack_->setObjectName("meStack");
-    root_layout->addWidget(settings_stack_);
+    auto addPlaceholderPage = [createPanel, addPageHeader](QWidget* page,
+                                                          QWidget* back_page,
+                                                          const QString& title_text,
+                                                          const QString& feature_text) {
+        QVBoxLayout* page_layout = new QVBoxLayout(page);
+        page_layout->setContentsMargins(36, 30, 36, 30);
+        page_layout->setSpacing(18);
+        addPageHeader(page_layout, page, title_text, back_page);
 
-    QWidget* home_page = new QWidget(settings_stack_);
-    home_page->setObjectName("mePage");
-    QWidget* profile_page = new QWidget(settings_stack_);
-    profile_page->setObjectName("mePage");
-    QWidget* password_page = new QWidget(settings_stack_);
-    password_page->setObjectName("mePage");
+        QFrame* panel = createPanel(page, "placeholderPanel");
+        QVBoxLayout* panel_layout = new QVBoxLayout(panel);
+        panel_layout->setContentsMargins(24, 22, 24, 22);
+        panel_layout->setSpacing(10);
 
-    const QString display_name = user_nickname_.isEmpty() ? user_id_ : user_nickname_;
+        QLabel* section_title = new QLabel(feature_text, panel);
+        section_title->setObjectName("meSectionTitle");
+        panel_layout->addWidget(section_title);
+
+        QLabel* status = new QLabel("开发中", panel);
+        status->setObjectName("meStatus");
+        panel_layout->addWidget(status);
+
+        page_layout->addWidget(panel);
+        page_layout->addStretch();
+    };
 
     QVBoxLayout* home_root_layout = new QVBoxLayout(home_page);
     home_root_layout->setContentsMargins(0, 0, 0, 0);
@@ -278,114 +313,30 @@ void MainWindow::createSettingsView() {
     home_layout->setSpacing(18);
 
     QLabel* title = new QLabel("我", home_content);
-    title->setObjectName("settingsTitle");
+    title->setObjectName("meTitle");
     home_layout->addWidget(title);
 
-    QFrame* summary_panel = createPanel(home_content, "profileSummaryPanel");
-    QHBoxLayout* summary_layout = new QHBoxLayout(summary_panel);
-    summary_layout->setContentsMargins(24, 22, 24, 22);
-    summary_layout->setSpacing(18);
+    me_profile_button_ = new QToolButton(home_content);
+    me_profile_button_->setObjectName("profileSummaryButton");
+    me_profile_button_->setIconSize(QSize(72, 72));
+    me_profile_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    me_profile_button_->setCursor(Qt::PointingHandCursor);
+    connect(me_profile_button_, &QToolButton::clicked, this, [showPage, profile_page]() {
+        showPage(profile_page);
+    });
+    home_layout->addWidget(me_profile_button_);
 
-    me_avatar_label_ = new QLabel(summary_panel);
-    me_avatar_label_->setFixedSize(72, 72);
-    me_avatar_label_->setAlignment(Qt::AlignCenter);
-    summary_layout->addWidget(me_avatar_label_, 0, Qt::AlignTop);
-
-    QVBoxLayout* summary_info_layout = new QVBoxLayout;
-    summary_info_layout->setContentsMargins(0, 4, 0, 4);
-    summary_info_layout->setSpacing(7);
-
-    QLabel* summary_name_label = new QLabel(display_name, summary_panel);
-    summary_name_label->setObjectName("settingsName");
-    summary_info_layout->addWidget(summary_name_label);
-
-    QLabel* summary_id_label = new QLabel(QString("用户ID：%1").arg(user_id_), summary_panel);
-    summary_id_label->setObjectName("settingsMeta");
-    summary_info_layout->addWidget(summary_id_label);
-    summary_info_layout->addStretch();
-
-    summary_layout->addLayout(summary_info_layout, 1);
-    home_layout->addWidget(summary_panel);
-
-    QFrame* profile_module_panel = createPanel(home_content, "mePanel");
-    QVBoxLayout* profile_module_layout = new QVBoxLayout(profile_module_panel);
-    profile_module_layout->setContentsMargins(20, 18, 20, 20);
-    profile_module_layout->setSpacing(10);
-    addSectionTitle(profile_module_layout, profile_module_panel, "个人信息");
-    addRowButton(profile_module_layout,
-                 profile_module_panel,
-                 "修改个人信息",
-                 ">",
-                 "meRowButton",
-                 true,
-                 [this, profile_page]() {
-                     if (settings_stack_) {
-                         settings_stack_->setCurrentWidget(profile_page);
-                     }
-                     updateAvatarPreview();
-                 });
-    home_layout->addWidget(profile_module_panel);
-
-    QFrame* favorite_panel = createPanel(home_content, "mePanel");
-    QVBoxLayout* favorite_layout = new QVBoxLayout(favorite_panel);
-    favorite_layout->setContentsMargins(20, 18, 20, 20);
-    favorite_layout->setSpacing(10);
-    addSectionTitle(favorite_layout, favorite_panel, "收藏");
-    addRowButton(favorite_layout,
-                 favorite_panel,
-                 "查看收藏",
-                 "开发中",
-                 "disabledRowButton",
-                 false,
-                 []() {});
-    home_layout->addWidget(favorite_panel);
-
-    QFrame* account_panel = createPanel(home_content, "mePanel");
-    QVBoxLayout* account_layout = new QVBoxLayout(account_panel);
-    account_layout->setContentsMargins(20, 18, 20, 20);
-    account_layout->setSpacing(10);
-    addSectionTitle(account_layout, account_panel, "账号设置");
-    addRowButton(account_layout,
-                 account_panel,
-                 "修改密码",
-                 ">",
-                 "meRowButton",
-                 true,
-                 [this, password_page]() {
-                     if (password_status_label_) {
-                         password_status_label_->setText(" ");
-                     }
-                     if (settings_stack_) {
-                         settings_stack_->setCurrentWidget(password_page);
-                     }
-                     if (old_password_edit_) {
-                         old_password_edit_->setFocus();
-                     }
-                 });
-    addRowButton(account_layout,
-                 account_panel,
-                 "退出登录",
-                 QString(),
-                 "dangerRowButton",
-                 true,
-                 [this]() {
-                     onLogoutClicked();
-                 });
-    home_layout->addWidget(account_panel);
-
-    QFrame* moments_panel = createPanel(home_content, "mePanel");
-    QVBoxLayout* moments_layout = new QVBoxLayout(moments_panel);
-    moments_layout->setContentsMargins(20, 18, 20, 20);
-    moments_layout->setSpacing(10);
-    addSectionTitle(moments_layout, moments_panel, "我的朋友圈");
-    addRowButton(moments_layout,
-                 moments_panel,
-                 "我的朋友圈",
-                 "开发中",
-                 "disabledRowButton",
-                 false,
-                 []() {});
-    home_layout->addWidget(moments_panel);
+    QFrame* entry_panel = createPanel(home_content, "mePanel");
+    QVBoxLayout* entry_layout = new QVBoxLayout(entry_panel);
+    entry_layout->setContentsMargins(20, 18, 20, 20);
+    entry_layout->setSpacing(10);
+    addEntryButton(entry_layout, entry_panel, "favorite", "收藏", "meEntryButton",
+                   [showPage, favorite_page]() { showPage(favorite_page); });
+    addEntryButton(entry_layout, entry_panel, "account", "账号设置", "meEntryButton",
+                   [showPage, account_page]() { showPage(account_page); });
+    addEntryButton(entry_layout, entry_panel, "moments", "我的朋友圈", "meEntryButton",
+                   [showPage, moments_page]() { showPage(moments_page); });
+    home_layout->addWidget(entry_panel);
     home_layout->addStretch();
     home_scroll_area->setWidget(home_content);
     home_root_layout->addWidget(home_scroll_area);
@@ -393,61 +344,106 @@ void MainWindow::createSettingsView() {
     QVBoxLayout* profile_layout = new QVBoxLayout(profile_page);
     profile_layout->setContentsMargins(36, 30, 36, 30);
     profile_layout->setSpacing(18);
-    addPageHeader(profile_layout, profile_page, "修改个人信息");
+    addPageHeader(profile_layout, profile_page, "个人信息", home_page);
 
     QFrame* profile_panel = createPanel(profile_page, "profilePanel");
-    QVBoxLayout* panel_layout = new QVBoxLayout(profile_panel);
-    panel_layout->setContentsMargins(24, 22, 24, 22);
-    panel_layout->setSpacing(18);
+    QVBoxLayout* profile_panel_layout = new QVBoxLayout(profile_panel);
+    profile_panel_layout->setContentsMargins(24, 22, 24, 22);
+    profile_panel_layout->setSpacing(18);
 
-    QLabel* section_title = new QLabel("头像", profile_panel);
-    section_title->setObjectName("settingsSectionTitle");
-    panel_layout->addWidget(section_title);
+    QLabel* profile_title = new QLabel("资料", profile_panel);
+    profile_title->setObjectName("meSectionTitle");
+    profile_panel_layout->addWidget(profile_title);
 
-    QWidget* profile_row = new QWidget(profile_panel);
-    QHBoxLayout* profile_row_layout = new QHBoxLayout(profile_row);
-    profile_row_layout->setContentsMargins(0, 0, 0, 0);
-    profile_row_layout->setSpacing(18);
+    QWidget* avatar_row = new QWidget(profile_panel);
+    QHBoxLayout* avatar_layout = new QHBoxLayout(avatar_row);
+    avatar_layout->setContentsMargins(0, 0, 0, 0);
+    avatar_layout->setSpacing(18);
 
-    settings_avatar_label_ = new QLabel(profile_row);
-    settings_avatar_label_->setFixedSize(96, 96);
-    settings_avatar_label_->setAlignment(Qt::AlignCenter);
-    profile_row_layout->addWidget(settings_avatar_label_, 0, Qt::AlignTop);
+    profile_avatar_label_ = new QLabel(avatar_row);
+    profile_avatar_label_->setFixedSize(96, 96);
+    profile_avatar_label_->setAlignment(Qt::AlignCenter);
+    avatar_layout->addWidget(profile_avatar_label_, 0, Qt::AlignTop);
 
-    QVBoxLayout* info_layout = new QVBoxLayout;
-    info_layout->setContentsMargins(0, 5, 0, 5);
-    info_layout->setSpacing(7);
+    QVBoxLayout* avatar_info_layout = new QVBoxLayout;
+    avatar_info_layout->setContentsMargins(0, 5, 0, 5);
+    avatar_info_layout->setSpacing(8);
 
-    QLabel* name_label = new QLabel(display_name, profile_row);
-    name_label->setObjectName("settingsName");
-    info_layout->addWidget(name_label);
+    avatar_status_label_ = new QLabel(avatar_row);
+    avatar_status_label_->setObjectName("meStatus");
+    avatar_status_label_->setText(current_avatar_url_.isEmpty() ? "未设置头像" : "头像已同步");
+    avatar_info_layout->addWidget(avatar_status_label_);
 
-    QLabel* id_label = new QLabel(QString("用户ID：%1").arg(user_id_), profile_row);
-    id_label->setObjectName("settingsMeta");
-    info_layout->addWidget(id_label);
-
-    settings_avatar_status_label_ = new QLabel(profile_row);
-    settings_avatar_status_label_->setObjectName("settingsStatus");
-    settings_avatar_status_label_->setText(current_avatar_url_.isEmpty() ? "未设置头像" : "头像已同步");
-    info_layout->addWidget(settings_avatar_status_label_);
-    info_layout->addStretch();
-
-    profile_row_layout->addLayout(info_layout, 1);
-
-    upload_avatar_button_ = new QPushButton("上传头像", profile_row);
+    upload_avatar_button_ = new QPushButton("上传头像", avatar_row);
     upload_avatar_button_->setObjectName("avatarUploadButton");
     connect(upload_avatar_button_, &QPushButton::clicked,
             this, &MainWindow::onUploadAvatarClicked);
-    profile_row_layout->addWidget(upload_avatar_button_, 0, Qt::AlignTop);
+    avatar_info_layout->addWidget(upload_avatar_button_, 0, Qt::AlignLeft);
+    avatar_info_layout->addStretch();
 
-    panel_layout->addWidget(profile_row);
+    avatar_layout->addLayout(avatar_info_layout, 1);
+    profile_panel_layout->addWidget(avatar_row);
+
+    QFormLayout* profile_form_layout = new QFormLayout;
+    profile_form_layout->setContentsMargins(0, 0, 0, 0);
+    profile_form_layout->setHorizontalSpacing(14);
+    profile_form_layout->setVerticalSpacing(12);
+    profile_form_layout->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    profile_nickname_edit_ = new QLineEdit(profile_panel);
+    profile_nickname_edit_->setObjectName("profileInput");
+    profile_nickname_edit_->setMaxLength(64);
+    profile_nickname_edit_->setPlaceholderText("请输入昵称");
+    profile_nickname_edit_->setText(user_nickname_.isEmpty() ? user_id_ : user_nickname_);
+
+    QLabel* id_value_label = new QLabel(user_id_, profile_panel);
+    id_value_label->setObjectName("meMeta");
+
+    profile_form_layout->addRow("昵称:", profile_nickname_edit_);
+    profile_form_layout->addRow("用户ID:", id_value_label);
+    profile_panel_layout->addLayout(profile_form_layout);
+
+    QWidget* profile_action_row = new QWidget(profile_panel);
+    QHBoxLayout* profile_action_layout = new QHBoxLayout(profile_action_row);
+    profile_action_layout->setContentsMargins(0, 0, 0, 0);
+    profile_action_layout->setSpacing(12);
+
+    profile_status_label_ = new QLabel(" ", profile_action_row);
+    profile_status_label_->setObjectName("meStatus");
+    profile_action_layout->addWidget(profile_status_label_, 1);
+
+    save_profile_button_ = new QPushButton("保存", profile_action_row);
+    save_profile_button_->setObjectName("profileSaveButton");
+    connect(save_profile_button_, &QPushButton::clicked,
+            this, &MainWindow::onSaveProfileClicked);
+    profile_action_layout->addWidget(save_profile_button_, 0, Qt::AlignRight);
+    profile_panel_layout->addWidget(profile_action_row);
+
     profile_layout->addWidget(profile_panel);
     profile_layout->addStretch();
+
+    addPlaceholderPage(favorite_page, home_page, "收藏", "查看收藏");
+
+    QVBoxLayout* account_layout = new QVBoxLayout(account_page);
+    account_layout->setContentsMargins(36, 30, 36, 30);
+    account_layout->setSpacing(18);
+    addPageHeader(account_layout, account_page, "账号设置", home_page);
+
+    QFrame* account_panel = createPanel(account_page, "mePanel");
+    QVBoxLayout* account_panel_layout = new QVBoxLayout(account_panel);
+    account_panel_layout->setContentsMargins(20, 18, 20, 20);
+    account_panel_layout->setSpacing(10);
+    addEntryButton(account_panel_layout, account_panel, "password", "修改密码", "meEntryButton",
+                   [showPage, password_page]() { showPage(password_page); });
+    addEntryButton(account_panel_layout, account_panel, "logout", "退出登录", "dangerEntryButton",
+                   [this]() { onLogoutClicked(); });
+    account_layout->addWidget(account_panel);
+    account_layout->addStretch();
 
     QVBoxLayout* password_page_layout = new QVBoxLayout(password_page);
     password_page_layout->setContentsMargins(36, 30, 36, 30);
     password_page_layout->setSpacing(18);
-    addPageHeader(password_page_layout, password_page, "修改密码");
+    addPageHeader(password_page_layout, password_page, "修改密码", account_page);
 
     QFrame* password_panel = createPanel(password_page, "passwordPanel");
     QVBoxLayout* password_layout = new QVBoxLayout(password_panel);
@@ -455,7 +451,7 @@ void MainWindow::createSettingsView() {
     password_layout->setSpacing(16);
 
     QLabel* password_title = new QLabel("账号密码", password_panel);
-    password_title->setObjectName("settingsSectionTitle");
+    password_title->setObjectName("meSectionTitle");
     password_layout->addWidget(password_title);
 
     QFormLayout* form_layout = new QFormLayout;
@@ -503,12 +499,18 @@ void MainWindow::createSettingsView() {
     password_page_layout->addWidget(password_panel);
     password_page_layout->addStretch();
 
-    settings_stack_->addWidget(home_page);
-    settings_stack_->addWidget(profile_page);
-    settings_stack_->addWidget(password_page);
-    settings_stack_->setCurrentIndex(0);
+    addPlaceholderPage(moments_page, home_page, "我的朋友圈", "我的朋友圈");
+
+    me_stack_->addWidget(home_page);
+    me_stack_->addWidget(profile_page);
+    me_stack_->addWidget(favorite_page);
+    me_stack_->addWidget(account_page);
+    me_stack_->addWidget(password_page);
+    me_stack_->addWidget(moments_page);
+    me_stack_->setCurrentIndex(0);
 
     updateAvatarPreview();
+    updateMeProfileText();
 }
 
 QString MainWindow::encodeAvatarFile(const QString& file_path) {
@@ -549,17 +551,22 @@ QString MainWindow::encodeAvatarFile(const QString& file_path) {
 }
 
 void MainWindow::updateAvatarPreview() {
-    if (!me_avatar_label_ && !settings_avatar_label_) {
-        return;
-    }
-
-    // 本地预览支持 data URL 和本地路径；解析失败时显示首字母默认头像。
     const QString display_name = user_nickname_.isEmpty() ? user_id_ : user_nickname_;
-    if (me_avatar_label_) {
-        me_avatar_label_->setPixmap(avatarPixmapFromValue(current_avatar_url_, display_name, 72));
+    if (me_profile_button_) {
+        me_profile_button_->setIcon(QIcon(avatarPixmapFromValue(current_avatar_url_, display_name, 72)));
     }
-    if (settings_avatar_label_) {
-        settings_avatar_label_->setPixmap(avatarPixmapFromValue(current_avatar_url_, display_name, 96));
+    if (profile_avatar_label_) {
+        profile_avatar_label_->setPixmap(avatarPixmapFromValue(current_avatar_url_, display_name, 96));
+    }
+}
+
+void MainWindow::updateMeProfileText() {
+    const QString display_name = user_nickname_.isEmpty() ? user_id_ : user_nickname_;
+    if (me_profile_button_) {
+        me_profile_button_->setText(QString("%1\n用户ID：%2").arg(display_name, user_id_));
+    }
+    if (profile_nickname_edit_ && !profile_nickname_edit_->hasFocus()) {
+        profile_nickname_edit_->setText(display_name);
     }
 }
 
@@ -611,8 +618,8 @@ void MainWindow::onUploadAvatarClicked() {
     if (upload_avatar_button_) {
         upload_avatar_button_->setEnabled(false);
     }
-    if (settings_avatar_status_label_) {
-        settings_avatar_status_label_->setText("正在同步头像...");
+    if (avatar_status_label_) {
+        avatar_status_label_->setText("正在同步头像...");
     }
 
     tcp_client_->updateAvatar(avatar_url);
@@ -628,8 +635,8 @@ void MainWindow::onAvatarUpdateResult(int code, const QString& message, const QS
         current_avatar_url_ = tcp_client_ ? tcp_client_->avatarUrl() : QString();
         updateAvatarPreview();
         const QString error = message.isEmpty() ? "头像同步失败" : message;
-        if (settings_avatar_status_label_) {
-            settings_avatar_status_label_->setText(error);
+        if (avatar_status_label_) {
+            avatar_status_label_->setText(error);
         }
         QMessageBox::warning(this, "上传头像", error);
         return;
@@ -642,8 +649,79 @@ void MainWindow::onAvatarUpdateResult(int code, const QString& message, const QS
     if (!current_messages_.isEmpty()) {
         renderChatMessages(false);
     }
-    if (settings_avatar_status_label_) {
-        settings_avatar_status_label_->setText("头像已同步");
+    if (avatar_status_label_) {
+        avatar_status_label_->setText("头像已同步");
+    }
+}
+
+void MainWindow::onSaveProfileClicked() {
+    if (!tcp_client_ || tcp_client_->state() != ClientState::LoggedIn) {
+        QMessageBox::warning(this, "保存资料", "当前未登录，无法保存资料");
+        return;
+    }
+
+    const QString nickname = profile_nickname_edit_
+        ? profile_nickname_edit_->text().trimmed()
+        : QString();
+
+    auto showProfileStatus = [this](const QString& text) {
+        if (profile_status_label_) {
+            profile_status_label_->setText(text);
+        }
+    };
+
+    if (nickname.isEmpty()) {
+        showProfileStatus("请输入昵称");
+        if (profile_nickname_edit_) {
+            profile_nickname_edit_->setFocus();
+        }
+        return;
+    }
+
+    if (nickname == user_nickname_ || (user_nickname_.isEmpty() && nickname == user_id_)) {
+        showProfileStatus("已保存");
+        return;
+    }
+
+    if (save_profile_button_) {
+        save_profile_button_->setEnabled(false);
+    }
+    showProfileStatus("正在保存...");
+    tcp_client_->updateProfile(nickname);
+}
+
+void MainWindow::onProfileUpdateResult(int code, const QString& message, const QString& nickname) {
+    if (save_profile_button_) {
+        save_profile_button_->setEnabled(true);
+    }
+
+    const QString result_message = message.isEmpty()
+        ? (code == 0 ? "资料已保存" : "资料保存失败")
+        : message;
+
+    if (code != 0) {
+        if (profile_status_label_) {
+            profile_status_label_->setText(result_message);
+        }
+        QMessageBox::warning(this, "保存资料", result_message);
+        return;
+    }
+
+    const QString saved_nickname = nickname.isEmpty() && profile_nickname_edit_
+        ? profile_nickname_edit_->text().trimmed()
+        : nickname;
+    if (!saved_nickname.isEmpty()) {
+        user_nickname_ = saved_nickname;
+        setWindowTitle(QString("IChat - %1").arg(user_nickname_));
+    }
+
+    updateMeProfileText();
+    updateAvatarPreview();
+    if (!current_messages_.isEmpty()) {
+        renderChatMessages(false);
+    }
+    if (profile_status_label_) {
+        profile_status_label_->setText(result_message);
     }
 }
 

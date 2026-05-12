@@ -149,6 +149,12 @@ public:
                               const std::string& avatar_url);
 
     /**
+     * @brief 更新用户个人信息
+     */
+    LoginResult update_profile(const std::string& user_id,
+                               const std::string& nickname);
+
+    /**
      * @brief 保存消息到数据库
      */
     bool save_message(const std::string& msg_id, int msg_type, int chat_type,

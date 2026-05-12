@@ -519,6 +519,35 @@ void Server::register_default_handlers() {
         session->send(MsgType::UPDATE_AVATAR_RSP, json::serialize(rsp));
     });
 
+    // 更新个人信息
+    dispatcher_.register_handler(MsgType::UPDATE_PROFILE, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到更新个人信息请求 from " << session->user_id() << std::endl;
+
+        if (session->user_id().empty()) {
+            session->send(MsgType::UPDATE_PROFILE_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string nickname;
+        try {
+            json::object req = parse_json_object(msg.body);
+            nickname = json_string(req, "nickname");
+        } catch (const std::exception& e) {
+            session->send(MsgType::UPDATE_PROFILE_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        LoginResult result = user_service_.update_profile(session->user_id(), nickname);
+
+        json::object rsp;
+        rsp["code"] = result.code;
+        rsp["message"] = result.message;
+        if (result.code == 0) {
+            rsp["nickname"] = result.nickname;
+        }
+        session->send(MsgType::UPDATE_PROFILE_RSP, json::serialize(rsp));
+    });
+
     // 修改密码
     dispatcher_.register_handler(MsgType::CHANGE_PASSWORD, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到修改密码请求 from " << session->user_id() << std::endl;
