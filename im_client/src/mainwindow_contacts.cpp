@@ -222,7 +222,10 @@ void MainWindow::onAddContactClicked() {
 void MainWindow::onContactItemDoubleClicked(QTreeWidgetItem* item, int column) {
     Q_UNUSED(column);
     QString user_id = item->data(0, Qt::UserRole).toString();
-    QString nickname = item->text(0);
+    QString nickname = item->data(0, Qt::AccessibleTextRole).toString();
+    if (nickname.isEmpty()) {
+        nickname = conversationTitle(user_id);
+    }
     if (!user_id.isEmpty()) {
         // 联系人页不单独维护聊天状态，双击后复用消息页的会话切换逻辑。
         switchToChatWith(user_id, nickname);
@@ -273,9 +276,10 @@ void MainWindow::rebuildContactList() {
             : QString("账号: %1").arg(friend_id);
 
         QTreeWidgetItem* friend_item = new QTreeWidgetItem(contact_tree_widget_);
-        friend_item->setText(0, title);
+        friend_item->setText(0, QString());
         friend_item->setData(0, Qt::UserRole, friend_id);
         friend_item->setData(0, Qt::AccessibleTextRole, title);
+        friend_item->setToolTip(0, title);
         friend_item->setSizeHint(0, QSize(0, 68));
 
         ContactListItemWidget* item_widget = new ContactListItemWidget(
