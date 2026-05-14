@@ -36,6 +36,7 @@
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QSize>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QToolButton>
 #include <QTimer>
@@ -335,7 +336,8 @@ void MainWindow::showUserProfileDialog(const QString &user_id,
                 background-color: #f7f8fa;
                 font-family: "Microsoft YaHei", sans-serif;
             }
-            QFrame#profileCard {
+            QFrame#profileCard,
+            QFrame#profileEntryPanel {
                 background-color: #ffffff;
                 border: 1px solid #e5e7eb;
                 border-radius: 6px;
@@ -350,6 +352,19 @@ void MainWindow::showUserProfileDialog(const QString &user_id,
                 color: #6b7280;
                 font-size: 12px;
                 background: transparent;
+            }
+            QToolButton#profileMomentButton {
+                min-height: 54px;
+                padding: 0 18px;
+                color: #111827;
+                background-color: #ffffff;
+                border: none;
+                border-radius: 4px;
+                font-size: 15px;
+                text-align: left;
+            }
+            QToolButton#profileMomentButton:hover {
+                background-color: #f3f4f6;
             }
             QPushButton#profileCloseButton {
                 min-width: 86px;
@@ -435,6 +450,23 @@ void MainWindow::showUserProfileDialog(const QString &user_id,
         view_profile_status_label_->setTextFormat(Qt::PlainText);
         card_layout->addWidget(view_profile_status_label_);
         root_layout->addWidget(card);
+
+        QFrame *entry_panel = new QFrame(user_profile_dialog_);
+        entry_panel->setObjectName("profileEntryPanel");
+        QVBoxLayout *entry_layout = new QVBoxLayout(entry_panel);
+        entry_layout->setContentsMargins(20, 18, 20, 18);
+        entry_layout->setSpacing(10);
+
+        QToolButton *moments_button = new QToolButton(entry_panel);
+        moments_button->setObjectName("profileMomentButton");
+        moments_button->setText("朋友圈");
+        moments_button->setIcon(lineIcon("moments", QColor("#4b5563")));
+        moments_button->setIconSize(QSize(24, 24));
+        moments_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        moments_button->setCursor(Qt::PointingHandCursor);
+        moments_button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        entry_layout->addWidget(moments_button);
+        root_layout->addWidget(entry_panel);
 
         QWidget *action_row = new QWidget(user_profile_dialog_);
         QHBoxLayout *action_layout = new QHBoxLayout(action_row);
