@@ -78,6 +78,9 @@ struct LoginResponse {
     std::string user_id;
     std::string nickname;
     std::string avatar_url;
+    std::string gender;
+    std::string region;
+    std::string signature;
     std::string token;
 };
 

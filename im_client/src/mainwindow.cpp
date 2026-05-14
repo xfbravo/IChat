@@ -58,6 +58,9 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     , tcp_client_(tcp_client)
     , user_id_(user_id)
     , user_nickname_(nickname)
+    , user_gender_(tcp_client ? tcp_client->gender() : QString())
+    , user_region_(tcp_client ? tcp_client->region() : QString())
+    , user_signature_(tcp_client ? tcp_client->signature() : QString())
     , current_avatar_url_(avatar_url)
 {
     if (current_avatar_url_.isEmpty() && tcp_client_) {

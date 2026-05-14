@@ -40,6 +40,7 @@
 #include <QToolButton>
 #include <QTimer>
 #include <QBuffer>
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFont>
 #include <QImage>
@@ -113,6 +114,19 @@ void MainWindow::createMeView() {
         }
         QLineEdit#profileInput:focus,
         QLineEdit#passwordInput:focus {
+            border-color: #4CAF50;
+        }
+        QComboBox#profileInput {
+            min-height: 34px;
+            max-width: 340px;
+            padding: 6px 10px;
+            color: #111827;
+            background-color: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        QComboBox#profileInput:focus {
             border-color: #4CAF50;
         }
         QToolButton#profileSummaryButton,
@@ -397,10 +411,31 @@ void MainWindow::createMeView() {
     profile_nickname_edit_->setPlaceholderText("请输入昵称");
     profile_nickname_edit_->setText(user_nickname_.isEmpty() ? user_id_ : user_nickname_);
 
+    profile_gender_combo_ = new QComboBox(profile_panel);
+    profile_gender_combo_->setObjectName("profileInput");
+    profile_gender_combo_->addItems(QStringList() << "男" << "女");
+    const int gender_index = profile_gender_combo_->findText(user_gender_);
+    profile_gender_combo_->setCurrentIndex(gender_index >= 0 ? gender_index : 0);
+
+    profile_region_edit_ = new QLineEdit(profile_panel);
+    profile_region_edit_->setObjectName("profileInput");
+    profile_region_edit_->setMaxLength(128);
+    profile_region_edit_->setPlaceholderText("请输入地区");
+    profile_region_edit_->setText(user_region_);
+
+    profile_signature_edit_ = new QLineEdit(profile_panel);
+    profile_signature_edit_->setObjectName("profileInput");
+    profile_signature_edit_->setMaxLength(255);
+    profile_signature_edit_->setPlaceholderText("请输入签名");
+    profile_signature_edit_->setText(user_signature_);
+
     QLabel* id_value_label = new QLabel(user_id_, profile_panel);
     id_value_label->setObjectName("meMeta");
 
     profile_form_layout->addRow("昵称:", profile_nickname_edit_);
+    profile_form_layout->addRow("性别:", profile_gender_combo_);
+    profile_form_layout->addRow("地区:", profile_region_edit_);
+    profile_form_layout->addRow("签名:", profile_signature_edit_);
     profile_form_layout->addRow("用户ID:", id_value_label);
     profile_panel_layout->addLayout(profile_form_layout);
 
@@ -569,6 +604,16 @@ void MainWindow::updateMeProfileText() {
     if (profile_nickname_edit_ && !profile_nickname_edit_->hasFocus()) {
         profile_nickname_edit_->setText(display_name);
     }
+    if (profile_gender_combo_ && !profile_gender_combo_->hasFocus()) {
+        const int index = profile_gender_combo_->findText(user_gender_);
+        profile_gender_combo_->setCurrentIndex(index >= 0 ? index : 0);
+    }
+    if (profile_region_edit_ && !profile_region_edit_->hasFocus()) {
+        profile_region_edit_->setText(user_region_);
+    }
+    if (profile_signature_edit_ && !profile_signature_edit_->hasFocus()) {
+        profile_signature_edit_->setText(user_signature_);
+    }
 }
 
 void MainWindow::onEditContactRemark() {
@@ -664,6 +709,15 @@ void MainWindow::onSaveProfileClicked() {
     const QString nickname = profile_nickname_edit_
         ? profile_nickname_edit_->text().trimmed()
         : QString();
+    const QString gender = profile_gender_combo_
+        ? profile_gender_combo_->currentText().trimmed()
+        : QString();
+    const QString region = profile_region_edit_
+        ? profile_region_edit_->text().trimmed()
+        : QString();
+    const QString signature = profile_signature_edit_
+        ? profile_signature_edit_->text().trimmed()
+        : QString();
 
     auto showProfileStatus = [this](const QString& text) {
         if (profile_status_label_) {
@@ -679,7 +733,19 @@ void MainWindow::onSaveProfileClicked() {
         return;
     }
 
-    if (nickname == user_nickname_ || (user_nickname_.isEmpty() && nickname == user_id_)) {
+    if (gender != "男" && gender != "女") {
+        showProfileStatus("请选择性别");
+        if (profile_gender_combo_) {
+            profile_gender_combo_->setFocus();
+        }
+        return;
+    }
+
+    const QString current_display_name = user_nickname_.isEmpty() ? user_id_ : user_nickname_;
+    if (nickname == current_display_name
+        && gender == user_gender_
+        && region == user_region_
+        && signature == user_signature_) {
         showProfileStatus("已保存");
         return;
     }
@@ -689,7 +755,7 @@ void MainWindow::onSaveProfileClicked() {
     }
     profile_save_pending_ = true;
     showProfileStatus("正在保存...");
-    tcp_client_->updateProfile(nickname);
+    tcp_client_->updateProfile(nickname, gender, region, signature);
 
     QTimer::singleShot(10000, this, [this]() {
         if (!profile_save_pending_) {
@@ -705,7 +771,12 @@ void MainWindow::onSaveProfileClicked() {
     });
 }
 
-void MainWindow::onProfileUpdateResult(int code, const QString& message, const QString& nickname) {
+void MainWindow::onProfileUpdateResult(int code,
+                                       const QString& message,
+                                       const QString& nickname,
+                                       const QString& gender,
+                                       const QString& region,
+                                       const QString& signature) {
     profile_save_pending_ = false;
     if (save_profile_button_) {
         save_profile_button_->setEnabled(true);
@@ -730,6 +801,9 @@ void MainWindow::onProfileUpdateResult(int code, const QString& message, const Q
         user_nickname_ = saved_nickname;
         setWindowTitle(QString("IChat - %1").arg(user_nickname_));
     }
+    user_gender_ = gender;
+    user_region_ = region;
+    user_signature_ = signature;
 
     updateMeProfileText();
     updateAvatarPreview();

@@ -132,7 +132,10 @@ public:
     /**
      * @brief 更新当前用户个人信息
      */
-    void updateProfile(const QString& nickname);
+    void updateProfile(const QString& nickname,
+                       const QString& gender,
+                       const QString& region,
+                       const QString& signature);
 
     /**
      * @brief 修改当前用户密码
@@ -161,6 +164,21 @@ public:
      * @brief 获取当前用户头像
      */
     const QString& avatarUrl() const { return user_avatar_url_; }
+
+    /**
+     * @brief 获取当前用户性别
+     */
+    const QString& gender() const { return user_gender_; }
+
+    /**
+     * @brief 获取当前用户地区
+     */
+    const QString& region() const { return user_region_; }
+
+    /**
+     * @brief 获取当前用户签名
+     */
+    const QString& signature() const { return user_signature_; }
 
     /**
      * @brief 是否有保存的登录凭证
@@ -255,7 +273,12 @@ signals:
     /**
      * @brief 更新个人信息结果信号
      */
-    void profileUpdateResult(int code, const QString& message, const QString& nickname);
+    void profileUpdateResult(int code,
+                             const QString& message,
+                             const QString& nickname,
+                             const QString& gender,
+                             const QString& region,
+                             const QString& signature);
 
     /**
      * @brief 修改密码结果信号
@@ -354,6 +377,9 @@ private:
     QString user_id_;
     QString user_nickname_;
     QString user_avatar_url_;
+    QString user_gender_;
+    QString user_region_;
+    QString user_signature_;
     QString token_;
     QString server_host_;
     quint16 server_port_;

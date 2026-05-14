@@ -111,6 +111,9 @@ bool Protocol::parseLoginResponse(const QString& body, LoginResponse& rsp) {
     rsp.user_id = obj["user_id"].toString().toStdString();
     rsp.nickname = obj["nickname"].toString().toStdString();
     rsp.avatar_url = obj["avatar_url"].toString().toStdString();
+    rsp.gender = obj["gender"].toString().toStdString();
+    rsp.region = obj["region"].toString().toStdString();
+    rsp.signature = obj["signature"].toString().toStdString();
     rsp.token = obj["token"].toString().toStdString();
 
     return true;

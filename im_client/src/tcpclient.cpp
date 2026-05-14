@@ -40,6 +40,9 @@ void TcpClient::loadCredentials() {
     user_id_ = settings.value("user_id", "").toString();
     user_nickname_ = settings.value("user_nickname", "").toString();
     user_avatar_url_ = settings.value("avatar_url", "").toString();
+    user_gender_ = settings.value("gender", "").toString();
+    user_region_ = settings.value("region", "").toString();
+    user_signature_ = settings.value("signature", "").toString();
     token_ = settings.value("token", "").toString();
 
     if (!user_id_.isEmpty()) {
@@ -52,6 +55,9 @@ void TcpClient::saveCredentials() {
     settings.setValue("user_id", user_id_);
     settings.setValue("user_nickname", user_nickname_);
     settings.setValue("avatar_url", user_avatar_url_);
+    settings.setValue("gender", user_gender_);
+    settings.setValue("region", user_region_);
+    settings.setValue("signature", user_signature_);
     settings.setValue("token", token_);
     qDebug() << "Saved credentials for user:" << user_id_;
 }
@@ -244,13 +250,19 @@ void TcpClient::updateAvatar(const QString& avatar_url) {
     sendMessage(MsgType::UPDATE_AVATAR, body);
 }
 
-void TcpClient::updateProfile(const QString& nickname) {
+void TcpClient::updateProfile(const QString& nickname,
+                              const QString& gender,
+                              const QString& region,
+                              const QString& signature) {
     if (state_ != ClientState::LoggedIn) {
         return;
     }
 
     QJsonObject obj;
     obj["nickname"] = nickname;
+    obj["gender"] = gender;
+    obj["region"] = region;
+    obj["signature"] = signature;
     QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::UPDATE_PROFILE, body);
 }
@@ -384,6 +396,9 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     user_id_ = QString::fromStdString(rsp.user_id);
                     user_nickname_ = QString::fromStdString(rsp.nickname);
                     user_avatar_url_ = QString::fromStdString(rsp.avatar_url);
+                    user_gender_ = QString::fromStdString(rsp.gender);
+                    user_region_ = QString::fromStdString(rsp.region);
+                    user_signature_ = QString::fromStdString(rsp.signature);
                     token_ = QString::fromStdString(rsp.token);
                     saveCredentials();
                 }
@@ -518,13 +533,24 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 QJsonObject obj = doc.object();
                 const int code = obj["code"].toInt();
                 const QString nickname = obj["nickname"].toString();
-                if (code == 0 && !nickname.isEmpty()) {
-                    user_nickname_ = nickname;
+                const QString gender = obj["gender"].toString();
+                const QString region = obj["region"].toString();
+                const QString signature = obj["signature"].toString();
+                if (code == 0) {
+                    if (!nickname.isEmpty()) {
+                        user_nickname_ = nickname;
+                    }
+                    user_gender_ = gender;
+                    user_region_ = region;
+                    user_signature_ = signature;
                     saveCredentials();
                 }
                 emit profileUpdateResult(code,
                                          obj["message"].toString(),
-                                         nickname);
+                                         nickname,
+                                         gender,
+                                         region,
+                                         signature);
             }
             break;
         }

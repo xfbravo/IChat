@@ -10,6 +10,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QListWidget>
@@ -73,7 +74,12 @@ private slots:
     void onUploadAvatarClicked();
     void onAvatarUpdateResult(int code, const QString& message, const QString& avatar_url);
     void onSaveProfileClicked();
-    void onProfileUpdateResult(int code, const QString& message, const QString& nickname);
+    void onProfileUpdateResult(int code,
+                               const QString& message,
+                               const QString& nickname,
+                               const QString& gender,
+                               const QString& region,
+                               const QString& signature);
     void onChangePasswordClicked();
     void onPasswordChangeResult(int code, const QString& message);
 
@@ -133,6 +139,9 @@ private:
     TcpClient* tcp_client_;
     QString user_id_;
     QString user_nickname_;
+    QString user_gender_;
+    QString user_region_;
+    QString user_signature_;
     QString current_avatar_url_;
     QString current_chat_target_;
 
@@ -170,6 +179,9 @@ private:
     QLabel* profile_avatar_label_ = nullptr;
     QLabel* avatar_status_label_ = nullptr;
     QLineEdit* profile_nickname_edit_ = nullptr;
+    QComboBox* profile_gender_combo_ = nullptr;
+    QLineEdit* profile_region_edit_ = nullptr;
+    QLineEdit* profile_signature_edit_ = nullptr;
     QLabel* profile_status_label_ = nullptr;
     QPushButton* save_profile_button_ = nullptr;
     bool profile_save_pending_ = false;

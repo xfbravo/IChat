@@ -98,6 +98,48 @@ bool ensure_large_text_column(MYSQL* mysql,
     return true;
 }
 
+bool ensure_column_exists(MYSQL* mysql,
+                          const std::string& table,
+                          const std::string& column,
+                          const std::string& column_definition,
+                          std::string& error_message) {
+    std::ostringstream query;
+    query << "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS "
+          << "WHERE TABLE_SCHEMA = DATABASE() "
+          << "AND TABLE_NAME = '" << sql_escape(mysql, table) << "' "
+          << "AND COLUMN_NAME = '" << sql_escape(mysql, column) << "'";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    const bool exists = row && row[0] && std::stoll(row[0]) > 0;
+    mysql_free_result(res);
+
+    if (exists) {
+        return true;
+    }
+
+    std::ostringstream alter_sql;
+    alter_sql << "ALTER TABLE `" << table << "` ADD COLUMN `"
+              << column << "` " << column_definition;
+
+    if (mysql_query(mysql, alter_sql.str().c_str())) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    return true;
+}
+
 bool ensure_avatar_columns(MYSQL* mysql, std::string& error_message) {
     return ensure_large_text_column(mysql,
                                     "im_user",
@@ -109,6 +151,24 @@ bool ensure_avatar_columns(MYSQL* mysql, std::string& error_message) {
                                     "friend_avatar",
                                     "MEDIUMTEXT COMMENT '好友头像'",
                                     error_message);
+}
+
+bool ensure_profile_columns(MYSQL* mysql, std::string& error_message) {
+    return ensure_column_exists(mysql,
+                                "im_user",
+                                "gender",
+                                "VARCHAR(8) NOT NULL DEFAULT '' COMMENT '性别'",
+                                error_message)
+        && ensure_column_exists(mysql,
+                                "im_user",
+                                "region",
+                                "VARCHAR(128) NOT NULL DEFAULT '' COMMENT '地区'",
+                                error_message)
+        && ensure_column_exists(mysql,
+                                "im_user",
+                                "signature",
+                                "VARCHAR(255) NOT NULL DEFAULT '' COMMENT '个性签名'",
+                                error_message);
 }
 
 } // namespace

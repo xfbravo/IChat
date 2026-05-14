@@ -22,6 +22,9 @@ struct UserInfo {
     std::string email;
     std::string nickname;
     std::string avatar_url;
+    std::string gender;
+    std::string region;
+    std::string signature;
     int status = 0;  // 0禁用 1正常 2被举报
     int user_type = 1;
     std::string create_time;
@@ -36,6 +39,9 @@ struct LoginResult {
     std::string user_id;
     std::string nickname;
     std::string avatar_url;
+    std::string gender;
+    std::string region;
+    std::string signature;
     std::string token;       // 暂不实现JWT
 };
 
@@ -152,7 +158,10 @@ public:
      * @brief 更新用户个人信息
      */
     LoginResult update_profile(const std::string& user_id,
-                               const std::string& nickname);
+                               const std::string& nickname,
+                               const std::string& gender,
+                               const std::string& region,
+                               const std::string& signature);
 
     /**
      * @brief 保存消息到数据库
