@@ -178,8 +178,8 @@ bool ensure_moments_table(MYSQL* mysql, std::string& error_message) {
         "moment_id VARCHAR(48) NOT NULL COMMENT '朋友圈ID',"
         "user_id VARCHAR(32) NOT NULL COMMENT '发布者ID',"
         "content TEXT COMMENT '文字内容',"
-        "media_type VARCHAR(16) NOT NULL DEFAULT 'text' COMMENT 'text/image/video',"
-        "media_json MEDIUMTEXT COMMENT '图片或视频data URL JSON',"
+        "media_type VARCHAR(16) NOT NULL DEFAULT 'text' COMMENT 'text/image',"
+        "media_json MEDIUMTEXT COMMENT '图片data URL JSON',"
         "status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1正常 5删除',"
         "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',"
         "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',"
@@ -1351,13 +1351,13 @@ LoginResult UserService::create_moment(const std::string& user_id,
         return result;
     }
 
-    if (media_type != "text" && media_type != "image" && media_type != "video") {
+    if (media_type != "text" && media_type != "image") {
         result.code = 3;
         result.message = "媒体类型不支持";
         return result;
     }
 
-    constexpr std::size_t kMaxMediaJsonLength = 8 * 1024 * 1024;
+    constexpr std::size_t kMaxMediaJsonLength = 14 * 1024 * 1024;
     if (media_json.size() > kMaxMediaJsonLength) {
         result.code = 4;
         result.message = "媒体数据过大";
@@ -1442,6 +1442,77 @@ std::string UserService::get_moments_feed(const std::string& user_id, int limit)
 
     if (mysql_query(mysql, query.str().c_str())) {
         std::cerr << "[UserService] 获取朋友圈失败: " << mysql_error(mysql) << std::endl;
+        return json::serialize(result);
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return json::serialize(result);
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        json::object item;
+        item["moment_id"] = row_string(row, 0);
+        item["user_id"] = row_string(row, 1);
+        item["nickname"] = row_string(row, 2);
+        item["avatar_url"] = row_string(row, 3);
+        item["content"] = row_string(row, 4);
+        item["media_type"] = row_string(row, 5);
+        const std::string media_json = row_string(row, 6);
+        try {
+            item["media"] = media_json.empty() ? json::array() : json::parse(media_json);
+        } catch (const std::exception&) {
+            item["media"] = json::array();
+        }
+        item["create_time"] = row_string(row, 7);
+        item["create_timestamp"] = row_int64(row, 8);
+        result.push_back(std::move(item));
+    }
+
+    mysql_free_result(res);
+    return json::serialize(result);
+}
+
+std::string UserService::get_user_moments(const std::string& viewer_user_id,
+                                          const std::string& target_user_id,
+                                          int limit) {
+    json::array result;
+
+    if (viewer_user_id.empty() || target_user_id.empty()) {
+        return json::serialize(result);
+    }
+
+    if (viewer_user_id != target_user_id && !are_friends(viewer_user_id, target_user_id)) {
+        return json::serialize(result);
+    }
+
+    if (limit <= 0 || limit > 100) {
+        limit = 50;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return json::serialize(result);
+
+    std::string schema_error;
+    if (!ensure_moments_table(mysql, schema_error)) {
+        std::cerr << "[UserService] 朋友圈表迁移失败: " << schema_error << std::endl;
+        return json::serialize(result);
+    }
+
+    const std::string escaped_target_id = sql_escape(mysql, target_user_id);
+    std::ostringstream query;
+    query << "SELECT m.moment_id, m.user_id, u.nickname, u.avatar_url, "
+          << "m.content, m.media_type, m.media_json, "
+          << "DATE_FORMAT(m.create_time, '%Y-%m-%d %H:%i:%s') AS create_time, "
+          << "CAST(UNIX_TIMESTAMP(m.create_time) * 1000 AS UNSIGNED) AS create_timestamp "
+          << "FROM im_moment m "
+          << "LEFT JOIN im_user u ON m.user_id = u.user_id "
+          << "WHERE m.status = 1 AND m.user_id = '" << escaped_target_id << "' "
+          << "ORDER BY m.create_time DESC, m.id DESC "
+          << "LIMIT " << limit;
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        std::cerr << "[UserService] 获取用户朋友圈失败: " << mysql_error(mysql) << std::endl;
         return json::serialize(result);
     }
 

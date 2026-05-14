@@ -11,6 +11,7 @@
 #include <QHostAddress>
 #include <QTimer>
 #include <QStringList>
+#include <QJsonArray>
 #include <memory>
 
 /**
@@ -147,13 +148,12 @@ public:
      * @brief 发布朋友圈
      */
     void createMoment(const QString& content,
-                      const QStringList& image_urls,
-                      const QString& video_url);
+                      const QJsonArray& images);
 
     /**
      * @brief 获取当前用户和好友的朋友圈
      */
-    void getMoments(int limit = 50);
+    void getMoments(int limit = 50, const QString& target_user_id = QString());
 
     /**
      * @brief 修改当前用户密码

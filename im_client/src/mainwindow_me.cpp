@@ -356,7 +356,7 @@ void MainWindow::createMeView() {
     addEntryButton(entry_layout, entry_panel, "account", "账号设置", "meEntryButton",
                    [showPage, account_page]() { showPage(account_page); });
     addEntryButton(entry_layout, entry_panel, "moments", "我的朋友圈", "meEntryButton",
-                   [showPage, moments_page]() { showPage(moments_page); });
+                   [this]() { openMomentsFeed(user_id_, "我的朋友圈", false); });
     home_layout->addWidget(entry_panel);
     home_layout->addStretch();
     home_scroll_area->setWidget(home_content);
@@ -541,14 +541,11 @@ void MainWindow::createMeView() {
     password_page_layout->addWidget(password_panel);
     password_page_layout->addStretch();
 
-    addPlaceholderPage(moments_page, home_page, "我的朋友圈", "我的朋友圈");
-
     me_stack_->addWidget(home_page);
     me_stack_->addWidget(profile_page);
     me_stack_->addWidget(favorite_page);
     me_stack_->addWidget(account_page);
     me_stack_->addWidget(password_page);
-    me_stack_->addWidget(moments_page);
     me_stack_->setCurrentIndex(0);
 
     updateAvatarPreview();

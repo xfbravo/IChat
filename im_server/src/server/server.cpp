@@ -485,20 +485,17 @@ void Server::register_default_handlers() {
         }
 
         std::string content;
-        std::string video_url;
         json::array images;
         try {
             json::object req = parse_json_object(msg.body);
             content = json_string(req, "content");
-            video_url = json_string(req, "video_url");
             images = json_array_value(req, "images");
+            if (!json_string(req, "video_url").empty()) {
+                session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, "朋友圈不支持发布视频"));
+                return;
+            }
         } catch (const std::exception& e) {
             session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
-            return;
-        }
-
-        if (!video_url.empty() && !images.empty()) {
-            session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, "视频和图片不能同时发布"));
             return;
         }
 
@@ -509,12 +506,7 @@ void Server::register_default_handlers() {
 
         std::string media_type = "text";
         std::string media_json;
-        if (!video_url.empty()) {
-            media_type = "video";
-            json::object media;
-            media["video_url"] = video_url;
-            media_json = json::serialize(media);
-        } else if (!images.empty()) {
+        if (!images.empty()) {
             media_type = "image";
             media_json = json::serialize(images);
         }
@@ -531,14 +523,18 @@ void Server::register_default_handlers() {
         }
 
         int limit = 50;
+        std::string target_user_id;
         try {
             json::object req = parse_json_object(msg.body);
             limit = static_cast<int>(json_int64(req, "limit", limit));
+            target_user_id = json_string(req, "target_user_id");
         } catch (const std::exception&) {
             limit = 50;
         }
 
-        std::string feed = user_service_.get_moments_feed(session->user_id(), limit);
+        const std::string feed = target_user_id.empty()
+            ? user_service_.get_moments_feed(session->user_id(), limit)
+            : user_service_.get_user_moments(session->user_id(), target_user_id, limit);
         session->send(MsgType::MOMENTS_RSP, feed);
     });
 

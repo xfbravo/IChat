@@ -199,6 +199,9 @@ public:
      * @brief 获取自己和好友的朋友圈
      */
     std::string get_moments_feed(const std::string& user_id, int limit = 50);
+    std::string get_user_moments(const std::string& viewer_user_id,
+                                 const std::string& target_user_id,
+                                 int limit = 50);
 
 private:
     std::string hash_password(const std::string& password, const std::string& salt);

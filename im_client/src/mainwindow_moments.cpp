@@ -28,13 +28,16 @@
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QSizePolicy>
 #include "mainwindow_helpers.h"
 
 using namespace mainwindow_detail;
 
 namespace {
 
-QPixmap imagePixmapFromDataUrl(const QString& data_url, const QSize& target_size) {
+QPixmap imagePixmapFromDataUrl(const QString& data_url,
+                               const QSize& target_size,
+                               Qt::AspectRatioMode aspect_mode = Qt::KeepAspectRatioByExpanding) {
     const int comma_index = data_url.indexOf(',');
     if (comma_index <= 0) {
         return QPixmap();
@@ -46,7 +49,7 @@ QPixmap imagePixmapFromDataUrl(const QString& data_url, const QSize& target_size
     if (pixmap.isNull()) {
         return pixmap;
     }
-    return pixmap.scaled(target_size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    return pixmap.scaled(target_size, aspect_mode, Qt::SmoothTransformation);
 }
 
 void clearLayout(QLayout* layout) {
@@ -64,10 +67,6 @@ void clearLayout(QLayout* layout) {
 
 QStringList imageFilters() {
     return {"图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"};
-}
-
-QStringList videoFilters() {
-    return {"视频文件 (*.mp4 *.mov *.m4v *.avi *.mkv)"};
 }
 
 } // namespace
@@ -113,8 +112,8 @@ void MainWindow::createMomentsView() {
             this, &MainWindow::onCreateMomentClicked);
     top_layout->addWidget(create_moment_button_, 0, Qt::AlignVCenter);
 
-    QLabel* title = new QLabel("朋友圈", top_bar);
-    title->setStyleSheet(R"(
+    moments_title_label_ = new QLabel("朋友圈", top_bar);
+    moments_title_label_->setStyleSheet(R"(
         QLabel {
             color: #111827;
             font-size: 20px;
@@ -123,7 +122,7 @@ void MainWindow::createMomentsView() {
             border: none;
         }
     )");
-    top_layout->addWidget(title);
+    top_layout->addWidget(moments_title_label_);
     top_layout->addStretch();
 
     moments_status_label_ = new QLabel("正在加载...", top_bar);
@@ -159,10 +158,35 @@ void MainWindow::loadMoments() {
         moments_status_label_->setText("正在加载...");
     }
     if (tcp_client_ && tcp_client_->state() == ClientState::LoggedIn) {
-        tcp_client_->getMoments(50);
+        tcp_client_->getMoments(50, moments_target_user_id_);
     } else if (moments_status_label_) {
         moments_status_label_->setText("离线");
     }
+}
+
+void MainWindow::openMomentsFeed(const QString& target_user_id,
+                                 const QString& title,
+                                 bool allow_create) {
+    moments_target_user_id_ = target_user_id.trimmed();
+    moments_title_text_ = title.trimmed().isEmpty() ? QStringLiteral("朋友圈") : title.trimmed();
+    moments_allow_create_ = allow_create;
+
+    if (moments_title_label_) {
+        moments_title_label_->setText(moments_title_text_);
+    }
+    if (create_moment_button_) {
+        create_moment_button_->setVisible(moments_allow_create_);
+        create_moment_button_->setEnabled(moments_allow_create_);
+    }
+    if (content_stacked_ && moments_view_) {
+        content_stacked_->setCurrentWidget(moments_view_);
+    }
+    if (nav_list_) {
+        const bool blocked = nav_list_->blockSignals(true);
+        nav_list_->setCurrentRow(2);
+        nav_list_->blockSignals(blocked);
+    }
+    loadMoments();
 }
 
 void MainWindow::onCreateMomentClicked() {
@@ -170,8 +194,7 @@ void MainWindow::onCreateMomentClicked() {
     dialog.setWindowTitle("发布朋友圈");
     dialog.setMinimumWidth(560);
 
-    QStringList image_urls;
-    QString video_url;
+    QJsonArray images;
 
     QVBoxLayout* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(18, 18, 18, 18);
@@ -191,7 +214,7 @@ void MainWindow::onCreateMomentClicked() {
     )");
     root->addWidget(content_edit);
 
-    QLabel* hint = new QLabel("可发布纯文字、最多九张图片、文字加图片，或一个视频。视频和图片不能同时发布。", &dialog);
+    QLabel* hint = new QLabel("可发布纯文字、最多九张图片，或文字加图片。图片列表展示缩略图，点击后查看正常大小。", &dialog);
     hint->setWordWrap(true);
     hint->setStyleSheet("color: #6b7280; font-size: 12px;");
     root->addWidget(hint);
@@ -211,71 +234,44 @@ void MainWindow::onCreateMomentClicked() {
 
     auto refresh_media_list = [&]() {
         media_list->clear();
-        if (!video_url.isEmpty()) {
-            media_list->addItem("视频 1 个");
-        }
-        for (int i = 0; i < image_urls.size(); ++i) {
+        for (int i = 0; i < images.size(); ++i) {
             media_list->addItem(QString("图片 %1").arg(i + 1));
         }
         if (media_list->count() == 0) {
-            media_list->addItem("未选择媒体");
+            media_list->addItem("未选择图片");
         }
     };
     refresh_media_list();
 
     QHBoxLayout* actions = new QHBoxLayout;
     QPushButton* add_images = new QPushButton("添加图片", &dialog);
-    QPushButton* add_video = new QPushButton("添加视频", &dialog);
-    QPushButton* clear_media = new QPushButton("清空媒体", &dialog);
+    QPushButton* clear_media = new QPushButton("清空图片", &dialog);
     actions->addWidget(add_images);
-    actions->addWidget(add_video);
     actions->addWidget(clear_media);
     actions->addStretch();
     root->addLayout(actions);
 
     connect(add_images, &QPushButton::clicked, &dialog, [&]() {
-        if (!video_url.isEmpty()) {
-            QMessageBox::information(&dialog, "无法添加图片", "已选择视频，发布视频时不能同时发布图片。");
-            return;
-        }
         const QStringList paths = QFileDialog::getOpenFileNames(
             &dialog, "选择图片", QString(), imageFilters().join(";;"));
         if (paths.isEmpty()) return;
-        if (image_urls.size() + paths.size() > 9) {
+        if (images.size() + paths.size() > 9) {
             QMessageBox::warning(&dialog, "图片过多", "朋友圈图片最多九张。");
             return;
         }
         for (const QString& path : paths) {
-            const QString encoded = encodeMomentImageFile(path);
+            const QJsonObject encoded = encodeMomentImageFile(path);
             if (encoded.isEmpty()) {
                 QMessageBox::warning(&dialog, "图片处理失败", QFileInfo(path).fileName() + " 无法读取或过大。");
                 return;
             }
-            image_urls.append(encoded);
+            images.append(encoded);
         }
-        refresh_media_list();
-    });
-
-    connect(add_video, &QPushButton::clicked, &dialog, [&]() {
-        if (!image_urls.isEmpty()) {
-            QMessageBox::information(&dialog, "无法添加视频", "已选择图片，发布视频时不能同时发布图片。");
-            return;
-        }
-        const QString path = QFileDialog::getOpenFileName(
-            &dialog, "选择视频", QString(), videoFilters().join(";;"));
-        if (path.isEmpty()) return;
-        const QString encoded = encodeMomentVideoFile(path);
-        if (encoded.isEmpty()) {
-            QMessageBox::warning(&dialog, "视频处理失败", "视频无法读取或超过 5MB。");
-            return;
-        }
-        video_url = encoded;
         refresh_media_list();
     });
 
     connect(clear_media, &QPushButton::clicked, &dialog, [&]() {
-        image_urls.clear();
-        video_url.clear();
+        images = QJsonArray();
         refresh_media_list();
     });
 
@@ -287,12 +283,12 @@ void MainWindow::onCreateMomentClicked() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
         const QString content = content_edit->toPlainText().trimmed();
-        if (content.isEmpty() && image_urls.isEmpty() && video_url.isEmpty()) {
-            QMessageBox::warning(&dialog, "内容为空", "请填写文字或选择图片/视频。");
+        if (content.isEmpty() && images.isEmpty()) {
+            QMessageBox::warning(&dialog, "内容为空", "请填写文字或选择图片。");
             return;
         }
         if (tcp_client_) {
-            tcp_client_->createMoment(content, image_urls, video_url);
+            tcp_client_->createMoment(content, images);
         }
         dialog.accept();
     });
@@ -401,40 +397,46 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
         grid->setSpacing(6);
         const QJsonArray images = media_value.toArray();
         for (int i = 0; i < images.size(); ++i) {
-            QLabel* image = new QLabel(card);
-            image->setFixedSize(132, 132);
-            image->setAlignment(Qt::AlignCenter);
-            image->setStyleSheet("background: #eef0f2; border: none; border-radius: 4px;");
-            const QPixmap pixmap = imagePixmapFromDataUrl(images.at(i).toString(), QSize(132, 132));
+            const QJsonValue image_value = images.at(i);
+            QString thumb_url;
+            QString full_url;
+            if (image_value.isObject()) {
+                const QJsonObject image_obj = image_value.toObject();
+                thumb_url = image_obj["thumb_url"].toString();
+                full_url = image_obj["image_url"].toString();
+            } else {
+                thumb_url = image_value.toString();
+                full_url = thumb_url;
+            }
+
+            QToolButton* image = new QToolButton(card);
+            image->setFixedSize(112, 112);
+            image->setCursor(Qt::PointingHandCursor);
+            image->setToolTip("查看图片");
+            image->setIconSize(QSize(112, 112));
+            image->setStyleSheet(R"(
+                QToolButton {
+                    background: #eef0f2;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 0;
+                }
+                QToolButton:hover {
+                    background: #e5e7eb;
+                }
+            )");
+            const QPixmap pixmap = imagePixmapFromDataUrl(thumb_url, QSize(112, 112));
             if (!pixmap.isNull()) {
-                image->setPixmap(pixmap.copy((pixmap.width() - 132) / 2, (pixmap.height() - 132) / 2, 132, 132));
+                image->setIcon(QIcon(pixmap.copy((pixmap.width() - 112) / 2, (pixmap.height() - 112) / 2, 112, 112)));
             } else {
                 image->setText("图片");
             }
+            connect(image, &QToolButton::clicked, this, [this, full_url]() {
+                showMomentImageDialog(full_url);
+            });
             grid->addWidget(image, i / 3, i % 3);
         }
         body->addLayout(grid);
-    } else if (media_type == "video" && media_value.isObject()) {
-        QPushButton* video = new QPushButton("视频动态", card);
-        video->setMinimumHeight(72);
-        video->setCursor(Qt::PointingHandCursor);
-        video->setStyleSheet(R"(
-            QPushButton {
-                text-align: left;
-                padding: 0 18px;
-                color: #ffffff;
-                background: #111827;
-                border: none;
-                border-radius: 6px;
-                font-size: 15px;
-                font-weight: 600;
-            }
-            QPushButton:hover { background: #1f2937; }
-        )");
-        connect(video, &QPushButton::clicked, this, [this]() {
-            QMessageBox::information(this, "视频动态", "视频已随朋友圈保存，当前客户端先以视频卡片展示。");
-        });
-        body->addWidget(video);
     }
 
     QLabel* time = new QLabel(moment["create_time"].toString(), card);
@@ -444,12 +446,12 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
     return card;
 }
 
-QString MainWindow::encodeMomentImageFile(const QString& file_path) {
+QJsonObject MainWindow::encodeMomentImageFile(const QString& file_path) {
     QImageReader reader(file_path);
     reader.setAutoTransform(true);
     QImage image = reader.read();
     if (image.isNull()) {
-        return QString();
+        return QJsonObject();
     }
 
     const int max_edge = 1280;
@@ -461,7 +463,7 @@ QString MainWindow::encodeMomentImageFile(const QString& file_path) {
     QBuffer buffer(&bytes);
     buffer.open(QIODevice::WriteOnly);
     if (!image.save(&buffer, "JPG", 78)) {
-        return QString();
+        return QJsonObject();
     }
 
     if (bytes.size() > 850 * 1024) {
@@ -471,30 +473,50 @@ QString MainWindow::encodeMomentImageFile(const QString& file_path) {
         buffer.open(QIODevice::WriteOnly);
         QImage smaller = image.scaled(960, 960, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         if (!smaller.save(&buffer, "JPG", 65) || bytes.size() > 850 * 1024) {
-            return QString();
+            return QJsonObject();
         }
     }
 
-    return "data:image/jpeg;base64," + QString::fromLatin1(bytes.toBase64());
+    QImage thumb = image.scaled(240, 240, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    const QRect crop((thumb.width() - 240) / 2, (thumb.height() - 240) / 2, 240, 240);
+    thumb = thumb.copy(crop);
+
+    QByteArray thumb_bytes;
+    QBuffer thumb_buffer(&thumb_bytes);
+    thumb_buffer.open(QIODevice::WriteOnly);
+    if (!thumb.save(&thumb_buffer, "JPG", 58)) {
+        return QJsonObject();
+    }
+
+    QJsonObject result;
+    result["thumb_url"] = "data:image/jpeg;base64," + QString::fromLatin1(thumb_bytes.toBase64());
+    result["image_url"] = "data:image/jpeg;base64," + QString::fromLatin1(bytes.toBase64());
+    return result;
 }
 
-QString MainWindow::encodeMomentVideoFile(const QString& file_path) {
-    QFile file(file_path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        return QString();
+void MainWindow::showMomentImageDialog(const QString& image_url) {
+    const QPixmap pixmap = imagePixmapFromDataUrl(image_url, QSize(900, 700), Qt::KeepAspectRatio);
+    if (pixmap.isNull()) {
+        QMessageBox::warning(this, "查看图片", "图片无法打开");
+        return;
     }
 
-    constexpr qint64 kMaxVideoBytes = 5 * 1024 * 1024;
-    if (file.size() <= 0 || file.size() > kMaxVideoBytes) {
-        return QString();
-    }
+    QDialog dialog(this);
+    dialog.setWindowTitle("查看图片");
+    dialog.resize(qMin(960, pixmap.width() + 40), qMin(760, pixmap.height() + 40));
 
-    const QByteArray bytes = file.readAll();
-    const QString suffix = QFileInfo(file_path).suffix().toLower();
-    QString mime = "video/mp4";
-    if (suffix == "mov") mime = "video/quicktime";
-    else if (suffix == "avi") mime = "video/x-msvideo";
-    else if (suffix == "mkv") mime = "video/x-matroska";
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(16, 16, 16, 16);
 
-    return "data:" + mime + ";base64," + QString::fromLatin1(bytes.toBase64());
+    QScrollArea* area = new QScrollArea(&dialog);
+    area->setWidgetResizable(true);
+    area->setFrameShape(QFrame::NoFrame);
+    QLabel* image = new QLabel(area);
+    image->setAlignment(Qt::AlignCenter);
+    image->setPixmap(pixmap);
+    image->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    area->setWidget(image);
+    layout->addWidget(area);
+
+    dialog.exec();
 }

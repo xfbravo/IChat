@@ -296,8 +296,7 @@ void TcpClient::getUserProfile(const QString& user_id) {
 }
 
 void TcpClient::createMoment(const QString& content,
-                             const QStringList& image_urls,
-                             const QString& video_url) {
+                             const QJsonArray& images) {
     if (state_ != ClientState::LoggedIn) {
         emit momentCreateResult(401, "未登录");
         return;
@@ -305,17 +304,12 @@ void TcpClient::createMoment(const QString& content,
 
     QJsonObject obj;
     obj["content"] = content;
-    QJsonArray images;
-    for (const QString& image_url : image_urls) {
-        images.append(image_url);
-    }
     obj["images"] = images;
-    obj["video_url"] = video_url;
     QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::CREATE_MOMENT, body);
 }
 
-void TcpClient::getMoments(int limit) {
+void TcpClient::getMoments(int limit, const QString& target_user_id) {
     if (state_ != ClientState::LoggedIn) {
         emit momentsReceived("[]");
         return;
@@ -323,6 +317,9 @@ void TcpClient::getMoments(int limit) {
 
     QJsonObject obj;
     obj["limit"] = limit;
+    if (!target_user_id.trimmed().isEmpty()) {
+        obj["target_user_id"] = target_user_id.trimmed();
+    }
     QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::GET_MOMENTS, body);
 }

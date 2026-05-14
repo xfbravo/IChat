@@ -230,7 +230,7 @@ void MainWindow::onNavigationItemClicked(int index) {
             break;
         case 2: // 朋友圈
             content_stacked_->setCurrentWidget(moments_view_);
-            loadMoments();
+            openMomentsFeed();
             break;
         case 3: // 我
             content_stacked_->setCurrentWidget(me_view_);

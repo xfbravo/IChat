@@ -465,6 +465,32 @@ void MainWindow::showUserProfileDialog(const QString &user_id,
         moments_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         moments_button->setCursor(Qt::PointingHandCursor);
         moments_button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        connect(moments_button, &QToolButton::clicked, this, [this]()
+        {
+            const QString target_id = profile_dialog_user_id_;
+            if (target_id.isEmpty())
+            {
+                return;
+            }
+
+            const UserProfileCache profile = cachedUserProfile(target_id);
+            QString title = profile.display_name.trimmed();
+            if (title.isEmpty())
+            {
+                const QString remark = profile.remark.trimmed();
+                const QString nickname = profile.nickname.trimmed();
+                title = remark.isEmpty() ? nickname : remark;
+            }
+            if (title.isEmpty())
+            {
+                title = target_id;
+            }
+            openMomentsFeed(target_id, QString("%1的朋友圈").arg(title), false);
+            if (user_profile_dialog_)
+            {
+                user_profile_dialog_->accept();
+            }
+        });
         entry_layout->addWidget(moments_button);
         root_layout->addWidget(entry_panel);
 

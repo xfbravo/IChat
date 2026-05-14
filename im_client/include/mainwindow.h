@@ -138,10 +138,13 @@ private:
     void createMeView();
     void createMomentsView();
     void loadMoments();
+    void openMomentsFeed(const QString& target_user_id = QString(),
+                         const QString& title = QStringLiteral("朋友圈"),
+                         bool allow_create = true);
     void renderMoments(const QJsonArray& moments);
     QWidget* createMomentCard(const QJsonObject& moment);
-    QString encodeMomentImageFile(const QString& file_path);
-    QString encodeMomentVideoFile(const QString& file_path);
+    QJsonObject encodeMomentImageFile(const QString& file_path);
+    void showMomentImageDialog(const QString& image_url);
 
     // “我”页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
     QString encodeAvatarFile(const QString& file_path);
@@ -224,8 +227,12 @@ private:
     QScrollArea* moments_scroll_area_ = nullptr;
     QWidget* moments_feed_widget_ = nullptr;
     QVBoxLayout* moments_feed_layout_ = nullptr;
+    QLabel* moments_title_label_ = nullptr;
     QLabel* moments_status_label_ = nullptr;
     QPushButton* create_moment_button_ = nullptr;
+    QString moments_target_user_id_;
+    QString moments_title_text_ = QStringLiteral("朋友圈");
+    bool moments_allow_create_ = true;
 
     // Me View
     QStackedWidget* me_stack_ = nullptr;
