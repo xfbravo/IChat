@@ -120,6 +120,12 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onOfflineMessageReceived);
     connect(tcp_client_, &TcpClient::messageAckReceived,
             this, &MainWindow::onMessageAckReceived);
+    connect(tcp_client_, &TcpClient::fileMessageSent,
+            this, &MainWindow::onFileMessageSent);
+    connect(tcp_client_, &TcpClient::fileTransferProgress,
+            this, &MainWindow::onFileTransferProgress);
+    connect(tcp_client_, &TcpClient::fileTransferFinished,
+            this, &MainWindow::onFileTransferFinished);
     connect(tcp_client_, &TcpClient::friendRemarkUpdateResult,
             this, &MainWindow::onFriendRemarkUpdateResult);
     connect(tcp_client_, &TcpClient::avatarUpdateResult,

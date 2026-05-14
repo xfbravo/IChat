@@ -11,6 +11,11 @@
 #include <ctime>
 #include <stdexcept>
 #include <vector>
+#include <fstream>
+#include <filesystem>
+#include <iomanip>
+#include <random>
+#include <cctype>
 #include <boost/json.hpp>
 
 namespace im {
@@ -63,6 +68,19 @@ bool json_bool(const json::object& obj, const char* key, bool default_value = fa
     return it->value().as_bool();
 }
 
+uint64_t json_uint64(const json::object& obj, const char* key, uint64_t default_value = 0) {
+    auto it = obj.find(key);
+    if (it == obj.end()) {
+        return default_value;
+    }
+
+    const json::value& value = it->value();
+    if (value.is_uint64()) return value.as_uint64();
+    if (value.is_int64() && value.as_int64() >= 0) return static_cast<uint64_t>(value.as_int64());
+    if (value.is_double() && value.as_double() >= 0) return static_cast<uint64_t>(value.as_double());
+    return default_value;
+}
+
 json::array json_array_value(const json::object& obj, const char* key) {
     auto it = obj.find(key);
     if (it == obj.end() || !it->value().is_array()) {
@@ -76,6 +94,87 @@ std::string json_response(int code, const std::string& message) {
     rsp["code"] = code;
     rsp["message"] = message;
     return json::serialize(rsp);
+}
+
+std::string random_hex_id(std::size_t bytes = 16) {
+    static thread_local std::mt19937_64 rng{std::random_device{}()};
+    std::uniform_int_distribution<int> dist(0, 255);
+
+    std::ostringstream out;
+    for (std::size_t i = 0; i < bytes; ++i) {
+        out << std::hex << std::setw(2) << std::setfill('0') << dist(rng);
+    }
+    return out.str();
+}
+
+std::string safe_file_name(const std::string& file_name) {
+    std::string safe;
+    for (unsigned char ch : file_name) {
+        if (std::isalnum(ch) || ch == '.' || ch == '_' || ch == '-') {
+            safe.push_back(static_cast<char>(ch));
+        } else {
+            safe.push_back('_');
+        }
+    }
+    return safe.empty() ? "file" : safe;
+}
+
+const std::string& base64_chars() {
+    static const std::string chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    return chars;
+}
+
+std::string base64_encode(const std::string& input) {
+    const std::string& chars = base64_chars();
+    std::string output;
+    int val = 0;
+    int valb = -6;
+    for (unsigned char c : input) {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0) {
+            output.push_back(chars[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) {
+        output.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    }
+    while (output.size() % 4) {
+        output.push_back('=');
+    }
+    return output;
+}
+
+std::string base64_decode(const std::string& input) {
+    std::vector<int> table(256, -1);
+    const std::string& chars = base64_chars();
+    for (int i = 0; i < static_cast<int>(chars.size()); ++i) {
+        table[static_cast<unsigned char>(chars[i])] = i;
+    }
+
+    std::string output;
+    int val = 0;
+    int valb = -8;
+    for (unsigned char c : input) {
+        if (std::isspace(c)) continue;
+        if (c == '=') break;
+        if (table[c] == -1) {
+            throw std::runtime_error("invalid base64 data");
+        }
+        val = (val << 6) + table[c];
+        valb += 6;
+        if (valb >= 0) {
+            output.push_back(static_cast<char>((val >> valb) & 0xFF));
+            valb -= 8;
+        }
+    }
+    return output;
+}
+
+std::filesystem::path file_storage_dir() {
+    return std::filesystem::current_path() / "storage" / "files";
 }
 
 std::string message_ack(const std::string& msg_id, const std::string& status,
@@ -758,6 +857,305 @@ void Server::register_default_handlers() {
         }
 
         user_service_.mark_offline_messages_pushed(session->user_id(), msg_id);
+    });
+
+    dispatcher_.register_handler(MsgType::FILE_UPLOAD_START, [this](std::shared_ptr<Session> session, const Message& msg) {
+        json::object rsp;
+        rsp["status"] = "failed";
+
+        if (session->user_id().empty()) {
+            rsp["code"] = 401;
+            rsp["message"] = "未登录";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        json::object req;
+        try {
+            req = parse_json_object(msg.body);
+        } catch (const std::exception& e) {
+            rsp["code"] = 400;
+            rsp["message"] = std::string("无效 JSON: ") + e.what();
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        constexpr uint64_t max_file_size = 200ULL * 1024ULL * 1024ULL;
+        const std::string transfer_id = json_string(req, "transfer_id");
+        const std::string to_user_id = json_string(req, "to_user_id");
+        const std::string file_name = json_string(req, "file_name", "file");
+        const std::string mime_type = json_string(req, "mime_type", "application/octet-stream");
+        const uint64_t file_size = json_uint64(req, "file_size");
+        const uint64_t total_chunks_64 = json_uint64(req, "total_chunks");
+
+        rsp["transfer_id"] = transfer_id;
+        if (transfer_id.empty() || to_user_id.empty() || file_size == 0 || total_chunks_64 == 0) {
+            rsp["code"] = 400;
+            rsp["message"] = "缺少文件上传参数";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+        if (file_size > max_file_size) {
+            rsp["code"] = 413;
+            rsp["message"] = "单个文件不能超过200MB";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+        if (!user_service_.user_exists(to_user_id) || !user_service_.are_friends(session->user_id(), to_user_id)) {
+            rsp["code"] = 403;
+            rsp["message"] = "只能给好友发送文件";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        try {
+            std::filesystem::create_directories(file_storage_dir());
+        } catch (const std::exception& e) {
+            rsp["code"] = 500;
+            rsp["message"] = std::string("创建文件目录失败: ") + e.what();
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        const std::string file_id = random_hex_id();
+        const std::filesystem::path temp_path = file_storage_dir() / (file_id + ".part");
+        const std::filesystem::path final_path = file_storage_dir() / (file_id + ".bin");
+        {
+            std::ofstream create_file(temp_path, std::ios::binary | std::ios::trunc);
+            if (!create_file) {
+                rsp["code"] = 500;
+                rsp["message"] = "创建临时文件失败";
+                session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+                return;
+            }
+        }
+
+        FileUploadState state;
+        state.transfer_id = transfer_id;
+        state.file_id = file_id;
+        state.from_user_id = session->user_id();
+        state.to_user_id = to_user_id;
+        state.file_name = file_name;
+        state.mime_type = mime_type;
+        state.file_size = file_size;
+        state.total_chunks = static_cast<uint32_t>(total_chunks_64);
+        state.temp_path = temp_path.string();
+        state.final_path = final_path.string();
+
+        {
+            std::lock_guard<std::mutex> lock(file_upload_mutex_);
+            file_uploads_[transfer_id] = state;
+        }
+
+        rsp["code"] = 0;
+        rsp["status"] = "ready";
+        rsp["message"] = "可以上传";
+        rsp["transfer_id"] = transfer_id;
+        rsp["file_id"] = file_id;
+        rsp["next_chunk_index"] = 0;
+        session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+    });
+
+    dispatcher_.register_handler(MsgType::FILE_UPLOAD_CHUNK, [this](std::shared_ptr<Session> session, const Message& msg) {
+        json::object rsp;
+        rsp["status"] = "failed";
+
+        json::object req;
+        try {
+            req = parse_json_object(msg.body);
+        } catch (const std::exception& e) {
+            rsp["code"] = 400;
+            rsp["message"] = std::string("无效 JSON: ") + e.what();
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        const std::string transfer_id = json_string(req, "transfer_id");
+        const uint64_t chunk_index_64 = json_uint64(req, "chunk_index");
+        rsp["transfer_id"] = transfer_id;
+
+        FileUploadState state;
+        {
+            std::lock_guard<std::mutex> lock(file_upload_mutex_);
+            auto it = file_uploads_.find(transfer_id);
+            if (it == file_uploads_.end()) {
+                rsp["code"] = 404;
+                rsp["message"] = "上传任务不存在";
+                session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+                return;
+            }
+            state = it->second;
+        }
+
+        if (state.from_user_id != session->user_id()) {
+            rsp["code"] = 403;
+            rsp["message"] = "无权上传该文件";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+        if (chunk_index_64 != state.next_chunk_index) {
+            rsp["code"] = 409;
+            rsp["message"] = "分片顺序不正确";
+            rsp["next_chunk_index"] = state.next_chunk_index;
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        std::string chunk;
+        try {
+            chunk = base64_decode(json_string(req, "data"));
+        } catch (const std::exception& e) {
+            rsp["code"] = 400;
+            rsp["message"] = std::string("分片解码失败: ") + e.what();
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        if (state.received_size + chunk.size() > state.file_size) {
+            rsp["code"] = 413;
+            rsp["message"] = "上传内容超过声明大小";
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        {
+            std::ofstream out(state.temp_path, std::ios::binary | std::ios::app);
+            if (!out) {
+                rsp["code"] = 500;
+                rsp["message"] = "写入文件失败";
+                session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+                return;
+            }
+            out.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        }
+
+        state.received_size += chunk.size();
+        ++state.next_chunk_index;
+
+        const bool complete = state.next_chunk_index >= state.total_chunks
+            && state.received_size == state.file_size;
+        if (complete) {
+            try {
+                std::filesystem::rename(state.temp_path, state.final_path);
+            } catch (const std::exception& e) {
+                rsp["code"] = 500;
+                rsp["message"] = std::string("保存文件失败: ") + e.what();
+                session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(file_upload_mutex_);
+                file_uploads_.erase(transfer_id);
+            }
+
+            rsp["code"] = 0;
+            rsp["status"] = "complete";
+            rsp["message"] = "上传完成";
+            rsp["file_id"] = state.file_id;
+            rsp["file_name"] = state.file_name;
+            rsp["file_size"] = state.file_size;
+            rsp["mime_type"] = state.mime_type;
+            session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(file_upload_mutex_);
+            file_uploads_[transfer_id] = state;
+        }
+
+        rsp["code"] = 0;
+        rsp["status"] = "chunk";
+        rsp["message"] = "分片已接收";
+        rsp["next_chunk_index"] = state.next_chunk_index;
+        rsp["received_size"] = state.received_size;
+        session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+    });
+
+    dispatcher_.register_handler(MsgType::FILE_DOWNLOAD_REQ, [this](std::shared_ptr<Session> session, const Message& msg) {
+        json::object rsp;
+        rsp["status"] = "failed";
+
+        if (session->user_id().empty()) {
+            rsp["code"] = 401;
+            rsp["message"] = "未登录";
+            session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        json::object req;
+        try {
+            req = parse_json_object(msg.body);
+        } catch (const std::exception& e) {
+            rsp["code"] = 400;
+            rsp["message"] = std::string("无效 JSON: ") + e.what();
+            session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        const std::string transfer_id = json_string(req, "transfer_id", random_hex_id());
+        const std::string file_id = safe_file_name(json_string(req, "file_id"));
+        const std::string file_name = json_string(req, "file_name", "file");
+        const std::filesystem::path path = file_storage_dir() / (file_id + ".bin");
+        rsp["transfer_id"] = transfer_id;
+        rsp["file_id"] = file_id;
+
+        if (file_id.empty() || !std::filesystem::exists(path)) {
+            rsp["code"] = 404;
+            rsp["message"] = "文件不存在或已过期";
+            session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            rsp["code"] = 500;
+            rsp["message"] = "打开文件失败";
+            session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
+            return;
+        }
+
+        constexpr std::size_t chunk_size = 256 * 1024;
+        const uint64_t file_size = static_cast<uint64_t>(std::filesystem::file_size(path));
+        const uint64_t total_chunks = (file_size + chunk_size - 1) / chunk_size;
+
+        rsp["code"] = 0;
+        rsp["status"] = "ready";
+        rsp["message"] = "开始下载";
+        rsp["file_name"] = file_name;
+        rsp["file_size"] = file_size;
+        rsp["total_chunks"] = total_chunks;
+        session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
+
+        std::vector<char> buffer(chunk_size);
+        uint64_t chunk_index = 0;
+        while (in && chunk_index < total_chunks) {
+            in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const std::streamsize bytes_read = in.gcount();
+            if (bytes_read <= 0) break;
+
+            json::object chunk_rsp;
+            chunk_rsp["code"] = 0;
+            chunk_rsp["transfer_id"] = transfer_id;
+            chunk_rsp["file_id"] = file_id;
+            chunk_rsp["file_name"] = file_name;
+            chunk_rsp["file_size"] = file_size;
+            chunk_rsp["chunk_index"] = chunk_index;
+            chunk_rsp["total_chunks"] = total_chunks;
+            chunk_rsp["data"] = base64_encode(std::string(buffer.data(), static_cast<std::size_t>(bytes_read)));
+            session->send(MsgType::FILE_DOWNLOAD_CHUNK, json::serialize(chunk_rsp));
+            ++chunk_index;
+        }
+
+        json::object done_rsp;
+        done_rsp["code"] = 0;
+        done_rsp["status"] = "complete";
+        done_rsp["message"] = "下载完成";
+        done_rsp["transfer_id"] = transfer_id;
+        done_rsp["file_id"] = file_id;
+        done_rsp["file_name"] = file_name;
+        session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(done_rsp));
     });
 
     // 登出消息处理

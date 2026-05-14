@@ -51,12 +51,21 @@ private slots:
     // Chat functions
     void onSendClicked();
     void onChatMessageReceived(const QString& from_user_id, const QString& content,
+                               const QString& content_type,
                                const QString& msg_id, qint64 server_timestamp,
                                const QString& server_time);
+    void onAttachFileClicked();
+    void onFileMessageSent(const QString& to_user_id, const QString& content, const QString& msg_id);
+    void onFileTransferProgress(const QString& transfer_id, const QString& file_name,
+                                qint64 transferred, qint64 total, bool upload);
+    void onFileTransferFinished(const QString& transfer_id, const QString& file_name,
+                                const QString& save_path, bool upload, bool success,
+                                const QString& message);
     void onChatItemClicked(QListWidgetItem* item);
     void onDisconnected();
     void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
     void onOfflineMessageReceived(const QString& from_user_id, const QString& content,
+                                  const QString& content_type,
                                   const QString& msg_id, qint64 server_timestamp,
                                   const QString& server_time);
     void onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
@@ -124,6 +133,7 @@ private:
     struct ChatViewMessage {
         QString msg_id;
         QString from;
+        QString content_type = QStringLiteral("text");
         QString content;
         QString time;
         QString status;
@@ -165,9 +175,13 @@ private:
 
     // 消息页工具：维护 conversations_ 与当前聊天窗口的同步。
     void appendMessage(const QString& from, const QString& content, bool is_mine,
-                       const QString& msg_id = QString(), const QString& status = QString());
+                       const QString& msg_id = QString(), const QString& status = QString(),
+                       const QString& content_type = QStringLiteral("text"));
     void renderChatMessages(bool scroll_to_bottom = false);
     QWidget* createMessageRow(const ChatViewMessage& message);
+    QWidget* createFileMessageCard(const ChatViewMessage& message, int max_width);
+    QString fileMessageTitle(const QString& content) const;
+    QString humanFileSize(qint64 size) const;
     void appendMessageRow(const ChatViewMessage& message);
     void scrollToBottomAnimated();
     void rebuildMessageIndex();
@@ -211,6 +225,7 @@ private:
     QWidget* chat_messages_widget_;
     QVBoxLayout* chat_messages_layout_;
     QLineEdit* message_input_;
+    QToolButton* attach_file_button_ = nullptr;
     QPushButton* send_button_;
     QPropertyAnimation* chat_scroll_animation_ = nullptr;
 

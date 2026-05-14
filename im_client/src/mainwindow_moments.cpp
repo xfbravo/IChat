@@ -5,6 +5,7 @@
 
 #include "mainwindow.h"
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QBuffer>
 #include <QDateTime>
 #include <QDialog>
@@ -23,14 +24,16 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
-#include <QAbstractItemModel>
+#include <QMouseEvent>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRect>
 #include <QScrollArea>
 #include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QSizePolicy>
+#include <functional>
 #include "mainwindow_helpers.h"
 
 using namespace mainwindow_detail;
@@ -69,6 +72,79 @@ void clearLayout(QLayout* layout) {
 
 QStringList imageFilters() {
     return {"图片文件 (*.png *.jpg *.jpeg *.bmp *.webp)"};
+}
+
+class MomentMediaList : public QListWidget {
+public:
+    explicit MomentMediaList(QWidget* parent = nullptr) : QListWidget(parent) {}
+
+    std::function<void()> order_changed;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        press_pos_ = event->pos();
+        dragged_item_ = itemAt(press_pos_);
+        dragging_ = false;
+        QListWidget::mousePressEvent(event);
+    }
+
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if (!(event->buttons() & Qt::LeftButton) || !dragged_item_) {
+            QListWidget::mouseMoveEvent(event);
+            return;
+        }
+
+        if (!dragging_ &&
+            (event->pos() - press_pos_).manhattanLength() < QApplication::startDragDistance()) {
+            QListWidget::mouseMoveEvent(event);
+            return;
+        }
+
+        dragging_ = true;
+        const int from = row(dragged_item_);
+        int to = indexAt(event->pos()).row();
+        if (to < 0 && count() > 0) {
+            const QRect last_rect = visualItemRect(item(count() - 1));
+            if (event->pos().y() >= last_rect.center().y()) {
+                to = count() - 1;
+            }
+        }
+
+        if (from >= 0 && to >= 0 && from != to) {
+            QListWidgetItem* moved_item = takeItem(from);
+            insertItem(to, moved_item);
+            dragged_item_ = moved_item;
+            setCurrentItem(moved_item);
+            scrollToItem(moved_item, QAbstractItemView::EnsureVisible);
+            if (order_changed) {
+                order_changed();
+            }
+        }
+        event->accept();
+    }
+
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        const bool was_dragging = dragging_;
+        dragged_item_ = nullptr;
+        dragging_ = false;
+        if (was_dragging) {
+            event->accept();
+            return;
+        }
+        QListWidget::mouseReleaseEvent(event);
+    }
+
+private:
+    QPoint press_pos_;
+    QListWidgetItem* dragged_item_ = nullptr;
+    bool dragging_ = false;
+};
+
+QSize momentMediaGridSize(int image_count, const QSize& item_size, int spacing) {
+    const int columns = qMin(3, qMax(1, image_count));
+    const int rows = (image_count + 2) / 3;
+    return QSize(columns * item_size.width() + (columns - 1) * spacing,
+                 rows * item_size.height() + (rows - 1) * spacing);
 }
 
 } // namespace
@@ -219,22 +295,23 @@ void MainWindow::onCreateMomentClicked() {
     hint->setStyleSheet("color: #6b7280; font-size: 12px;");
     root->addWidget(hint);
 
-    QListWidget* media_list = new QListWidget(&dialog);
+    MomentMediaList* media_list = new MomentMediaList(&dialog);
     media_list->setFixedHeight(162);
     media_list->setViewMode(QListView::IconMode);
-    media_list->setMovement(QListView::Snap);
+    media_list->setMovement(QListView::Static);
     media_list->setResizeMode(QListView::Adjust);
     media_list->setFlow(QListView::LeftToRight);
     media_list->setWrapping(true);
     media_list->setIconSize(QSize(88, 88));
     media_list->setGridSize(QSize(104, 122));
     media_list->setSpacing(8);
+    media_list->setUniformItemSizes(true);
+    media_list->setWordWrap(false);
     media_list->setSelectionMode(QAbstractItemView::SingleSelection);
-    media_list->setDragDropMode(QAbstractItemView::InternalMove);
-    media_list->setDefaultDropAction(Qt::MoveAction);
-    media_list->setDragEnabled(true);
-    media_list->setAcceptDrops(true);
-    media_list->setDropIndicatorShown(true);
+    media_list->setDragDropMode(QAbstractItemView::NoDragDrop);
+    media_list->setDragEnabled(false);
+    media_list->setAcceptDrops(false);
+    media_list->setDropIndicatorShown(false);
     media_list->setStyleSheet(R"(
         QListWidget {
             border: 1px solid #e5e7eb;
@@ -298,7 +375,11 @@ void MainWindow::onCreateMomentClicked() {
             item->setSizeHint(QSize(104, 122));
             item->setData(Qt::UserRole, QString::fromUtf8(QJsonDocument(encoded).toJson(QJsonDocument::Compact)));
             item->setData(Qt::UserRole + 1, encoded["image_url"].toString());
-            item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+            Qt::ItemFlags item_flags = item->flags();
+            item_flags |= Qt::ItemIsSelectable | Qt::ItemIsEnabled;
+            item_flags &= ~Qt::ItemIsDragEnabled;
+            item_flags &= ~Qt::ItemIsDropEnabled;
+            item->setFlags(item_flags);
             media_list->addItem(item);
         }
         update_item_titles();
@@ -309,9 +390,7 @@ void MainWindow::onCreateMomentClicked() {
         showMomentImageDialog(item->data(Qt::UserRole + 1).toString());
     });
 
-    connect(media_list->model(), &QAbstractItemModel::rowsMoved, &dialog, [&]() {
-        update_item_titles();
-    });
+    media_list->order_changed = update_item_titles;
 
     connect(clear_media, &QPushButton::clicked, &dialog, [&]() {
         media_list->clear();
@@ -477,10 +556,19 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
     const QString media_type = moment["media_type"].toString();
     const QJsonValue media_value = moment["media"];
     if (media_type == "image" && media_value.isArray()) {
-        QGridLayout* grid = new QGridLayout;
-        grid->setContentsMargins(0, 2, 0, 0);
-        grid->setSpacing(6);
         const QJsonArray images = media_value.toArray();
+        const QSize image_size(112, 112);
+        constexpr int image_spacing = 6;
+
+        QWidget* media_grid = new QWidget(card);
+        media_grid->setStyleSheet("background: transparent; border: none;");
+        media_grid->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        media_grid->setFixedSize(momentMediaGridSize(images.size(), image_size, image_spacing));
+
+        QGridLayout* grid = new QGridLayout(media_grid);
+        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setHorizontalSpacing(image_spacing);
+        grid->setVerticalSpacing(image_spacing);
         for (int i = 0; i < images.size(); ++i) {
             const QJsonValue image_value = images.at(i);
             QString thumb_url;
@@ -495,10 +583,10 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
             }
 
             QToolButton* image = new QToolButton(card);
-            image->setFixedSize(112, 112);
+            image->setFixedSize(image_size);
             image->setCursor(Qt::PointingHandCursor);
             image->setToolTip("查看图片");
-            image->setIconSize(QSize(112, 112));
+            image->setIconSize(image_size);
             image->setStyleSheet(R"(
                 QToolButton {
                     background: #eef0f2;
@@ -510,9 +598,12 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
                     background: #e5e7eb;
                 }
             )");
-            const QPixmap pixmap = imagePixmapFromDataUrl(thumb_url, QSize(112, 112));
+            const QPixmap pixmap = imagePixmapFromDataUrl(thumb_url, image_size);
             if (!pixmap.isNull()) {
-                image->setIcon(QIcon(pixmap.copy((pixmap.width() - 112) / 2, (pixmap.height() - 112) / 2, 112, 112)));
+                image->setIcon(QIcon(pixmap.copy((pixmap.width() - image_size.width()) / 2,
+                                                 (pixmap.height() - image_size.height()) / 2,
+                                                 image_size.width(),
+                                                 image_size.height())));
             } else {
                 image->setText("图片");
             }
@@ -521,7 +612,7 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
             });
             grid->addWidget(image, i / 3, i % 3);
         }
-        body->addLayout(grid);
+        body->addWidget(media_grid, 0, Qt::AlignLeft);
     }
 
     QLabel* time = new QLabel(moment["create_time"].toString(), card);

@@ -226,6 +226,32 @@ void MainWindow::createMessageView() {
     )");
     connect(message_input_, &QLineEdit::returnPressed, this, &MainWindow::onSendClicked);
 
+    attach_file_button_ = new QToolButton;
+    attach_file_button_->setText("+");
+    attach_file_button_->setToolTip("发送文件");
+    attach_file_button_->setEnabled(false);
+    attach_file_button_->setCursor(Qt::PointingHandCursor);
+    attach_file_button_->setStyleSheet(R"(
+        QToolButton {
+            min-width: 38px;
+            min-height: 38px;
+            border: 1px solid #dddddd;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #333333;
+            font-size: 24px;
+            padding-bottom: 3px;
+        }
+        QToolButton:hover {
+            background-color: #f2f2f2;
+        }
+        QToolButton:disabled {
+            color: #bbbbbb;
+            background-color: #f7f7f7;
+        }
+    )");
+    connect(attach_file_button_, &QToolButton::clicked, this, &MainWindow::onAttachFileClicked);
+
     send_button_ = new QPushButton("发送");
     send_button_->setStyleSheet(R"(
         QPushButton {
@@ -247,6 +273,7 @@ void MainWindow::createMessageView() {
     connect(send_button_, &QPushButton::clicked, this, &MainWindow::onSendClicked);
 
     input_layout->addWidget(message_input_);
+    input_layout->addWidget(attach_file_button_);
     input_layout->addWidget(send_button_);
 
     chat_layout->addWidget(input_widget);
@@ -279,12 +306,14 @@ void MainWindow::onSendClicked() {
 }
 
 void MainWindow::onChatMessageReceived(const QString& from_user_id, const QString& content,
+                                       const QString& content_type,
                                        const QString& msg_id, qint64 server_timestamp,
                                        const QString& server_time) {
     // 服务端推送进入后先转换为 UI 消息模型，再统一交给会话缓存处理。
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = from_user_id;
+    message.content_type = content_type.isEmpty() ? QStringLiteral("text") : content_type;
     message.content = content;
     message.time = server_time.isEmpty()
         ? QDateTime::currentDateTime().toString("hh:mm:ss")
@@ -297,6 +326,65 @@ void MainWindow::onChatMessageReceived(const QString& from_user_id, const QStrin
     }
     message.is_mine = false;
     addMessageToConversation(from_user_id, message, from_user_id != current_chat_target_);
+}
+
+void MainWindow::onAttachFileClicked() {
+    if (current_chat_target_.isEmpty()) {
+        QMessageBox::information(this, "发送文件", "请先选择一个聊天对象");
+        return;
+    }
+
+    const QStringList file_paths = QFileDialog::getOpenFileNames(
+        this,
+        "选择要发送的文件",
+        QString(),
+        "所有文件 (*.*)");
+    if (file_paths.isEmpty()) {
+        return;
+    }
+
+    tcp_client_->sendFiles(current_chat_target_, file_paths);
+}
+
+void MainWindow::onFileMessageSent(const QString& to_user_id, const QString& content, const QString& msg_id) {
+    if (to_user_id.isEmpty()) {
+        return;
+    }
+
+    ChatViewMessage message;
+    message.msg_id = msg_id;
+    message.from = user_nickname_;
+    message.content_type = "file";
+    message.content = content;
+    message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
+    message.timestamp = QDateTime::currentMSecsSinceEpoch();
+    message.status = "sending";
+    message.is_mine = true;
+    addMessageToConversation(to_user_id, message, false);
+}
+
+void MainWindow::onFileTransferProgress(const QString& transfer_id, const QString& file_name,
+                                        qint64 transferred, qint64 total, bool upload) {
+    Q_UNUSED(transfer_id);
+    const QString action = upload ? "上传" : "下载";
+    const QString total_text = total > 0 ? humanFileSize(total) : QString("未知大小");
+    statusBar()->showMessage(QString("%1 %2：%3 / %4")
+                                 .arg(action, file_name, humanFileSize(transferred), total_text),
+                             2500);
+}
+
+void MainWindow::onFileTransferFinished(const QString& transfer_id, const QString& file_name,
+                                        const QString& save_path, bool upload, bool success,
+                                        const QString& message) {
+    Q_UNUSED(transfer_id);
+    const QString action = upload ? "上传" : "下载";
+    const QString detail = save_path.isEmpty() ? message : QString("%1：%2").arg(message, save_path);
+    statusBar()->showMessage(QString("%1%2 %3：%4")
+                                 .arg(action, success ? "完成" : "失败", file_name, detail),
+                             5000);
+    if (!success) {
+        QMessageBox::warning(this, QString("%1文件").arg(action), detail);
+    }
 }
 
 void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& history_json) {
@@ -313,12 +401,14 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
         QJsonObject msg = messages[i].toObject();
         QString from_user_id = msg["from_user_id"].toString();
         QString content = msg["content"].toString();
+        QString content_type = msg["content_type"].toString("text");
         bool is_mine = (from_user_id == user_id_);
 
         QString peer_id = is_mine ? target_id : from_user_id;
         ChatViewMessage view_message;
         view_message.msg_id = msg["msg_id"].toString();
         view_message.from = from_user_id;
+        view_message.content_type = content_type;
         view_message.content = content;
         view_message.time = msg["server_time"].toString();
         view_message.timestamp = msg["server_timestamp"].toInteger();
@@ -331,11 +421,13 @@ void MainWindow::onChatHistoryReceived(const QString& friend_id, const QString& 
 }
 
 void MainWindow::onOfflineMessageReceived(const QString& from_user_id, const QString& content,
+                                          const QString& content_type,
                                           const QString& msg_id, qint64 server_timestamp,
                                           const QString& server_time) {
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = from_user_id;
+    message.content_type = content_type.isEmpty() ? QStringLiteral("text") : content_type;
     message.content = content;
     message.time = server_time.isEmpty()
         ? QDateTime::currentDateTime().toString("hh:mm:ss")
@@ -399,6 +491,7 @@ void MainWindow::switchToChatWith(const QString& user_id, const QString& nicknam
     QString display_name = contact_remarks_.value(user_id, nickname);
     chat_target_label_->setText(display_name);
     chat_more_button_->setEnabled(true);
+    attach_file_button_->setEnabled(true);
     conversations_[user_id].title = display_name;
     conversations_[user_id].unread = 0;
     current_messages_ = conversations_[user_id].messages;
@@ -412,15 +505,18 @@ void MainWindow::switchToChatWith(const QString& user_id, const QString& nicknam
 void MainWindow::onDisconnected() {
     status_label_->setText("离线");
     message_input_->setEnabled(false);
+    attach_file_button_->setEnabled(false);
     send_button_->setEnabled(false);
     markSendingMessagesFailed("连接已断开");
 }
 
 void MainWindow::appendMessage(const QString& from, const QString& content, bool is_mine,
-                               const QString& msg_id, const QString& status) {
+                               const QString& msg_id, const QString& status,
+                               const QString& content_type) {
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = from;
+    message.content_type = content_type.isEmpty() ? QStringLiteral("text") : content_type;
     message.content = content;
     message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
     message.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -463,7 +559,9 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
 
     conversation.last_message = conversation.messages.isEmpty()
         ? QString()
-        : conversation.messages.last().content;
+        : (conversation.messages.last().content_type == "file"
+               ? QString("[文件] %1").arg(fileMessageTitle(conversation.messages.last().content))
+               : conversation.messages.last().content);
     conversation.last_timestamp = conversation.messages.isEmpty()
         ? 0
         : conversation.messages.last().timestamp;
@@ -560,6 +658,121 @@ void MainWindow::refreshConversationSelectionStyles() {
     }
 }
 
+QString MainWindow::humanFileSize(qint64 size) const {
+    const QStringList units = {"B", "KB", "MB", "GB"};
+    double value = static_cast<double>(qMax<qint64>(0, size));
+    int unit_index = 0;
+    while (value >= 1024.0 && unit_index < units.size() - 1) {
+        value /= 1024.0;
+        ++unit_index;
+    }
+    return unit_index == 0
+        ? QString("%1 %2").arg(static_cast<qint64>(value)).arg(units[unit_index])
+        : QString("%1 %2").arg(value, 0, 'f', 1).arg(units[unit_index]);
+}
+
+QString MainWindow::fileMessageTitle(const QString& content) const {
+    QJsonDocument doc = QJsonDocument::fromJson(content.toUtf8());
+    if (doc.isObject()) {
+        const QString name = doc.object()["file_name"].toString();
+        if (!name.isEmpty()) {
+            return name;
+        }
+    }
+    return QStringLiteral("文件");
+}
+
+QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int max_width) {
+    QJsonObject file;
+    QJsonDocument doc = QJsonDocument::fromJson(message.content.toUtf8());
+    if (doc.isObject()) {
+        file = doc.object();
+    }
+
+    const QString file_id = file["file_id"].toString();
+    const QString file_name = file["file_name"].toString("文件");
+    const qint64 file_size = static_cast<qint64>(file["file_size"].toDouble());
+    const QString mime_type = file["mime_type"].toString("application/octet-stream");
+
+    QFrame* card = new QFrame;
+    card->setMaximumWidth(max_width);
+    card->setMinimumWidth(qMin(max_width, 280));
+    card->setStyleSheet(QString(R"(
+        QFrame {
+            background-color: %1;
+            border: 1px solid %2;
+            border-radius: 6px;
+        }
+    )").arg(message.is_mine ? "#dff5df" : "#ffffff",
+           message.is_mine ? "#b9e4bb" : "#dddddd"));
+
+    QHBoxLayout* layout = new QHBoxLayout(card);
+    layout->setContentsMargins(12, 10, 12, 10);
+    layout->setSpacing(10);
+
+    QLabel* icon_label = new QLabel("FILE", card);
+    icon_label->setFixedSize(42, 42);
+    icon_label->setAlignment(Qt::AlignCenter);
+    icon_label->setStyleSheet(R"(
+        QLabel {
+            background-color: #4CAF50;
+            color: #ffffff;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    )");
+    layout->addWidget(icon_label, 0, Qt::AlignTop);
+
+    QWidget* text_box = new QWidget(card);
+    QVBoxLayout* text_layout = new QVBoxLayout(text_box);
+    text_layout->setContentsMargins(0, 0, 0, 0);
+    text_layout->setSpacing(3);
+
+    QLabel* name_label = new QLabel(file_name, text_box);
+    name_label->setWordWrap(true);
+    name_label->setStyleSheet("QLabel { color: #111111; font-size: 14px; font-weight: bold; border: none; background: transparent; }");
+    text_layout->addWidget(name_label);
+
+    QLabel* meta_label = new QLabel(QString("%1 · %2").arg(humanFileSize(file_size), mime_type), text_box);
+    meta_label->setWordWrap(true);
+    meta_label->setStyleSheet("QLabel { color: #777777; font-size: 12px; border: none; background: transparent; }");
+    text_layout->addWidget(meta_label);
+
+    layout->addWidget(text_box, 1);
+
+    QPushButton* download_button = new QPushButton("下载", card);
+    download_button->setEnabled(!file_id.isEmpty());
+    download_button->setCursor(Qt::PointingHandCursor);
+    download_button->setStyleSheet(R"(
+        QPushButton {
+            padding: 7px 12px;
+            background-color: #ffffff;
+            color: #2e7d32;
+            border: 1px solid #b7d7b8;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        QPushButton:hover {
+            background-color: #f4fbf4;
+        }
+        QPushButton:disabled {
+            color: #aaaaaa;
+            border-color: #dddddd;
+        }
+    )");
+    connect(download_button, &QPushButton::clicked, this, [this, file_id, file_name]() {
+        const QString save_path = QFileDialog::getSaveFileName(this, "保存文件", file_name);
+        if (save_path.isEmpty()) {
+            return;
+        }
+        tcp_client_->downloadFile(file_id, file_name, save_path);
+    });
+    layout->addWidget(download_button, 0, Qt::AlignVCenter);
+
+    return card;
+}
+
 QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     const int viewport_width = chat_scroll_area_->viewport()
         ? chat_scroll_area_->viewport()->width()
@@ -618,8 +831,9 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
         showUserProfile(profile_user_id);
     });
 
-    // 后续媒体消息可以在这里按 content_type 切换为图片、视频或文件卡片组件。
-    MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row);
+    QWidget* bubble = message.content_type == "file"
+        ? createFileMessageCard(message, max_text_width)
+        : static_cast<QWidget*>(new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row));
     if (message.is_mine) {
         bubble_row_layout->addStretch();
         bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);

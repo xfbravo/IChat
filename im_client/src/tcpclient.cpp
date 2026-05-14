@@ -11,6 +11,10 @@
 #include <QApplication>
 #include <QThread>
 #include <QSettings>
+#include <QFile>
+#include <QFileInfo>
+#include <QMimeDatabase>
+#include <QDir>
 
 TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
@@ -175,6 +179,113 @@ QString TcpClient::sendChatMessage(const QString& to_user_id,
     QString body = Protocol::makeChatMessage(msg_id, user_id_, to_user_id, content_type, content);
     sendMessage(MsgType::CHAT_MESSAGE, body);
     return msg_id;
+}
+
+void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_paths) {
+    if (state_ != ClientState::LoggedIn || to_user_id.isEmpty()) {
+        return;
+    }
+
+    constexpr qint64 max_file_size = 200LL * 1024LL * 1024LL;
+    constexpr qint64 chunk_size = 256LL * 1024LL;
+    QMimeDatabase mime_database;
+
+    for (const QString& file_path : file_paths) {
+        QFileInfo info(file_path);
+        if (!info.exists() || !info.isFile()) {
+            emit fileTransferFinished(QString(), info.fileName(), QString(), true, false, "文件不存在");
+            continue;
+        }
+        if (info.size() <= 0) {
+            emit fileTransferFinished(QString(), info.fileName(), QString(), true, false, "不能发送空文件");
+            continue;
+        }
+        if (info.size() > max_file_size) {
+            emit fileTransferFinished(QString(), info.fileName(), QString(), true, false, "单个文件不能超过200MB");
+            continue;
+        }
+
+        PendingUpload upload;
+        upload.transfer_id = Protocol::generateMsgId();
+        upload.to_user_id = to_user_id;
+        upload.file_path = info.absoluteFilePath();
+        upload.file_name = info.fileName();
+        upload.file_size = info.size();
+        upload.total_chunks = static_cast<int>((upload.file_size + chunk_size - 1) / chunk_size);
+        upload.mime_type = mime_database.mimeTypeForFile(info).name();
+        if (upload.mime_type.isEmpty()) {
+            upload.mime_type = "application/octet-stream";
+        }
+        pending_uploads_[upload.transfer_id] = upload;
+
+        QJsonObject obj;
+        obj["transfer_id"] = upload.transfer_id;
+        obj["to_user_id"] = to_user_id;
+        obj["file_name"] = upload.file_name;
+        obj["file_size"] = static_cast<double>(upload.file_size);
+        obj["mime_type"] = upload.mime_type;
+        obj["total_chunks"] = upload.total_chunks;
+        sendMessage(MsgType::FILE_UPLOAD_START, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+        emit fileTransferProgress(upload.transfer_id, upload.file_name, 0, upload.file_size, true);
+    }
+}
+
+void TcpClient::downloadFile(const QString& file_id, const QString& file_name, const QString& save_path) {
+    if (state_ != ClientState::LoggedIn || file_id.isEmpty() || save_path.isEmpty()) {
+        return;
+    }
+
+    QFile target(save_path);
+    if (!target.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        emit fileTransferFinished(QString(), file_name, save_path, false, false, "无法创建保存文件");
+        return;
+    }
+    target.close();
+
+    PendingDownload download;
+    download.transfer_id = Protocol::generateMsgId();
+    download.file_id = file_id;
+    download.file_name = file_name;
+    download.save_path = save_path;
+    pending_downloads_[download.transfer_id] = download;
+
+    QJsonObject obj;
+    obj["transfer_id"] = download.transfer_id;
+    obj["file_id"] = file_id;
+    obj["file_name"] = file_name;
+    sendMessage(MsgType::FILE_DOWNLOAD_REQ, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::sendNextFileChunk(const QString& transfer_id, int chunk_index) {
+    auto it = pending_uploads_.find(transfer_id);
+    if (it == pending_uploads_.end()) {
+        return;
+    }
+
+    constexpr qint64 chunk_size = 256LL * 1024LL;
+    PendingUpload& upload = it.value();
+    QFile file(upload.file_path);
+    if (!file.open(QIODevice::ReadOnly) || !file.seek(static_cast<qint64>(chunk_index) * chunk_size)) {
+        emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, false, "读取文件失败");
+        pending_uploads_.erase(it);
+        return;
+    }
+
+    QByteArray chunk = file.read(chunk_size);
+    if (chunk.isEmpty() && chunk_index < upload.total_chunks) {
+        emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, false, "读取文件分片失败");
+        pending_uploads_.erase(it);
+        return;
+    }
+
+    QJsonObject obj;
+    obj["transfer_id"] = transfer_id;
+    obj["chunk_index"] = chunk_index;
+    obj["data"] = QString::fromLatin1(chunk.toBase64());
+    sendMessage(MsgType::FILE_UPLOAD_CHUNK, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+
+    const qint64 sent = qMin(upload.file_size, (static_cast<qint64>(chunk_index) + 1) * chunk_size);
+    emit fileTransferProgress(transfer_id, upload.file_name, sent, upload.file_size, true);
 }
 
 void TcpClient::ackOfflineMessage(const QString& msg_id) {
@@ -495,12 +606,113 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 QJsonObject obj = doc.object();
                 QString from_user_id = obj["from_user_id"].toString();
                 QString content = obj["content"].toString();
+                QString content_type = obj["content_type"].toString("text");
                 QString msg_id = obj["msg_id"].toString();
                 qint64 server_timestamp = obj["server_timestamp"].toInteger();
                 QString server_time = obj["server_time"].toString();
-                emit chatMessageReceived(from_user_id, content, msg_id,
+                emit chatMessageReceived(from_user_id, content, content_type, msg_id,
                                          server_timestamp, server_time);
             }
+            break;
+        }
+
+        case MsgType::FILE_UPLOAD_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (!doc.isObject()) break;
+
+            QJsonObject obj = doc.object();
+            const int code = obj["code"].toInt();
+            const QString transfer_id = obj["transfer_id"].toString();
+            const QString status = obj["status"].toString();
+            auto it = pending_uploads_.find(transfer_id);
+            if (it == pending_uploads_.end()) break;
+
+            if (code != 0) {
+                emit fileTransferFinished(transfer_id, it->file_name, QString(), true, false,
+                                          obj["message"].toString("上传失败"));
+                pending_uploads_.erase(it);
+                break;
+            }
+
+            if (status == "ready") {
+                it->file_id = obj["file_id"].toString();
+                sendNextFileChunk(transfer_id, obj["next_chunk_index"].toInt(0));
+            } else if (status == "chunk") {
+                sendNextFileChunk(transfer_id, obj["next_chunk_index"].toInt());
+            } else if (status == "complete") {
+                PendingUpload upload = it.value();
+                upload.file_id = obj["file_id"].toString(upload.file_id);
+
+                QJsonObject content;
+                content["file_id"] = upload.file_id;
+                content["file_name"] = upload.file_name;
+                content["file_size"] = static_cast<double>(upload.file_size);
+                content["mime_type"] = upload.mime_type;
+                content["transfer_id"] = upload.transfer_id;
+                const QString content_json = QString::fromUtf8(
+                    QJsonDocument(content).toJson(QJsonDocument::Compact));
+                const QString msg_id = sendChatMessage(upload.to_user_id, "file", content_json);
+                if (msg_id.isEmpty()) {
+                    emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, false,
+                                              "文件已上传，但消息发送失败");
+                } else {
+                    emit fileMessageSent(upload.to_user_id, content_json, msg_id);
+                    emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, true, "上传完成");
+                }
+                pending_uploads_.erase(it);
+            }
+            break;
+        }
+
+        case MsgType::FILE_DOWNLOAD_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (!doc.isObject()) break;
+
+            QJsonObject obj = doc.object();
+            const QString transfer_id = obj["transfer_id"].toString();
+            auto it = pending_downloads_.find(transfer_id);
+            if (it == pending_downloads_.end()) break;
+
+            const int code = obj["code"].toInt();
+            const QString status = obj["status"].toString();
+            if (code != 0) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          obj["message"].toString("下载失败"));
+                pending_downloads_.erase(it);
+                break;
+            }
+
+            if (status == "ready") {
+                it->file_size = static_cast<qint64>(obj["file_size"].toDouble());
+                it->total_chunks = obj["total_chunks"].toInt();
+                emit fileTransferProgress(transfer_id, it->file_name, 0, it->file_size, false);
+            } else if (status == "complete") {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, true, "下载完成");
+                pending_downloads_.erase(it);
+            }
+            break;
+        }
+
+        case MsgType::FILE_DOWNLOAD_CHUNK: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (!doc.isObject()) break;
+
+            QJsonObject obj = doc.object();
+            const QString transfer_id = obj["transfer_id"].toString();
+            auto it = pending_downloads_.find(transfer_id);
+            if (it == pending_downloads_.end()) break;
+
+            QByteArray chunk = QByteArray::fromBase64(obj["data"].toString().toLatin1());
+            QFile file(it->save_path);
+            if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          "写入下载文件失败");
+                pending_downloads_.erase(it);
+                break;
+            }
+            file.write(chunk);
+            it->received_size += chunk.size();
+            emit fileTransferProgress(transfer_id, it->file_name, it->received_size, it->file_size, false);
             break;
         }
 
@@ -724,10 +936,11 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     QJsonObject obj = value.toObject();
                     QString from_user_id = obj["from_user_id"].toString();
                     QString content = obj["content"].toString();
+                    QString content_type = obj["content_type"].toString("text");
                     QString msg_id = obj["msg_id"].toString();
                     QString server_time = obj["server_time"].toString();
                     qint64 server_timestamp = obj["server_timestamp"].toInteger();
-                    emit offlineMessageReceived(from_user_id, content, msg_id,
+                    emit offlineMessageReceived(from_user_id, content, content_type, msg_id,
                                                 server_timestamp, server_time);
                     ackOfflineMessage(msg_id);
                 }

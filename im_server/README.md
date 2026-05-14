@@ -62,8 +62,12 @@ im_server/
 | REGISTER_REQ | 0x0003 | C→S | 注册请求 |
 | LOGOUT | 0x0004 | C→S | 登出请求 |
 | CHAT_MESSAGE | 0x0005 | 双向 | 统一聊天消息，使用 content_type 区分 text/image/file/voice |
+| FILE_UPLOAD_START / FILE_UPLOAD_CHUNK | 0x0019 / 0x001A | C→S | 文件分片上传，单文件最大 200MB |
+| FILE_DOWNLOAD_REQ | 0x001B | C→S | 文件下载请求 |
 | LOGIN_RSP | 0x8002 | S→C | 登录响应 |
 | REGISTER_RSP | 0x8003 | S→C | 注册响应 |
+| FILE_UPLOAD_RSP | 0x8019 | S→C | 文件上传进度/完成响应 |
+| FILE_DOWNLOAD_RSP / FILE_DOWNLOAD_CHUNK | 0x801A / 0x801B | S→C | 文件下载响应和下载分片 |
 | IMAGE/FILE/VOICE | 0x0006/0x0007/0x0008 | C→S | 旧媒体消息类型，仅兼容；新实现请用 CHAT_MESSAGE |
 | ACK | 0x0009 | 双向 | 消息确认 |
 | ERROR | 0x800F | S→C | 错误响应 |

@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <string>
 #include <mutex>
+#include <cstdint>
 
 namespace im {
 
@@ -132,6 +133,21 @@ private:
     void remove_session(Session::Ptr session);
 
 private:
+    struct FileUploadState {
+        std::string transfer_id;
+        std::string file_id;
+        std::string from_user_id;
+        std::string to_user_id;
+        std::string file_name;
+        std::string mime_type;
+        std::uint64_t file_size = 0;
+        std::uint32_t total_chunks = 0;
+        std::uint32_t next_chunk_index = 0;
+        std::uint64_t received_size = 0;
+        std::string temp_path;
+        std::string final_path;
+    };
+
     uint16_t port_;                              // 监听端口
     ThreadPool thread_pool_;                     // 线程池（必须在 acceptor_ 之前初始化）
     boost::asio::ip::tcp::acceptor acceptor_;    // 接受器
@@ -143,6 +159,8 @@ private:
     std::unordered_map<std::string, Session::Ptr> sessions_;  // user_id -> session
     std::unordered_map<std::string, Session::Ptr> endpoints_; // endpoint -> session
     mutable std::mutex session_mutex_;                       // 保护 sessions_
+    std::unordered_map<std::string, FileUploadState> file_uploads_;
+    std::mutex file_upload_mutex_;
 
     bool running_{false};                                    // 运行状态
 };

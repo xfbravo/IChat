@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QStringList>
 #include <QJsonArray>
+#include <QHash>
 #include <memory>
 
 /**
@@ -91,6 +92,16 @@ public:
     QString sendChatMessage(const QString& to_user_id,
                             const QString& content_type,
                             const QString& content);
+
+    /**
+     * @brief 上传文件，上传完成后自动发送 file 类型聊天消息
+     */
+    void sendFiles(const QString& to_user_id, const QStringList& file_paths);
+
+    /**
+     * @brief 请求下载聊天文件
+     */
+    void downloadFile(const QString& file_id, const QString& file_name, const QString& save_path);
 
     /**
      * @brief 确认已收到离线消息
@@ -253,6 +264,7 @@ signals:
      * @param content 内容
      */
     void chatMessageReceived(const QString& from_user_id, const QString& content,
+                             const QString& content_type,
                              const QString& msg_id, qint64 server_timestamp,
                              const QString& server_time);
 
@@ -334,6 +346,7 @@ signals:
      * @brief 收到离线消息信号
      */
     void offlineMessageReceived(const QString& from_user_id, const QString& content,
+                                const QString& content_type,
                                 const QString& msg_id, qint64 server_timestamp,
                                 const QString& server_time);
 
@@ -341,6 +354,32 @@ signals:
      * @brief 消息发送状态回执
      */
     void messageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
+
+    /**
+     * @brief 文件传输进度
+     */
+    void fileTransferProgress(const QString& transfer_id,
+                              const QString& file_name,
+                              qint64 transferred,
+                              qint64 total,
+                              bool upload);
+
+    /**
+     * @brief 文件传输完成/失败
+     */
+    void fileTransferFinished(const QString& transfer_id,
+                              const QString& file_name,
+                              const QString& save_path,
+                              bool upload,
+                              bool success,
+                              const QString& message);
+
+    /**
+     * @brief 文件上传完成后已经发出的聊天文件消息
+     */
+    void fileMessageSent(const QString& to_user_id,
+                         const QString& content,
+                         const QString& msg_id);
 
     /**
      * @brief 发布朋友圈结果
@@ -388,6 +427,7 @@ private:
      * @brief 处理接收到的消息
      */
     void handleMessage(MsgType type, const QString& body);
+    void sendNextFileChunk(const QString& transfer_id, int chunk_index);
 
     /**
      * @brief 启动心跳
@@ -411,6 +451,30 @@ private:
 
     bool expecting_friend_requests_ = false;
     QString current_chat_history_friend_id_;
+
+    struct PendingUpload {
+        QString transfer_id;
+        QString to_user_id;
+        QString file_path;
+        QString file_name;
+        QString mime_type;
+        qint64 file_size = 0;
+        int total_chunks = 0;
+        QString file_id;
+    };
+
+    struct PendingDownload {
+        QString transfer_id;
+        QString file_id;
+        QString file_name;
+        QString save_path;
+        qint64 file_size = 0;
+        int total_chunks = 0;
+        qint64 received_size = 0;
+    };
+
+    QHash<QString, PendingUpload> pending_uploads_;
+    QHash<QString, PendingDownload> pending_downloads_;
 
     std::unique_ptr<QTcpSocket> socket_;
     ClientState state_ = ClientState::Disconnected;

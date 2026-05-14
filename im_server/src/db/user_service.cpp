@@ -1231,11 +1231,13 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
     if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
-    query << "SELECT msg_id, msg_type, chat_type, from_user_id, content, client_time, server_time, "
-          << "CAST(UNIX_TIMESTAMP(server_time) * 1000 AS UNSIGNED) "
-          << "FROM im_offline_message "
-          << "WHERE user_id = '" << sql_escape(mysql, user_id) << "' AND is_pushed = 0 "
-          << "ORDER BY create_time ASC LIMIT 100";
+    query << "SELECT o.msg_id, o.msg_type, o.chat_type, o.from_user_id, o.content, "
+          << "o.client_time, o.server_time, CAST(UNIX_TIMESTAMP(o.server_time) * 1000 AS UNSIGNED), "
+          << "COALESCE(m.content_type, 'text') "
+          << "FROM im_offline_message o "
+          << "LEFT JOIN im_message m ON m.msg_id = o.msg_id "
+          << "WHERE o.user_id = '" << sql_escape(mysql, user_id) << "' AND o.is_pushed = 0 "
+          << "ORDER BY o.create_time ASC LIMIT 100";
 
     if (mysql_query(mysql, query.str().c_str())) {
         return json::serialize(result);
@@ -1255,6 +1257,7 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
         item["client_time"] = row_string(row, 5);
         item["server_time"] = row_string(row, 6);
         item["server_timestamp"] = row_int64(row, 7);
+        item["content_type"] = row_string(row, 8, "text");
         result.push_back(std::move(item));
     }
 

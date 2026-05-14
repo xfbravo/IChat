@@ -50,6 +50,9 @@ enum class MsgType : uint16_t {
     GET_USER_PROFILE     = 0x0016, // 获取用户个人信息
     CREATE_MOMENT        = 0x0017, // 发布朋友圈
     GET_MOMENTS          = 0x0018, // 获取朋友圈时间流
+    FILE_UPLOAD_START    = 0x0019, // 开始文件上传
+    FILE_UPLOAD_CHUNK    = 0x001A, // 上传文件分片
+    FILE_DOWNLOAD_REQ    = 0x001B, // 下载文件请求
 
     // 服务端 -> 客户端
     LOGIN_RSP           = 0x8002,  // 登录响应
@@ -67,6 +70,9 @@ enum class MsgType : uint16_t {
     USER_PROFILE_RSP    = 0x8016, // 用户个人信息响应
     CREATE_MOMENT_RSP   = 0x8017, // 发布朋友圈响应
     MOMENTS_RSP         = 0x8018, // 朋友圈时间流响应
+    FILE_UPLOAD_RSP     = 0x8019, // 文件上传响应
+    FILE_DOWNLOAD_RSP   = 0x801A, // 文件下载响应
+    FILE_DOWNLOAD_CHUNK = 0x801B, // 文件下载分片
 };
 
 /**

@@ -75,6 +75,11 @@ enum class MsgType : uint16_t {
     CHANGE_PASSWORD      = 0x0014,  // 修改密码
     UPDATE_PROFILE       = 0x0015,  // 更新个人信息
     GET_USER_PROFILE     = 0x0016,  // 获取用户个人信息
+    CREATE_MOMENT        = 0x0017,  // 发布朋友圈
+    GET_MOMENTS          = 0x0018,  // 获取朋友圈时间流
+    FILE_UPLOAD_START    = 0x0019,  // 开始文件上传
+    FILE_UPLOAD_CHUNK    = 0x001A,  // 上传文件分片
+    FILE_DOWNLOAD_REQ    = 0x001B,  // 下载文件请求
 
     LOGIN_RSP            = 0x8002,  // 登录响应
     REGISTER_RSP         = 0x8003,  // 注册响应
@@ -89,6 +94,11 @@ enum class MsgType : uint16_t {
     CHANGE_PASSWORD_RSP  = 0x8014,  // 修改密码响应
     UPDATE_PROFILE_RSP   = 0x8015,  // 更新个人信息响应
     USER_PROFILE_RSP     = 0x8016,  // 用户个人信息响应
+    CREATE_MOMENT_RSP    = 0x8017,  // 发布朋友圈响应
+    MOMENTS_RSP          = 0x8018,  // 朋友圈时间流响应
+    FILE_UPLOAD_RSP      = 0x8019,  // 文件上传响应
+    FILE_DOWNLOAD_RSP    = 0x801A,  // 文件下载响应
+    FILE_DOWNLOAD_CHUNK  = 0x801B,  // 文件下载分片
 };
 ```
 
@@ -359,7 +369,75 @@ enum class MsgType : uint16_t {
 
 图片、文件、语音、视频都通过 `CHAT_MESSAGE / 0x0005` 发送，`content_type` 决定内容类型。旧的 `IMAGE(0x0006)`、`FILE(0x0007)`、`VOICE(0x0008)` 仅用于兼容旧客户端，服务端会按统一聊天消息处理并以 `CHAT_MESSAGE` 转发。
 
-#### 3.9.1 文件消息
+#### 3.9.1 文件上传开始
+
+**请求 (FILE_UPLOAD_START / 0x0019)**:
+```json
+{
+    "transfer_id": "uuid-transfer-001",
+    "to_user_id": "user_002",
+    "file_name": "document.pdf",
+    "file_size": 1048576,
+    "mime_type": "application/pdf",
+    "total_chunks": 4
+}
+```
+
+**响应 (FILE_UPLOAD_RSP / 0x8019)**:
+```json
+{
+    "code": 0,
+    "status": "ready",
+    "message": "可以上传",
+    "transfer_id": "uuid-transfer-001",
+    "file_id": "server-file-id",
+    "next_chunk_index": 0
+}
+```
+
+服务端限制单个文件最大 200MB。客户端可一次选择多个文件，但每个文件独立创建上传任务。
+
+#### 3.9.2 文件上传分片
+
+**请求 (FILE_UPLOAD_CHUNK / 0x001A)**:
+```json
+{
+    "transfer_id": "uuid-transfer-001",
+    "chunk_index": 0,
+    "data": "base64_encoded_data"
+}
+```
+
+**响应 (FILE_UPLOAD_RSP / 0x8019)**:
+```json
+{
+    "code": 0,
+    "status": "chunk",
+    "message": "分片已接收",
+    "transfer_id": "uuid-transfer-001",
+    "next_chunk_index": 1,
+    "received_size": 262144
+}
+```
+
+最后一个分片完成后，服务端返回：
+
+```json
+{
+    "code": 0,
+    "status": "complete",
+    "message": "上传完成",
+    "transfer_id": "uuid-transfer-001",
+    "file_id": "server-file-id",
+    "file_name": "document.pdf",
+    "file_size": 1048576,
+    "mime_type": "application/pdf"
+}
+```
+
+客户端收到 `complete` 后，再发送一条普通聊天消息。
+
+#### 3.9.3 文件消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -368,71 +446,60 @@ enum class MsgType : uint16_t {
     "from_user_id": "user_001",
     "to_user_id": "user_002",
     "content_type": "file",
-    "content": "https://cdn.example.com/files/uuid-msg-file-001",
-    "file": {
-        "name": "document.pdf",
-        "size": 1048576,
-        "hash": "sha256_hash",
-        "mime_type": "application/pdf"
-    },
+    "content": "{\"file_id\":\"server-file-id\",\"file_name\":\"document.pdf\",\"file_size\":1048576,\"mime_type\":\"application/pdf\",\"transfer_id\":\"uuid-transfer-001\"}",
     "client_time": 1713900000
 }
 ```
 
-#### 3.9.2 大文件分片（规划）
+#### 3.9.4 文件下载
 
-当前代码尚未实现独立文件分片协议；以下为规划接口，不能与当前正式 v1 代码混用。
-
-**请求 (FILE_TRANS_REQ)**:
+**请求 (FILE_DOWNLOAD_REQ / 0x001B)**:
 ```json
 {
-    "transfer_id": "uuid-transfer-001",
-    "from_user_id": "user_001",
-    "to_user_id": "user_002",          // 接收方（个人）或 group_id
+    "transfer_id": "uuid-download-001",
+    "file_id": "server-file-id",
+    "file_name": "document.pdf"
+}
+```
+
+**响应 (FILE_DOWNLOAD_RSP / 0x801A)**:
+```json
+{
+    "code": 0,
+    "status": "ready",
+    "message": "开始下载",
+    "transfer_id": "uuid-download-001",
+    "file_id": "server-file-id",
     "file_name": "document.pdf",
-    "file_size": 1048576,              // 文件大小（字节）
-    "file_hash": "sha256_hash",        // 文件内容哈希
-    "mime_type": "application/pdf",
-    "thumbnail": "base64_encoded_thumbnail",  // 图片/视频缩略图
-    "client_time": 1713900000
+    "file_size": 1048576,
+    "total_chunks": 4
 }
 ```
 
-**响应 (FILE_TRANS_RSP)**:
+**下载分片 (FILE_DOWNLOAD_CHUNK / 0x801B)**:
 ```json
 {
-    "transfer_id": "uuid-transfer-001",
     "code": 0,
-    "message": "开始传输",
-    "server_time": 1713900001,
-    "download_url": "https://cdn.example.com/files/uuid-transfer-001"  // CDN地址
+    "transfer_id": "uuid-download-001",
+    "file_id": "server-file-id",
+    "file_name": "document.pdf",
+    "file_size": 1048576,
+    "chunk_index": 0,
+    "total_chunks": 4,
+    "data": "base64_encoded_data"
 }
 ```
 
-#### 3.9.3 文件分片数据
+下载结束后服务端再次返回 `FILE_DOWNLOAD_RSP`：
 
-**请求 (FILE_TRANS_DATA)**:
 ```json
 {
-    "transfer_id": "uuid-transfer-001",
-    "chunk_index": 0,                  // 分片索引（从0开始）
-    "chunk_size": 65536,               // 分片大小（64KB）
-    "total_chunks": 16,                 // 总分片数
-    "data": "base64_encoded_data",
-    "offset": 0                         // 文件内偏移
-}
-```
-
-#### 3.9.4 传输完成
-
-**请求 (FILE_TRANS_END)**:
-```json
-{
-    "transfer_id": "uuid-transfer-001",
-    "file_hash": "sha256_hash",
     "code": 0,
-    "message": "传输完成",
-    "client_time": 1713900000
+    "status": "complete",
+    "message": "下载完成",
+    "transfer_id": "uuid-download-001",
+    "file_id": "server-file-id",
+    "file_name": "document.pdf"
 }
 ```
 
@@ -662,32 +729,37 @@ enum class MsgType : uint16_t {
 ```
 发送方                                              服务器
    |                                                    |
-   |  1. 发送 CHAT_MESSAGE(content_type=file)           |
-   |     file_name: "doc.pdf", size: 1048576           |
+   |  1. FILE_UPLOAD_START(file_name, size, chunks)     |
+   |-------------------------------------------------->|
+   |  2. FILE_UPLOAD_RSP(status=ready, file_id)         |
+   |<--------------------------------------------------|
+   |  3. FILE_UPLOAD_CHUNK(base64 chunk 0..N)           |
+   |-------------------------------------------------->|
+   |  4. FILE_UPLOAD_RSP(status=complete)               |
+   |<--------------------------------------------------|
+   |  5. CHAT_MESSAGE(content_type=file)                |
+   |     content: { file_id, file_name, file_size }      |
    |-------------------------------------------------->|
    |                                                    |
-   |                              2. 保存文件消息元数据                      |
-   |                              3. 按 CHAT_MESSAGE 转发                    |
+   |                              6. 保存文件消息元数据                      |
+   |                              7. 按 CHAT_MESSAGE 转发                    |
    |                                                    |
    |  接收 CHAT_MESSAGE                                |
-   |  { content_type: "file", content: "https://cdn..." } |
+   |  { content_type: "file", content: "{...file_id...}" } |
    |<--------------------------------------------------|
-   |                                                    |
-   |  4. 大文件分片上传为规划能力，当前 v1 未实现       |
-   |     chunk_index: 0, data: "base64..."             |
+```
+
+接收方点击下载时：
+
+```
+接收方                                              服务器
+   |  1. FILE_DOWNLOAD_REQ(file_id)                     |
    |-------------------------------------------------->|
-   |  5. chunk_index: 1                                |
-   |-------------------------------------------------->|
-   |  ... (继续上传剩余分片)                           |
-   |                                                    |
-   |  N. 发送文件完成通知（规划）                       |
-   |     file_hash: "sha256..."                        |
-   |-------------------------------------------------->|
-   |                                                    |
-   |                              验证 file_hash       |
-   |                              生成 CDN URL          |
-   |                                                    |
-   |  接收 ACK（规划）                                  |
+   |  2. FILE_DOWNLOAD_RSP(status=ready)                |
+   |<--------------------------------------------------|
+   |  3. FILE_DOWNLOAD_CHUNK(base64 chunk 0..N)         |
+   |<--------------------------------------------------|
+   |  4. FILE_DOWNLOAD_RSP(status=complete)             |
    |<--------------------------------------------------|
 ```
 
