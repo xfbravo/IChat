@@ -243,10 +243,18 @@ LoginResult UserService::login(const std::string& user_id,
         return result;
     }
 
+    std::string schema_error;
+    if (!ensure_profile_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 资料字段迁移失败: " << schema_error << std::endl;
+        result.code = 5002;
+        result.message = "资料字段迁移失败: " + schema_error;
+        return result;
+    }
+
     // 查询用户
     const std::string escaped_user_id = sql_escape(mysql, user_id);
     std::ostringstream sql;
-    sql << "SELECT user_id, nickname, avatar_url, password_hash, salt, status "
+    sql << "SELECT user_id, nickname, avatar_url, password_hash, salt, status, gender, region, signature "
         << "FROM im_user WHERE user_id = '" << escaped_user_id << "' OR phone = '" << escaped_user_id << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) {
@@ -276,6 +284,9 @@ LoginResult UserService::login(const std::string& user_id,
     std::string db_password_hash = row[3] ? row[3] : "";
     std::string db_salt = row[4] ? row[4] : "";
     int db_status = row[5] ? std::stoi(row[5]) : 0;
+    std::string db_gender = row[6] ? row[6] : "";
+    std::string db_region = row[7] ? row[7] : "";
+    std::string db_signature = row[8] ? row[8] : "";
 
     mysql_free_result(res);
 
@@ -300,6 +311,9 @@ LoginResult UserService::login(const std::string& user_id,
     result.user_id = db_user_id;
     result.nickname = db_nickname;
     result.avatar_url = db_avatar;
+    result.gender = db_gender;
+    result.region = db_region;
+    result.signature = db_signature;
     result.token = generate_token(db_user_id);
 
     std::cout << "[UserService] 用户登录成功: " << db_user_id << std::endl;
@@ -490,8 +504,15 @@ UserInfo UserService::get_user_by_id(const std::string& user_id) {
 
     if (!mysql) return info;
 
+    std::string schema_error;
+    if (!ensure_profile_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 资料字段迁移失败: " << schema_error << std::endl;
+        return info;
+    }
+
     std::ostringstream sql;
-    sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time "
+    sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time, "
+        << "gender, region, signature "
         << "FROM im_user WHERE user_id = '" << sql_escape(mysql, user_id) << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) return info;
@@ -509,6 +530,9 @@ UserInfo UserService::get_user_by_id(const std::string& user_id) {
         info.status = row[5] ? std::stoi(row[5]) : 0;
         info.user_type = row[6] ? std::stoi(row[6]) : 1;
         info.create_time = row[7] ? row[7] : "";
+        info.gender = row[8] ? row[8] : "";
+        info.region = row[9] ? row[9] : "";
+        info.signature = row[10] ? row[10] : "";
     }
 
     mysql_free_result(res);
@@ -523,8 +547,15 @@ UserInfo UserService::get_user_by_phone(const std::string& phone) {
 
     if (!mysql) return info;
 
+    std::string schema_error;
+    if (!ensure_profile_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 资料字段迁移失败: " << schema_error << std::endl;
+        return info;
+    }
+
     std::ostringstream sql;
-    sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time "
+    sql << "SELECT user_id, phone, email, nickname, avatar_url, status, user_type, create_time, "
+        << "gender, region, signature "
         << "FROM im_user WHERE phone = '" << sql_escape(mysql, phone) << "'";
 
     if (mysql_query(mysql, sql.str().c_str())) return info;
@@ -542,6 +573,9 @@ UserInfo UserService::get_user_by_phone(const std::string& phone) {
         info.status = row[5] ? std::stoi(row[5]) : 0;
         info.user_type = row[6] ? std::stoi(row[6]) : 1;
         info.create_time = row[7] ? row[7] : "";
+        info.gender = row[8] ? row[8] : "";
+        info.region = row[9] ? row[9] : "";
+        info.signature = row[10] ? row[10] : "";
     }
 
     mysql_free_result(res);
@@ -996,9 +1030,15 @@ LoginResult UserService::update_avatar(const std::string& user_id,
 }
 
 LoginResult UserService::update_profile(const std::string& user_id,
-                                        const std::string& nickname) {
+                                        const std::string& nickname,
+                                        const std::string& gender,
+                                        const std::string& region,
+                                        const std::string& signature) {
     LoginResult result;
     const std::string clean_nickname = trim_copy(nickname);
+    const std::string clean_gender = trim_copy(gender);
+    const std::string clean_region = trim_copy(region);
+    const std::string clean_signature = trim_copy(signature);
 
     if (user_id.empty()) {
         result.code = 401;
@@ -1018,6 +1058,24 @@ LoginResult UserService::update_profile(const std::string& user_id,
         return result;
     }
 
+    if (clean_gender != "男" && clean_gender != "女") {
+        result.code = 3;
+        result.message = "性别只能是男或女";
+        return result;
+    }
+
+    if (clean_region.size() > 128) {
+        result.code = 4;
+        result.message = "地区长度不能超过128个字符";
+        return result;
+    }
+
+    if (clean_signature.size() > 255) {
+        result.code = 5;
+        result.message = "签名长度不能超过255个字符";
+        return result;
+    }
+
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
     if (!mysql) {
@@ -1026,11 +1084,25 @@ LoginResult UserService::update_profile(const std::string& user_id,
         return result;
     }
 
+    std::string schema_error;
+    if (!ensure_profile_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 资料字段迁移失败: " << schema_error << std::endl;
+        result.code = 5002;
+        result.message = "资料字段迁移失败: " + schema_error;
+        return result;
+    }
+
     const std::string escaped_user_id = sql_escape(mysql, user_id);
     const std::string escaped_nickname = sql_escape(mysql, clean_nickname);
+    const std::string escaped_gender = sql_escape(mysql, clean_gender);
+    const std::string escaped_region = sql_escape(mysql, clean_region);
+    const std::string escaped_signature = sql_escape(mysql, clean_signature);
 
     std::ostringstream sql;
     sql << "UPDATE im_user SET nickname = '" << escaped_nickname
+        << "', gender = '" << escaped_gender
+        << "', region = '" << escaped_region
+        << "', signature = '" << escaped_signature
         << "', update_time = NOW() "
         << "WHERE user_id = '" << escaped_user_id
         << "' AND status = 1";
@@ -1053,6 +1125,9 @@ LoginResult UserService::update_profile(const std::string& user_id,
     result.message = "资料已保存";
     result.user_id = user_id;
     result.nickname = clean_nickname;
+    result.gender = clean_gender;
+    result.region = clean_region;
+    result.signature = clean_signature;
     return result;
 }
 

@@ -532,10 +532,18 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             if (doc.isObject()) {
                 QJsonObject obj = doc.object();
                 const int code = obj["code"].toInt();
-                const QString nickname = obj["nickname"].toString();
-                const QString gender = obj["gender"].toString();
-                const QString region = obj["region"].toString();
-                const QString signature = obj["signature"].toString();
+                const QString nickname = obj.contains("nickname")
+                    ? obj["nickname"].toString()
+                    : user_nickname_;
+                const QString gender = obj.contains("gender")
+                    ? obj["gender"].toString()
+                    : user_gender_;
+                const QString region = obj.contains("region")
+                    ? obj["region"].toString()
+                    : user_region_;
+                const QString signature = obj.contains("signature")
+                    ? obj["signature"].toString()
+                    : user_signature_;
                 if (code == 0) {
                     if (!nickname.isEmpty()) {
                         user_nickname_ = nickname;

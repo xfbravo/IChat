@@ -285,6 +285,9 @@ void Server::register_default_handlers() {
             rsp["user_id"] = login_result.user_id;
             rsp["nickname"] = login_result.nickname;
             rsp["avatar_url"] = login_result.avatar_url;
+            rsp["gender"] = login_result.gender;
+            rsp["region"] = login_result.region;
+            rsp["signature"] = login_result.signature;
             rsp["token"] = login_result.token;
 
             // 注册会话
@@ -529,21 +532,30 @@ void Server::register_default_handlers() {
         }
 
         std::string nickname;
+        std::string gender;
+        std::string region;
+        std::string signature;
         try {
             json::object req = parse_json_object(msg.body);
             nickname = json_string(req, "nickname");
+            gender = json_string(req, "gender");
+            region = json_string(req, "region");
+            signature = json_string(req, "signature");
         } catch (const std::exception& e) {
             session->send(MsgType::UPDATE_PROFILE_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
             return;
         }
 
-        LoginResult result = user_service_.update_profile(session->user_id(), nickname);
+        LoginResult result = user_service_.update_profile(session->user_id(), nickname, gender, region, signature);
 
         json::object rsp;
         rsp["code"] = result.code;
         rsp["message"] = result.message;
         if (result.code == 0) {
             rsp["nickname"] = result.nickname;
+            rsp["gender"] = result.gender;
+            rsp["region"] = result.region;
+            rsp["signature"] = result.signature;
         }
         session->send(MsgType::UPDATE_PROFILE_RSP, json::serialize(rsp));
     });

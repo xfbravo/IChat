@@ -138,6 +138,9 @@ enum class MsgType : uint16_t {
     "user_id": "user_001",
     "nickname": "张三",
     "avatar_url": "https://cdn.example.com/avatar/user_001.jpg",
+    "gender": "男",
+    "region": "北京",
+    "signature": "Somebody feels the rain，somebody just gets wet",
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",  // JWT Token
     "refresh_token": "refresh_token_string",
     "expires_in": 604800,              // token 有效期（秒）
@@ -198,7 +201,10 @@ enum class MsgType : uint16_t {
 **请求 (UPDATE_PROFILE / 0x0015)**:
 ```json
 {
-    "nickname": "张三"
+    "nickname": "张三",
+    "gender": "男",
+    "region": "北京",
+    "signature": "Somebody feels the rain，somebody just gets wet"
 }
 ```
 
@@ -207,7 +213,10 @@ enum class MsgType : uint16_t {
 {
     "code": 0,
     "message": "资料已保存",
-    "nickname": "张三"
+    "nickname": "张三",
+    "gender": "男",
+    "region": "北京",
+    "signature": "Somebody feels the rain，somebody just gets wet"
 }
 ```
 
