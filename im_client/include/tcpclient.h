@@ -378,6 +378,7 @@ signals:
      * @brief 文件上传完成后已经发出的聊天文件消息
      */
     void fileMessageSent(const QString& to_user_id,
+                         const QString& content_type,
                          const QString& content,
                          const QString& msg_id);
 
@@ -428,6 +429,8 @@ private:
      */
     void handleMessage(MsgType type, const QString& body);
     void sendNextFileChunk(const QString& transfer_id, int chunk_index);
+    QString makeImagePreviewDataUrl(const QString& file_path) const;
+    QString makeVideoPosterDataUrl(const QString& file_path) const;
 
     /**
      * @brief 启动心跳
@@ -458,6 +461,9 @@ private:
         QString file_path;
         QString file_name;
         QString mime_type;
+        QString content_type = QStringLiteral("file");
+        QString preview_data_url;
+        QString poster_data_url;
         qint64 file_size = 0;
         int total_chunks = 0;
         QString file_id;

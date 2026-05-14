@@ -55,7 +55,8 @@ private slots:
                                const QString& msg_id, qint64 server_timestamp,
                                const QString& server_time);
     void onAttachFileClicked();
-    void onFileMessageSent(const QString& to_user_id, const QString& content, const QString& msg_id);
+    void onFileMessageSent(const QString& to_user_id, const QString& content_type,
+                           const QString& content, const QString& msg_id);
     void onFileTransferProgress(const QString& transfer_id, const QString& file_name,
                                 qint64 transferred, qint64 total, bool upload);
     void onFileTransferFinished(const QString& transfer_id, const QString& file_name,
@@ -180,6 +181,8 @@ private:
     void renderChatMessages(bool scroll_to_bottom = false);
     QWidget* createMessageRow(const ChatViewMessage& message);
     QWidget* createFileMessageCard(const ChatViewMessage& message, int max_width);
+    QWidget* createImageMessageBubble(const ChatViewMessage& message, int max_width);
+    QWidget* createVideoMessageBubble(const ChatViewMessage& message, int max_width);
     QString fileMessageTitle(const QString& content) const;
     QString humanFileSize(qint64 size) const;
     void appendMessageRow(const ChatViewMessage& message);

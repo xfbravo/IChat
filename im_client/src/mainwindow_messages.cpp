@@ -10,6 +10,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QSplitter>
 #include <QFrame>
 #include <QHeaderView>
@@ -48,6 +49,27 @@
 #include "mainwindow_helpers.h"
 
 using namespace mainwindow_detail;
+
+namespace {
+
+QPixmap pixmapFromDataUrl(const QString& data_url, const QSize& target_size) {
+    const int comma = data_url.indexOf(',');
+    const QByteArray payload = comma >= 0
+        ? data_url.mid(comma + 1).toLatin1()
+        : data_url.toLatin1();
+    QImage image;
+    if (!image.loadFromData(QByteArray::fromBase64(payload))) {
+        return QPixmap();
+    }
+    return QPixmap::fromImage(image.scaled(target_size, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+}
+
+QJsonObject messageContentObject(const QString& content) {
+    const QJsonDocument doc = QJsonDocument::fromJson(content.toUtf8());
+    return doc.isObject() ? doc.object() : QJsonObject();
+}
+
+} // namespace
 
 void MainWindow::createMessageView() {
     message_view_ = new QWidget;
@@ -346,7 +368,8 @@ void MainWindow::onAttachFileClicked() {
     tcp_client_->sendFiles(current_chat_target_, file_paths);
 }
 
-void MainWindow::onFileMessageSent(const QString& to_user_id, const QString& content, const QString& msg_id) {
+void MainWindow::onFileMessageSent(const QString& to_user_id, const QString& content_type,
+                                   const QString& content, const QString& msg_id) {
     if (to_user_id.isEmpty()) {
         return;
     }
@@ -354,7 +377,7 @@ void MainWindow::onFileMessageSent(const QString& to_user_id, const QString& con
     ChatViewMessage message;
     message.msg_id = msg_id;
     message.from = user_nickname_;
-    message.content_type = "file";
+    message.content_type = content_type.isEmpty() ? QStringLiteral("file") : content_type;
     message.content = content;
     message.time = QDateTime::currentDateTime().toString("hh:mm:ss");
     message.timestamp = QDateTime::currentMSecsSinceEpoch();
@@ -559,8 +582,14 @@ void MainWindow::addMessageToConversation(const QString& peer_id, const ChatView
 
     conversation.last_message = conversation.messages.isEmpty()
         ? QString()
-        : (conversation.messages.last().content_type == "file"
-               ? QString("[文件] %1").arg(fileMessageTitle(conversation.messages.last().content))
+        : ((conversation.messages.last().content_type == "file"
+            || conversation.messages.last().content_type == "image"
+            || conversation.messages.last().content_type == "video")
+               ? QString("[%1] %2").arg(
+                     conversation.messages.last().content_type == "image" ? QStringLiteral("图片")
+                     : conversation.messages.last().content_type == "video" ? QStringLiteral("视频")
+                     : QStringLiteral("文件"),
+                     fileMessageTitle(conversation.messages.last().content))
                : conversation.messages.last().content);
     conversation.last_timestamp = conversation.messages.isEmpty()
         ? 0
@@ -672,22 +701,15 @@ QString MainWindow::humanFileSize(qint64 size) const {
 }
 
 QString MainWindow::fileMessageTitle(const QString& content) const {
-    QJsonDocument doc = QJsonDocument::fromJson(content.toUtf8());
-    if (doc.isObject()) {
-        const QString name = doc.object()["file_name"].toString();
-        if (!name.isEmpty()) {
-            return name;
-        }
+    const QString name = messageContentObject(content)["file_name"].toString();
+    if (!name.isEmpty()) {
+        return name;
     }
     return QStringLiteral("文件");
 }
 
 QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int max_width) {
-    QJsonObject file;
-    QJsonDocument doc = QJsonDocument::fromJson(message.content.toUtf8());
-    if (doc.isObject()) {
-        file = doc.object();
-    }
+    QJsonObject file = messageContentObject(message.content);
 
     const QString file_id = file["file_id"].toString();
     const QString file_name = file["file_name"].toString("文件");
@@ -773,6 +795,88 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
     return card;
 }
 
+QWidget* MainWindow::createImageMessageBubble(const ChatViewMessage& message, int max_width) {
+    const QJsonObject file = messageContentObject(message.content);
+    const QString preview = file["preview_data_url"].toString();
+    const QString file_name = file["file_name"].toString("图片");
+    const QPixmap pixmap = pixmapFromDataUrl(preview, QSize(max_width, 420));
+
+    QLabel* image_label = new QLabel;
+    image_label->setToolTip(file_name);
+    image_label->setAlignment(Qt::AlignCenter);
+    image_label->setStyleSheet("QLabel { background: #eef0f2; border-radius: 6px; color: #777777; }");
+    if (!pixmap.isNull()) {
+        image_label->setPixmap(pixmap);
+        image_label->setFixedSize(pixmap.size());
+    } else {
+        image_label->setText("图片");
+        image_label->setFixedSize(qMin(max_width, 260), 160);
+    }
+    return image_label;
+}
+
+QWidget* MainWindow::createVideoMessageBubble(const ChatViewMessage& message, int max_width) {
+    const QJsonObject file = messageContentObject(message.content);
+    const QString file_id = file["file_id"].toString();
+    const QString file_name = file["file_name"].toString("视频");
+    const QString poster = file["poster_data_url"].toString();
+    const QPixmap poster_pixmap = pixmapFromDataUrl(poster, QSize(max_width, 360));
+
+    QFrame* frame = new QFrame;
+    const QSize bubble_size = poster_pixmap.isNull()
+        ? QSize(qMin(max_width, 300), 170)
+        : poster_pixmap.size();
+    frame->setFixedSize(bubble_size);
+    frame->setStyleSheet("QFrame { background: #111111; border-radius: 6px; }");
+
+    QGridLayout* layout = new QGridLayout(frame);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    QLabel* poster_label = new QLabel(frame);
+    poster_label->setFixedSize(bubble_size);
+    poster_label->setAlignment(Qt::AlignCenter);
+    poster_label->setStyleSheet("QLabel { color: #dddddd; border-radius: 6px; background: #111111; }");
+    if (!poster_pixmap.isNull()) {
+        poster_label->setPixmap(poster_pixmap);
+    } else {
+        poster_label->setText("视频");
+    }
+    layout->addWidget(poster_label, 0, 0);
+
+    QToolButton* play_button = new QToolButton(frame);
+    play_button->setCursor(Qt::PointingHandCursor);
+    play_button->setToolTip("下载视频");
+    play_button->setText("▶");
+    play_button->setFixedSize(64, 64);
+    play_button->setStyleSheet(R"(
+        QToolButton {
+            background-color: rgba(0, 0, 0, 145);
+            color: #ffffff;
+            border: none;
+            border-radius: 32px;
+            font-size: 34px;
+            padding-left: 5px;
+        }
+        QToolButton:hover {
+            background-color: rgba(0, 0, 0, 185);
+        }
+        QToolButton:disabled {
+            color: #999999;
+        }
+    )");
+    play_button->setEnabled(!file_id.isEmpty());
+    connect(play_button, &QToolButton::clicked, this, [this, file_id, file_name]() {
+        const QString save_path = QFileDialog::getSaveFileName(this, "保存视频", file_name);
+        if (save_path.isEmpty()) {
+            return;
+        }
+        tcp_client_->downloadFile(file_id, file_name, save_path);
+    });
+    layout->addWidget(play_button, 0, 0, Qt::AlignCenter);
+    return frame;
+}
+
 QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     const int viewport_width = chat_scroll_area_->viewport()
         ? chat_scroll_area_->viewport()->width()
@@ -831,9 +935,16 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
         showUserProfile(profile_user_id);
     });
 
-    QWidget* bubble = message.content_type == "file"
-        ? createFileMessageCard(message, max_text_width)
-        : static_cast<QWidget*>(new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row));
+    QWidget* bubble = nullptr;
+    if (message.content_type == "image") {
+        bubble = createImageMessageBubble(message, max_text_width);
+    } else if (message.content_type == "video") {
+        bubble = createVideoMessageBubble(message, max_text_width);
+    } else if (message.content_type == "file") {
+        bubble = createFileMessageCard(message, max_text_width);
+    } else {
+        bubble = new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row);
+    }
     if (message.is_mine) {
         bubble_row_layout->addStretch();
         bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);

@@ -15,6 +15,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Network
     Widgets
     Gui
+    Multimedia
     Qml
     Quick
     QuickControls2
@@ -65,6 +66,7 @@ target_link_libraries(${PROJECT_NAME}
     Qt6::Network
     Qt6::Widgets
     Qt6::Gui
+    Qt6::Multimedia
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2

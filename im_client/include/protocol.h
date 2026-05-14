@@ -19,7 +19,7 @@ enum class MsgType : uint16_t {
     LOGIN            = 0x0002,  // 登录请求
     REGISTER_REQ     = 0x0003,  // 注册请求
     LOGOUT           = 0x0004,  // 登出请求
-    CHAT_MESSAGE     = 0x0005,  // 统一聊天消息，content_type 区分 text/image/file/voice
+    CHAT_MESSAGE     = 0x0005,  // 统一聊天消息，content_type 区分 text/image/video/file/voice
     TEXT             = 0x0005,  // 兼容旧名称
     IMAGE            = 0x0006,  // 兼容旧媒体消息类型，请改用 CHAT_MESSAGE + content_type=image
     FILE             = 0x0007,  // 兼容旧媒体消息类型，请改用 CHAT_MESSAGE + content_type=file

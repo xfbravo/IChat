@@ -61,7 +61,7 @@ im_server/
 | LOGIN | 0x0002 | C→S | 登录请求 |
 | REGISTER_REQ | 0x0003 | C→S | 注册请求 |
 | LOGOUT | 0x0004 | C→S | 登出请求 |
-| CHAT_MESSAGE | 0x0005 | 双向 | 统一聊天消息，使用 content_type 区分 text/image/file/voice |
+| CHAT_MESSAGE | 0x0005 | 双向 | 统一聊天消息，使用 content_type 区分 text/image/video/file/voice |
 | FILE_UPLOAD_START / FILE_UPLOAD_CHUNK | 0x0019 / 0x001A | C→S | 文件分片上传，单文件最大 200MB |
 | FILE_DOWNLOAD_REQ | 0x001B | C→S | 文件下载请求 |
 | LOGIN_RSP | 0x8002 | S→C | 登录响应 |

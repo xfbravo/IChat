@@ -15,6 +15,36 @@
 #include <QFileInfo>
 #include <QMimeDatabase>
 #include <QDir>
+#include <QBuffer>
+#include <QEventLoop>
+#include <QImageReader>
+#include <QMediaPlayer>
+#include <QTimer>
+#include <QUrl>
+#include <QVideoFrame>
+#include <QVideoSink>
+
+namespace {
+
+QString imageToDataUrl(const QImage& source, const QSize& max_size, int quality = 76) {
+    if (source.isNull()) {
+        return QString();
+    }
+
+    QImage image = source;
+    if (image.width() > max_size.width() || image.height() > max_size.height()) {
+        image = image.scaled(max_size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
+
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "JPEG", quality)) {
+        return QString();
+    }
+    return QString("data:image/jpeg;base64,%1").arg(QString::fromLatin1(bytes.toBase64()));
+}
+
+} // namespace
 
 TcpClient::TcpClient(QObject* parent)
     : QObject(parent)
@@ -181,6 +211,41 @@ QString TcpClient::sendChatMessage(const QString& to_user_id,
     return msg_id;
 }
 
+QString TcpClient::makeImagePreviewDataUrl(const QString& file_path) const {
+    QImageReader reader(file_path);
+    reader.setAutoTransform(true);
+    const QImage image = reader.read();
+    return imageToDataUrl(image, QSize(1280, 1280), 78);
+}
+
+QString TcpClient::makeVideoPosterDataUrl(const QString& file_path) const {
+    QMediaPlayer player;
+    QVideoSink video_sink;
+    QEventLoop loop;
+    QTimer timeout;
+    QString poster_data_url;
+
+    timeout.setSingleShot(true);
+    connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+    connect(&player, &QMediaPlayer::errorOccurred, &loop,
+            [&](QMediaPlayer::Error, const QString&) { loop.quit(); });
+    connect(&video_sink, &QVideoSink::videoFrameChanged, &loop, [&](const QVideoFrame& frame) {
+        QImage image = frame.toImage();
+        if (!image.isNull()) {
+            poster_data_url = imageToDataUrl(image, QSize(960, 540), 76);
+            loop.quit();
+        }
+    });
+
+    player.setVideoSink(&video_sink);
+    player.setSource(QUrl::fromLocalFile(file_path));
+    player.play();
+    timeout.start(3000);
+    loop.exec();
+    player.stop();
+    return poster_data_url;
+}
+
 void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_paths) {
     if (state_ != ClientState::LoggedIn || to_user_id.isEmpty()) {
         return;
@@ -215,6 +280,13 @@ void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_pat
         upload.mime_type = mime_database.mimeTypeForFile(info).name();
         if (upload.mime_type.isEmpty()) {
             upload.mime_type = "application/octet-stream";
+        }
+        if (upload.mime_type.startsWith("image/")) {
+            upload.content_type = "image";
+            upload.preview_data_url = makeImagePreviewDataUrl(upload.file_path);
+        } else if (upload.mime_type.startsWith("video/")) {
+            upload.content_type = "video";
+            upload.poster_data_url = makeVideoPosterDataUrl(upload.file_path);
         }
         pending_uploads_[upload.transfer_id] = upload;
 
@@ -649,14 +721,19 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 content["file_size"] = static_cast<double>(upload.file_size);
                 content["mime_type"] = upload.mime_type;
                 content["transfer_id"] = upload.transfer_id;
+                if (upload.content_type == "image" && !upload.preview_data_url.isEmpty()) {
+                    content["preview_data_url"] = upload.preview_data_url;
+                } else if (upload.content_type == "video" && !upload.poster_data_url.isEmpty()) {
+                    content["poster_data_url"] = upload.poster_data_url;
+                }
                 const QString content_json = QString::fromUtf8(
                     QJsonDocument(content).toJson(QJsonDocument::Compact));
-                const QString msg_id = sendChatMessage(upload.to_user_id, "file", content_json);
+                const QString msg_id = sendChatMessage(upload.to_user_id, upload.content_type, content_json);
                 if (msg_id.isEmpty()) {
                     emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, false,
                                               "文件已上传，但消息发送失败");
                 } else {
-                    emit fileMessageSent(upload.to_user_id, content_json, msg_id);
+                    emit fileMessageSent(upload.to_user_id, upload.content_type, content_json, msg_id);
                     emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, true, "上传完成");
                 }
                 pending_uploads_.erase(it);

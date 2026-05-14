@@ -56,7 +56,7 @@ enum class MsgType : uint16_t {
     LOGIN                = 0x0002,  // 登录请求
     REGISTER_REQ         = 0x0003,  // 注册请求
     LOGOUT               = 0x0004,  // 登出
-    CHAT_MESSAGE         = 0x0005,  // 统一聊天消息，content_type 区分 text/image/file/voice
+    CHAT_MESSAGE         = 0x0005,  // 统一聊天消息，content_type 区分 text/image/video/file/voice
     TEXT                 = 0x0005,  // 旧名称，仅兼容
     IMAGE                = 0x0006,  // 旧媒体类型，仅兼容；新实现使用 CHAT_MESSAGE + content_type=image
     FILE                 = 0x0007,  // 旧媒体类型，仅兼容；新实现使用 CHAT_MESSAGE + content_type=file
@@ -435,7 +435,8 @@ enum class MsgType : uint16_t {
 }
 ```
 
-客户端收到 `complete` 后，再发送一条普通聊天消息。
+客户端收到 `complete` 后，再发送一条普通聊天消息。客户端会按 MIME 类型生成
+`content_type`：图片为 `image`，视频为 `video`，其他格式为 `file`。
 
 #### 3.9.3 文件消息
 
@@ -447,6 +448,32 @@ enum class MsgType : uint16_t {
     "to_user_id": "user_002",
     "content_type": "file",
     "content": "{\"file_id\":\"server-file-id\",\"file_name\":\"document.pdf\",\"file_size\":1048576,\"mime_type\":\"application/pdf\",\"transfer_id\":\"uuid-transfer-001\"}",
+    "client_time": 1713900000
+}
+```
+
+图片消息会在 `content` 中携带压缩后的 `preview_data_url`，接收端直接渲染，不需要点击下载：
+
+```json
+{
+    "msg_id": "uuid-msg-image-001",
+    "from_user_id": "user_001",
+    "to_user_id": "user_002",
+    "content_type": "image",
+    "content": "{\"file_id\":\"server-file-id\",\"file_name\":\"photo.jpg\",\"file_size\":1048576,\"mime_type\":\"image/jpeg\",\"preview_data_url\":\"data:image/jpeg;base64,...\"}",
+    "client_time": 1713900000
+}
+```
+
+视频消息会在 `content` 中携带第一帧封面 `poster_data_url`，接收端显示封面和播放按钮，点击后再请求下载原视频：
+
+```json
+{
+    "msg_id": "uuid-msg-video-001",
+    "from_user_id": "user_001",
+    "to_user_id": "user_002",
+    "content_type": "video",
+    "content": "{\"file_id\":\"server-file-id\",\"file_name\":\"clip.mp4\",\"file_size\":8388608,\"mime_type\":\"video/mp4\",\"poster_data_url\":\"data:image/jpeg;base64,...\"}",
     "client_time": 1713900000
 }
 ```
@@ -507,32 +534,8 @@ enum class MsgType : uint16_t {
 
 ### 3.10 图片消息
 
-**请求 (CHAT_MESSAGE / 0x0005)**:
-```json
-{
-    "msg_id": "uuid-msg-003",
-    "from_user_id": "user_001",
-    "to_user_id": "user_002",
-    "content_type": "image",
-    "image": {
-        "original": {
-            "width": 1920,
-            "height": 1080,
-            "size": 204800,
-            "hash": "sha256_original"
-        },
-        "thumbnail": {
-            "width": 200,
-            "height": 200,
-            "size": 10240,
-            "hash": "sha256_thumbnail",
-            "data": "base64_thumbnail_data"
-        },
-        "url": "https://cdn.example.com/images/uuid-msg-003.jpg"
-    },
-    "client_time": 1713900000
-}
-```
+图片消息沿用 3.9 的文件上传流程，上传完成后发送 `CHAT_MESSAGE(content_type=image)`。
+`content` 是 JSON 字符串，必须包含 `preview_data_url`，接收端用它直接显示图片。
 
 ---
 
