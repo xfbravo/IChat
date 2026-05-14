@@ -48,6 +48,8 @@ enum class MsgType : uint16_t {
     CHANGE_PASSWORD      = 0x0014, // 修改密码
     UPDATE_PROFILE       = 0x0015, // 更新个人信息
     GET_USER_PROFILE     = 0x0016, // 获取用户个人信息
+    CREATE_MOMENT        = 0x0017, // 发布朋友圈
+    GET_MOMENTS          = 0x0018, // 获取朋友圈时间流
 
     // 服务端 -> 客户端
     LOGIN_RSP           = 0x8002,  // 登录响应
@@ -63,6 +65,8 @@ enum class MsgType : uint16_t {
     CHANGE_PASSWORD_RSP = 0x8014, // 修改密码响应
     UPDATE_PROFILE_RSP  = 0x8015, // 更新个人信息响应
     USER_PROFILE_RSP    = 0x8016, // 用户个人信息响应
+    CREATE_MOMENT_RSP   = 0x8017, // 发布朋友圈响应
+    MOMENTS_RSP         = 0x8018, // 朋友圈时间流响应
 };
 
 /**

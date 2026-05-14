@@ -22,6 +22,8 @@
 #include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QHash>
 #include <QVector>
 #include "tcpclient.h"
@@ -91,6 +93,9 @@ private slots:
                                const QString& signature);
     void onChangePasswordClicked();
     void onPasswordChangeResult(int code, const QString& message);
+    void onCreateMomentClicked();
+    void onMomentCreateResult(int code, const QString& message);
+    void onMomentsReceived(const QString& moments_json);
 
 private:
     /**
@@ -132,6 +137,11 @@ private:
     void createContactView();
     void createMeView();
     void createMomentsView();
+    void loadMoments();
+    void renderMoments(const QJsonArray& moments);
+    QWidget* createMomentCard(const QJsonObject& moment);
+    QString encodeMomentImageFile(const QString& file_path);
+    QString encodeMomentVideoFile(const QString& file_path);
 
     // “我”页工具：头像会被裁剪压缩为 data URL 后通过 TcpClient 同步。
     QString encodeAvatarFile(const QString& file_path);
@@ -209,6 +219,13 @@ private:
     // Top-level views
     QWidget* moments_view_;
     QWidget* me_view_;
+
+    // Moments View
+    QScrollArea* moments_scroll_area_ = nullptr;
+    QWidget* moments_feed_widget_ = nullptr;
+    QVBoxLayout* moments_feed_layout_ = nullptr;
+    QLabel* moments_status_label_ = nullptr;
+    QPushButton* create_moment_button_ = nullptr;
 
     // Me View
     QStackedWidget* me_stack_ = nullptr;

@@ -295,6 +295,38 @@ void TcpClient::getUserProfile(const QString& user_id) {
     sendMessage(MsgType::GET_USER_PROFILE, body);
 }
 
+void TcpClient::createMoment(const QString& content,
+                             const QStringList& image_urls,
+                             const QString& video_url) {
+    if (state_ != ClientState::LoggedIn) {
+        emit momentCreateResult(401, "未登录");
+        return;
+    }
+
+    QJsonObject obj;
+    obj["content"] = content;
+    QJsonArray images;
+    for (const QString& image_url : image_urls) {
+        images.append(image_url);
+    }
+    obj["images"] = images;
+    obj["video_url"] = video_url;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::CREATE_MOMENT, body);
+}
+
+void TcpClient::getMoments(int limit) {
+    if (state_ != ClientState::LoggedIn) {
+        emit momentsReceived("[]");
+        return;
+    }
+
+    QJsonObject obj;
+    obj["limit"] = limit;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::GET_MOMENTS, body);
+}
+
 void TcpClient::changePassword(const QString& old_password, const QString& new_password) {
     if (state_ != ClientState::LoggedIn) {
         return;
@@ -663,6 +695,21 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 emit passwordChangeResult(obj["code"].toInt(),
                                           obj["message"].toString());
             }
+            break;
+        }
+
+        case MsgType::CREATE_MOMENT_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit momentCreateResult(obj["code"].toInt(),
+                                        obj["message"].toString());
+            }
+            break;
+        }
+
+        case MsgType::MOMENTS_RSP: {
+            emit momentsReceived(body);
             break;
         }
 

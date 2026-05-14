@@ -63,6 +63,14 @@ bool json_bool(const json::object& obj, const char* key, bool default_value = fa
     return it->value().as_bool();
 }
 
+json::array json_array_value(const json::object& obj, const char* key) {
+    auto it = obj.find(key);
+    if (it == obj.end() || !it->value().is_array()) {
+        return json::array();
+    }
+    return it->value().as_array();
+}
+
 std::string json_response(int code, const std::string& message) {
     json::object rsp;
     rsp["code"] = code;
@@ -465,6 +473,73 @@ void Server::register_default_handlers() {
 
         std::string history = user_service_.get_chat_history(session->user_id(), friend_id, limit, before_time);
         session->send(MsgType::CHAT_HISTORY_RSP, history);
+    });
+
+    dispatcher_.register_handler(MsgType::CREATE_MOMENT, [this](std::shared_ptr<Session> session, const Message& msg) {
+        std::cout << "[Server] 收到朋友圈发布请求 from " << session->user_id()
+                  << ", body_size=" << msg.body.size() << std::endl;
+
+        if (session->user_id().empty()) {
+            session->send(MsgType::CREATE_MOMENT_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string content;
+        std::string video_url;
+        json::array images;
+        try {
+            json::object req = parse_json_object(msg.body);
+            content = json_string(req, "content");
+            video_url = json_string(req, "video_url");
+            images = json_array_value(req, "images");
+        } catch (const std::exception& e) {
+            session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        if (!video_url.empty() && !images.empty()) {
+            session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, "视频和图片不能同时发布"));
+            return;
+        }
+
+        if (images.size() > 9) {
+            session->send(MsgType::CREATE_MOMENT_RSP, json_response(400, "图片最多九张"));
+            return;
+        }
+
+        std::string media_type = "text";
+        std::string media_json;
+        if (!video_url.empty()) {
+            media_type = "video";
+            json::object media;
+            media["video_url"] = video_url;
+            media_json = json::serialize(media);
+        } else if (!images.empty()) {
+            media_type = "image";
+            media_json = json::serialize(images);
+        }
+
+        LoginResult result = user_service_.create_moment(
+            session->user_id(), content, media_type, media_json);
+        session->send(MsgType::CREATE_MOMENT_RSP, json_response(result.code, result.message));
+    });
+
+    dispatcher_.register_handler(MsgType::GET_MOMENTS, [this](std::shared_ptr<Session> session, const Message& msg) {
+        if (session->user_id().empty()) {
+            session->send(MsgType::MOMENTS_RSP, "[]");
+            return;
+        }
+
+        int limit = 50;
+        try {
+            json::object req = parse_json_object(msg.body);
+            limit = static_cast<int>(json_int64(req, "limit", limit));
+        } catch (const std::exception&) {
+            limit = 50;
+        }
+
+        std::string feed = user_service_.get_moments_feed(session->user_id(), limit);
+        session->send(MsgType::MOMENTS_RSP, feed);
     });
 
     // 发送好友请求

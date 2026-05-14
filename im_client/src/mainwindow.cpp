@@ -130,6 +130,10 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onUserProfileReceived);
     connect(tcp_client_, &TcpClient::passwordChangeResult,
             this, &MainWindow::onPasswordChangeResult);
+    connect(tcp_client_, &TcpClient::momentCreateResult,
+            this, &MainWindow::onMomentCreateResult);
+    connect(tcp_client_, &TcpClient::momentsReceived,
+            this, &MainWindow::onMomentsReceived);
 }
 
 void MainWindow::createNavigationBar() {
@@ -226,6 +230,7 @@ void MainWindow::onNavigationItemClicked(int index) {
             break;
         case 2: // 朋友圈
             content_stacked_->setCurrentWidget(moments_view_);
+            loadMoments();
             break;
         case 3: // 我
             content_stacked_->setCurrentWidget(me_view_);

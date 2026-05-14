@@ -10,6 +10,7 @@
 #include <QTcpSocket>
 #include <QHostAddress>
 #include <QTimer>
+#include <QStringList>
 #include <memory>
 
 /**
@@ -141,6 +142,18 @@ public:
      * @brief 获取指定用户个人信息
      */
     void getUserProfile(const QString& user_id);
+
+    /**
+     * @brief 发布朋友圈
+     */
+    void createMoment(const QString& content,
+                      const QStringList& image_urls,
+                      const QString& video_url);
+
+    /**
+     * @brief 获取当前用户和好友的朋友圈
+     */
+    void getMoments(int limit = 50);
 
     /**
      * @brief 修改当前用户密码
@@ -328,6 +341,16 @@ signals:
      * @brief 消息发送状态回执
      */
     void messageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
+
+    /**
+     * @brief 发布朋友圈结果
+     */
+    void momentCreateResult(int code, const QString& message);
+
+    /**
+     * @brief 朋友圈时间流
+     */
+    void momentsReceived(const QString& moments_json);
 
 private slots:
     /**

@@ -293,6 +293,23 @@ CREATE TABLE `im_offline_message` (
     KEY `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='离线消息表';
 
+CREATE TABLE `im_moment` (
+    `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增ID',
+    `moment_id`         VARCHAR(48) NOT NULL COMMENT '朋友圈ID',
+    `user_id`           VARCHAR(32) NOT NULL COMMENT '发布者ID',
+    `content`           TEXT COMMENT '文字内容',
+    `media_type`        VARCHAR(16) NOT NULL DEFAULT 'text' COMMENT 'text/image/video',
+    `media_json`        MEDIUMTEXT COMMENT '图片或视频data URL JSON',
+    `status`            TINYINT NOT NULL DEFAULT 1 COMMENT '状态：1正常 5删除',
+    `create_time`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发布时间',
+    `update_time`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_moment_id` (`moment_id`),
+    KEY `idx_user_time` (`user_id`, `create_time`),
+    KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='朋友圈动态表';
+
 -- ============================================
 -- 5. 文件模块
 -- ============================================

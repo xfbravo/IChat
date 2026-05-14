@@ -187,6 +187,19 @@ public:
     std::string get_chat_history(const std::string& user_id, const std::string& friend_id,
                                  int limit = 20, int64_t before_time = 0);
 
+    /**
+     * @brief 发布朋友圈
+     */
+    LoginResult create_moment(const std::string& user_id,
+                              const std::string& content,
+                              const std::string& media_type,
+                              const std::string& media_json);
+
+    /**
+     * @brief 获取自己和好友的朋友圈
+     */
+    std::string get_moments_feed(const std::string& user_id, int limit = 50);
+
 private:
     std::string hash_password(const std::string& password, const std::string& salt);
     std::string generate_salt();
