@@ -273,6 +273,17 @@ void TcpClient::updateProfile(const QString& nickname,
     sendMessage(MsgType::UPDATE_PROFILE, body);
 }
 
+void TcpClient::getUserProfile(const QString& user_id) {
+    if (state_ != ClientState::LoggedIn || user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["user_id"] = user_id;
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    sendMessage(MsgType::GET_USER_PROFILE, body);
+}
+
 void TcpClient::changePassword(const QString& old_password, const QString& new_password) {
     if (state_ != ClientState::LoggedIn) {
         return;
@@ -576,6 +587,22 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 pending_profile_gender_.clear();
                 pending_profile_region_.clear();
                 pending_profile_signature_.clear();
+            }
+            break;
+        }
+
+        case MsgType::USER_PROFILE_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit userProfileReceived(obj["code"].toInt(),
+                                         obj["message"].toString(),
+                                         obj["user_id"].toString(),
+                                         obj["nickname"].toString(),
+                                         obj["avatar_url"].toString(),
+                                         obj["gender"].toString(),
+                                         obj["region"].toString(),
+                                         obj["signature"].toString());
             }
             break;
         }

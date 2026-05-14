@@ -45,7 +45,9 @@
 #include <QImage>
 #include <QImageReader>
 #include <QIODevice>
+#include <QMouseEvent>
 #include <algorithm>
+#include <functional>
 #include "mainwindow_helpers.h"
 #include <QDebug>
 
@@ -53,6 +55,26 @@ using namespace mainwindow_detail;
 
 namespace
 {
+    QString profileTextOrUnset(const QString &text)
+    {
+        const QString trimmed = text.trimmed();
+        return trimmed.isEmpty() ? QStringLiteral("未填写") : trimmed;
+    }
+
+    QLabel *createProfileValueLabel(QWidget *parent)
+    {
+        QLabel *label = new QLabel(parent);
+        label->setTextFormat(Qt::PlainText);
+        label->setWordWrap(true);
+        label->setStyleSheet(R"(
+            QLabel {
+                color: #111827;
+                font-size: 14px;
+                background: transparent;
+            }
+        )");
+        return label;
+    }
 
     class ContactListItemWidget : public QWidget
     {
@@ -60,22 +82,43 @@ namespace
         ContactListItemWidget(const QString &title,
                               const QString &subtitle,
                               const QString &avatar_url,
+                              std::function<void()> avatar_handler,
+                              std::function<void()> double_click_handler,
                               QWidget *parent = nullptr)
             : QWidget(parent)
+            , double_click_handler_(std::move(double_click_handler))
         {
             setAttribute(Qt::WA_StyledBackground, true);
-            setAttribute(Qt::WA_TransparentForMouseEvents, true);
             setStyleSheet("background: transparent;");
 
             constexpr int avatar_size = 44;
-            QLabel *avatar_label = new QLabel(this);
-            avatar_label->setFixedSize(avatar_size, avatar_size);
-            avatar_label->setPixmap(avatarPixmapFromValue(avatar_url, title, avatar_size));
-            avatar_label->setAlignment(Qt::AlignCenter);
+            QToolButton *avatar_button = new QToolButton(this);
+            avatar_button->setFixedSize(avatar_size, avatar_size);
+            avatar_button->setIcon(QIcon(avatarPixmapFromValue(avatar_url, title, avatar_size)));
+            avatar_button->setIconSize(QSize(avatar_size, avatar_size));
+            avatar_button->setCursor(Qt::PointingHandCursor);
+            avatar_button->setToolTip("查看个人信息");
+            avatar_button->setStyleSheet(R"(
+                QToolButton {
+                    padding: 0;
+                    border: none;
+                    border-radius: 22px;
+                    background: transparent;
+                }
+                QToolButton:hover {
+                    background-color: #eeeeee;
+                }
+            )");
+            QObject::connect(avatar_button, &QToolButton::clicked, this, [avatar_handler = std::move(avatar_handler)]() {
+                if (avatar_handler) {
+                    avatar_handler();
+                }
+            });
 
             QLabel *title_label = new QLabel(title, this);
             title_label->setTextFormat(Qt::PlainText);
             title_label->setWordWrap(false);
+            title_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
             title_label->setStyleSheet(R"(
             QLabel {
                 color: #111111;
@@ -88,6 +131,7 @@ namespace
             QLabel *subtitle_label = new QLabel(subtitle, this);
             subtitle_label->setTextFormat(Qt::PlainText);
             subtitle_label->setWordWrap(false);
+            subtitle_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
             subtitle_label->setStyleSheet(R"(
             QLabel {
                 color: #777777;
@@ -105,9 +149,23 @@ namespace
             QHBoxLayout *layout = new QHBoxLayout(this);
             layout->setContentsMargins(16, 10, 16, 10);
             layout->setSpacing(12);
-            layout->addWidget(avatar_label, 0, Qt::AlignVCenter);
+            layout->addWidget(avatar_button, 0, Qt::AlignVCenter);
             layout->addLayout(text_layout, 1);
         }
+
+    protected:
+        void mouseDoubleClickEvent(QMouseEvent *event) override
+        {
+            if (double_click_handler_) {
+                double_click_handler_();
+                event->accept();
+                return;
+            }
+            QWidget::mouseDoubleClickEvent(event);
+        }
+
+    private:
+        std::function<void()> double_click_handler_;
     };
 
 } // namespace
@@ -241,6 +299,439 @@ void MainWindow::onContactItemDoubleClicked(QTreeWidgetItem *item, int column)
     }
 }
 
+void MainWindow::showUserProfile(const QString &user_id)
+{
+    const QString target_id = user_id.trimmed();
+    if (target_id.isEmpty())
+    {
+        return;
+    }
+
+    const bool can_request = tcp_client_ && tcp_client_->state() == ClientState::LoggedIn;
+    showUserProfileDialog(target_id,
+                          cachedUserProfile(target_id),
+                          can_request,
+                          can_request ? QString("正在获取最新资料...") : QString("当前离线，显示本地资料"));
+
+    if (can_request)
+    {
+        tcp_client_->getUserProfile(target_id);
+    }
+}
+
+void MainWindow::showUserProfileDialog(const QString &user_id,
+                                       const UserProfileCache &profile,
+                                       bool loading,
+                                       const QString &status_text)
+{
+    if (!user_profile_dialog_)
+    {
+        user_profile_dialog_ = new QDialog(this);
+        user_profile_dialog_->setAttribute(Qt::WA_DeleteOnClose, true);
+        user_profile_dialog_->setWindowTitle("个人信息");
+        user_profile_dialog_->setMinimumWidth(380);
+        user_profile_dialog_->setStyleSheet(R"(
+            QDialog {
+                background-color: #f7f8fa;
+                font-family: "Microsoft YaHei", sans-serif;
+            }
+            QFrame#profileCard {
+                background-color: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 6px;
+            }
+            QLabel#profileName {
+                color: #111827;
+                font-size: 18px;
+                font-weight: 700;
+                background: transparent;
+            }
+            QLabel#profileStatus {
+                color: #6b7280;
+                font-size: 12px;
+                background: transparent;
+            }
+            QPushButton#profileCloseButton {
+                min-width: 86px;
+                padding: 8px 16px;
+                color: #374151;
+                background-color: #ffffff;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton#profileCloseButton:hover {
+                background-color: #f3f4f6;
+            }
+            QPushButton#profileMessageButton {
+                min-width: 96px;
+                padding: 8px 18px;
+                color: #ffffff;
+                background-color: #4CAF50;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton#profileMessageButton:hover {
+                background-color: #45a049;
+            }
+        )");
+
+        QVBoxLayout *root_layout = new QVBoxLayout(user_profile_dialog_);
+        root_layout->setContentsMargins(18, 18, 18, 18);
+        root_layout->setSpacing(14);
+
+        QFrame *card = new QFrame(user_profile_dialog_);
+        card->setObjectName("profileCard");
+        QVBoxLayout *card_layout = new QVBoxLayout(card);
+        card_layout->setContentsMargins(20, 18, 20, 18);
+        card_layout->setSpacing(16);
+
+        QWidget *summary = new QWidget(card);
+        QHBoxLayout *summary_layout = new QHBoxLayout(summary);
+        summary_layout->setContentsMargins(0, 0, 0, 0);
+        summary_layout->setSpacing(14);
+
+        view_profile_avatar_label_ = new QLabel(summary);
+        view_profile_avatar_label_->setFixedSize(72, 72);
+        view_profile_avatar_label_->setAlignment(Qt::AlignCenter);
+        summary_layout->addWidget(view_profile_avatar_label_, 0, Qt::AlignTop);
+
+        QVBoxLayout *summary_text_layout = new QVBoxLayout;
+        summary_text_layout->setContentsMargins(0, 4, 0, 4);
+        summary_text_layout->setSpacing(6);
+        view_profile_name_label_ = new QLabel(summary);
+        view_profile_name_label_->setObjectName("profileName");
+        view_profile_name_label_->setTextFormat(Qt::PlainText);
+        summary_text_layout->addWidget(view_profile_name_label_);
+        view_profile_id_label_ = createProfileValueLabel(summary);
+        summary_text_layout->addWidget(view_profile_id_label_);
+        summary_text_layout->addStretch();
+        summary_layout->addLayout(summary_text_layout, 1);
+        card_layout->addWidget(summary);
+
+        QFormLayout *form_layout = new QFormLayout;
+        form_layout->setContentsMargins(0, 0, 0, 0);
+        form_layout->setHorizontalSpacing(12);
+        form_layout->setVerticalSpacing(10);
+        form_layout->setLabelAlignment(Qt::AlignRight | Qt::AlignTop);
+
+        view_profile_nickname_label_ = createProfileValueLabel(card);
+        view_profile_remark_label_ = createProfileValueLabel(card);
+        view_profile_gender_label_ = createProfileValueLabel(card);
+        view_profile_region_label_ = createProfileValueLabel(card);
+        view_profile_signature_label_ = createProfileValueLabel(card);
+        form_layout->addRow("昵称:", view_profile_nickname_label_);
+        form_layout->addRow("备注:", view_profile_remark_label_);
+        form_layout->addRow("性别:", view_profile_gender_label_);
+        form_layout->addRow("地区:", view_profile_region_label_);
+        form_layout->addRow("签名:", view_profile_signature_label_);
+        card_layout->addLayout(form_layout);
+
+        view_profile_status_label_ = new QLabel(card);
+        view_profile_status_label_->setObjectName("profileStatus");
+        view_profile_status_label_->setTextFormat(Qt::PlainText);
+        card_layout->addWidget(view_profile_status_label_);
+        root_layout->addWidget(card);
+
+        QWidget *action_row = new QWidget(user_profile_dialog_);
+        QHBoxLayout *action_layout = new QHBoxLayout(action_row);
+        action_layout->setContentsMargins(0, 0, 0, 0);
+        action_layout->setSpacing(10);
+        action_layout->addStretch();
+
+        QPushButton *close_button = new QPushButton("关闭", action_row);
+        close_button->setObjectName("profileCloseButton");
+        connect(close_button, &QPushButton::clicked, user_profile_dialog_, &QDialog::accept);
+        action_layout->addWidget(close_button);
+
+        view_profile_message_button_ = new QPushButton("发消息", action_row);
+        view_profile_message_button_->setObjectName("profileMessageButton");
+        connect(view_profile_message_button_, &QPushButton::clicked, this, [this]()
+        {
+            const QString target_id = profile_dialog_user_id_;
+            if (target_id.isEmpty() || target_id == user_id_)
+            {
+                return;
+            }
+
+            const UserProfileCache profile = cachedUserProfile(target_id);
+            QString display_name = profile.display_name.trimmed();
+            if (display_name.isEmpty())
+            {
+                const QString nickname = profile.nickname.trimmed();
+                const QString remark = profile.remark.trimmed();
+                display_name = remark.isEmpty() ? nickname : remark;
+            }
+            if (display_name.isEmpty())
+            {
+                display_name = conversationTitle(target_id);
+            }
+            if (display_name.isEmpty())
+            {
+                display_name = target_id;
+            }
+
+            switchToChatWith(target_id, display_name);
+            if (nav_list_)
+            {
+                nav_list_->setCurrentRow(0);
+            }
+            if (content_stacked_ && message_view_)
+            {
+                content_stacked_->setCurrentWidget(message_view_);
+            }
+            if (user_profile_dialog_)
+            {
+                user_profile_dialog_->accept();
+            }
+        });
+        action_layout->addWidget(view_profile_message_button_);
+        root_layout->addWidget(action_row);
+
+        connect(user_profile_dialog_, &QDialog::destroyed, this, [this]()
+        {
+            user_profile_dialog_ = nullptr;
+            profile_dialog_user_id_.clear();
+            view_profile_avatar_label_ = nullptr;
+            view_profile_name_label_ = nullptr;
+            view_profile_id_label_ = nullptr;
+            view_profile_nickname_label_ = nullptr;
+            view_profile_remark_label_ = nullptr;
+            view_profile_gender_label_ = nullptr;
+            view_profile_region_label_ = nullptr;
+            view_profile_signature_label_ = nullptr;
+            view_profile_status_label_ = nullptr;
+            view_profile_message_button_ = nullptr;
+        });
+    }
+
+    profile_dialog_user_id_ = user_id;
+    updateUserProfileDialog(profile, loading, status_text);
+    user_profile_dialog_->show();
+    user_profile_dialog_->raise();
+    user_profile_dialog_->activateWindow();
+}
+
+void MainWindow::updateUserProfileDialog(const UserProfileCache &profile,
+                                         bool loading,
+                                         const QString &status_text)
+{
+    if (!user_profile_dialog_)
+    {
+        return;
+    }
+
+    const QString display_name = profile.display_name.trimmed().isEmpty()
+        ? (profile.nickname.trimmed().isEmpty() ? profile.user_id : profile.nickname.trimmed())
+        : profile.display_name.trimmed();
+
+    if (view_profile_avatar_label_)
+    {
+        view_profile_avatar_label_->setPixmap(avatarPixmapFromValue(profile.avatar_url, display_name, 72));
+    }
+    if (view_profile_name_label_)
+    {
+        view_profile_name_label_->setText(display_name);
+    }
+    if (view_profile_id_label_)
+    {
+        view_profile_id_label_->setText(QString("用户ID: %1").arg(profile.user_id));
+    }
+    if (view_profile_nickname_label_)
+    {
+        view_profile_nickname_label_->setText(profileTextOrUnset(profile.nickname));
+    }
+    if (view_profile_remark_label_)
+    {
+        view_profile_remark_label_->setText(profileTextOrUnset(profile.remark));
+    }
+    if (view_profile_gender_label_)
+    {
+        view_profile_gender_label_->setText(profileTextOrUnset(profile.gender));
+    }
+    if (view_profile_region_label_)
+    {
+        view_profile_region_label_->setText(profileTextOrUnset(profile.region));
+    }
+    if (view_profile_signature_label_)
+    {
+        view_profile_signature_label_->setText(profileTextOrUnset(profile.signature));
+    }
+    if (view_profile_status_label_)
+    {
+        if (!status_text.isEmpty())
+        {
+            view_profile_status_label_->setText(status_text);
+        }
+        else
+        {
+            view_profile_status_label_->setText(loading ? "正在获取最新资料..." : "资料已更新");
+        }
+    }
+    if (view_profile_message_button_)
+    {
+        const bool can_message = !profile.user_id.isEmpty() && profile.user_id != user_id_;
+        view_profile_message_button_->setVisible(can_message);
+        view_profile_message_button_->setEnabled(can_message);
+    }
+}
+
+MainWindow::UserProfileCache MainWindow::cachedUserProfile(const QString &user_id) const
+{
+    UserProfileCache profile = user_profile_cache_.value(user_id);
+    profile.user_id = user_id;
+
+    if (user_id == user_id_)
+    {
+        profile.nickname = user_nickname_;
+        profile.display_name = user_nickname_.trimmed().isEmpty() ? user_id_ : user_nickname_.trimmed();
+        profile.avatar_url = current_avatar_url_;
+        profile.gender = user_gender_;
+        profile.region = user_region_;
+        profile.signature = user_signature_;
+        return profile;
+    }
+
+    const QString remark = contact_remarks_.value(user_id).trimmed();
+    const QString nickname = contact_nicknames_.value(user_id).trimmed();
+    profile.remark = remark;
+    if (!nickname.isEmpty())
+    {
+        profile.nickname = nickname;
+    }
+    const QString avatar_url = contact_avatars_.value(user_id);
+    if (!avatar_url.isEmpty())
+    {
+        profile.avatar_url = avatar_url;
+    }
+
+    if (!profile.remark.trimmed().isEmpty())
+    {
+        profile.display_name = profile.remark.trimmed();
+    }
+    else if (!profile.nickname.trimmed().isEmpty())
+    {
+        profile.display_name = profile.nickname.trimmed();
+    }
+    else if (profile.display_name.isEmpty())
+    {
+        profile.display_name = conversationTitle(user_id);
+    }
+    if (profile.display_name.isEmpty())
+    {
+        profile.display_name = user_id;
+    }
+    return profile;
+}
+
+void MainWindow::mergeUserProfileCache(const UserProfileCache &profile)
+{
+    if (profile.user_id.isEmpty())
+    {
+        return;
+    }
+
+    user_profile_cache_[profile.user_id] = profile;
+    if (profile.user_id == user_id_)
+    {
+        if (!profile.nickname.isEmpty())
+        {
+            user_nickname_ = profile.nickname;
+            setWindowTitle(QString("IChat - %1").arg(user_nickname_));
+        }
+        if (!profile.avatar_url.isEmpty())
+        {
+            current_avatar_url_ = profile.avatar_url;
+        }
+        user_gender_ = profile.gender;
+        user_region_ = profile.region;
+        user_signature_ = profile.signature;
+        updateMeProfileText();
+        updateAvatarPreview();
+        if (!current_messages_.isEmpty())
+        {
+            renderChatMessages(false);
+        }
+        return;
+    }
+
+    if (!profile.nickname.isEmpty())
+    {
+        contact_nicknames_[profile.user_id] = profile.nickname;
+    }
+    if (!profile.avatar_url.isEmpty())
+    {
+        contact_avatars_[profile.user_id] = profile.avatar_url;
+    }
+
+    auto conversation_it = conversations_.find(profile.user_id);
+    if (conversation_it != conversations_.end())
+    {
+        const QString remark = contact_remarks_.value(profile.user_id).trimmed();
+        const QString display_name = remark.isEmpty()
+            ? (profile.nickname.isEmpty() ? profile.user_id : profile.nickname)
+            : remark;
+        conversation_it->title = display_name;
+        if (profile.user_id == current_chat_target_ && chat_target_label_)
+        {
+            chat_target_label_->setText(display_name);
+        }
+    }
+
+    refreshConversationList();
+    rebuildContactList();
+    if (!current_messages_.isEmpty())
+    {
+        renderChatMessages(false);
+    }
+}
+
+void MainWindow::onUserProfileReceived(int code,
+                                       const QString &message,
+                                       const QString &user_id,
+                                       const QString &nickname,
+                                       const QString &avatar_url,
+                                       const QString &gender,
+                                       const QString &region,
+                                       const QString &signature)
+{
+    const QString target_id = user_id.isEmpty() ? profile_dialog_user_id_ : user_id;
+    if (target_id.isEmpty())
+    {
+        return;
+    }
+
+    if (code != 0)
+    {
+        if (target_id == profile_dialog_user_id_)
+        {
+            const QString text = message.isEmpty() ? QString("获取资料失败") : message;
+            updateUserProfileDialog(cachedUserProfile(target_id), false, text);
+        }
+        return;
+    }
+
+    UserProfileCache profile = cachedUserProfile(target_id);
+    profile.user_id = target_id;
+    profile.nickname = nickname;
+    profile.avatar_url = avatar_url;
+    profile.gender = gender;
+    profile.region = region;
+    profile.signature = signature;
+    profile.display_name = profile.remark.trimmed().isEmpty()
+        ? (nickname.trimmed().isEmpty() ? target_id : nickname.trimmed())
+        : profile.remark.trimmed();
+
+    mergeUserProfileCache(profile);
+    if (target_id == profile_dialog_user_id_)
+    {
+        updateUserProfileDialog(profile, false, "资料已更新");
+    }
+}
+
 void MainWindow::rebuildContactList()
 {
     if (!contact_tree_widget_)
@@ -304,6 +795,16 @@ void MainWindow::rebuildContactList()
             title,
             subtitle,
             contact_avatars_.value(friend_id),
+            [this, friend_id]()
+            {
+                showUserProfile(friend_id);
+            },
+            [this, friend_id, title]()
+            {
+                switchToChatWith(friend_id, title);
+                nav_list_->setCurrentRow(0);
+                content_stacked_->setCurrentWidget(message_view_);
+            },
             contact_tree_widget_);
         contact_tree_widget_->setItemWidget(friend_item, 0, item_widget);
     }

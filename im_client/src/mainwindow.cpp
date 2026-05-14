@@ -126,6 +126,8 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onAvatarUpdateResult);
     connect(tcp_client_, &TcpClient::profileUpdateResult,
             this, &MainWindow::onProfileUpdateResult);
+    connect(tcp_client_, &TcpClient::userProfileReceived,
+            this, &MainWindow::onUserProfileReceived);
     connect(tcp_client_, &TcpClient::passwordChangeResult,
             this, &MainWindow::onPasswordChangeResult);
 }

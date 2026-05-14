@@ -138,6 +138,11 @@ public:
                        const QString& signature);
 
     /**
+     * @brief 获取指定用户个人信息
+     */
+    void getUserProfile(const QString& user_id);
+
+    /**
      * @brief 修改当前用户密码
      */
     void changePassword(const QString& old_password, const QString& new_password);
@@ -276,6 +281,18 @@ signals:
     void profileUpdateResult(int code,
                              const QString& message,
                              const QString& nickname,
+                             const QString& gender,
+                             const QString& region,
+                             const QString& signature);
+
+    /**
+     * @brief 用户个人信息查询结果
+     */
+    void userProfileReceived(int code,
+                             const QString& message,
+                             const QString& user_id,
+                             const QString& nickname,
+                             const QString& avatar_url,
                              const QString& gender,
                              const QString& region,
                              const QString& signature);

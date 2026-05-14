@@ -568,11 +568,12 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     constexpr int avatar_size = 36;
 
     const QString display_name = message.is_mine
-        ? user_nickname_
+        ? (user_nickname_.isEmpty() ? user_id_ : user_nickname_)
         : conversationTitle(message.from);
     const QString avatar_value = message.is_mine
         ? current_avatar_url_
         : contact_avatars_.value(message.from);
+    const QString profile_user_id = message.is_mine ? user_id_ : message.from;
 
     QWidget* row = new QWidget(chat_messages_widget_);
     row->setProperty("msg_id", message.msg_id);
@@ -595,19 +596,36 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     bubble_row_layout->setContentsMargins(0, 0, 0, 0);
     bubble_row_layout->setSpacing(8);
 
-    QLabel* avatar_label = new QLabel(bubble_row);
-    avatar_label->setFixedSize(avatar_size, avatar_size);
-    avatar_label->setPixmap(avatarPixmapFromValue(avatar_value, display_name, avatar_size));
-    avatar_label->setAlignment(Qt::AlignCenter);
+    QToolButton* avatar_button = new QToolButton(bubble_row);
+    avatar_button->setFixedSize(avatar_size, avatar_size);
+    avatar_button->setIcon(QIcon(avatarPixmapFromValue(avatar_value, display_name, avatar_size)));
+    avatar_button->setIconSize(QSize(avatar_size, avatar_size));
+    avatar_button->setCursor(Qt::PointingHandCursor);
+    avatar_button->setToolTip(QString("查看%1的个人信息").arg(display_name));
+    avatar_button->setStyleSheet(R"(
+        QToolButton {
+            padding: 0;
+            border: none;
+            border-radius: 18px;
+            background: transparent;
+        }
+        QToolButton:hover {
+            background-color: #eeeeee;
+        }
+    )");
+    avatar_button->setEnabled(!profile_user_id.isEmpty());
+    connect(avatar_button, &QToolButton::clicked, this, [this, profile_user_id]() {
+        showUserProfile(profile_user_id);
+    });
 
     // 后续媒体消息可以在这里按 content_type 切换为图片、视频或文件卡片组件。
     MessageBubble* bubble = new MessageBubble(message.content, message.is_mine, max_text_width, bubble_row);
     if (message.is_mine) {
         bubble_row_layout->addStretch();
         bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);
-        bubble_row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
+        bubble_row_layout->addWidget(avatar_button, 0, Qt::AlignTop);
     } else {
-        bubble_row_layout->addWidget(avatar_label, 0, Qt::AlignTop);
+        bubble_row_layout->addWidget(avatar_button, 0, Qt::AlignTop);
         bubble_row_layout->addWidget(bubble, 0, Qt::AlignTop);
         bubble_row_layout->addStretch();
     }

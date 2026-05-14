@@ -27,6 +27,7 @@
 #include "tcpclient.h"
 
 class QPropertyAnimation;
+class QDialog;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -80,10 +81,34 @@ private slots:
                                const QString& gender,
                                const QString& region,
                                const QString& signature);
+    void onUserProfileReceived(int code,
+                               const QString& message,
+                               const QString& user_id,
+                               const QString& nickname,
+                               const QString& avatar_url,
+                               const QString& gender,
+                               const QString& region,
+                               const QString& signature);
     void onChangePasswordClicked();
     void onPasswordChangeResult(int code, const QString& message);
 
 private:
+    /**
+     * @brief 头像点击后展示的只读资料缓存
+     *
+     * 数据来源可能是联系人列表、当前登录用户资料或服务端按用户ID查询结果。
+     */
+    struct UserProfileCache {
+        QString user_id;
+        QString display_name;
+        QString nickname;
+        QString remark;
+        QString avatar_url;
+        QString gender;
+        QString region;
+        QString signature;
+    };
+
     /**
      * @brief 聊天区渲染用的消息模型
      *
@@ -112,6 +137,18 @@ private:
     QString encodeAvatarFile(const QString& file_path);
     void updateAvatarPreview();
     void updateMeProfileText();
+
+    // 头像点击入口：聊天、联系人和后续朋友圈/群聊头像都复用这里。
+    void showUserProfile(const QString& user_id);
+    void showUserProfileDialog(const QString& user_id,
+                               const UserProfileCache& profile,
+                               bool loading,
+                               const QString& status_text = QString());
+    void updateUserProfileDialog(const UserProfileCache& profile,
+                                 bool loading,
+                                 const QString& status_text = QString());
+    UserProfileCache cachedUserProfile(const QString& user_id) const;
+    void mergeUserProfileCache(const UserProfileCache& profile);
 
     // 消息页工具：维护 conversations_ 与当前聊天窗口的同步。
     void appendMessage(const QString& from, const QString& content, bool is_mine,
@@ -192,6 +229,20 @@ private:
     QLabel* password_status_label_ = nullptr;
     QPushButton* change_password_button_ = nullptr;
 
+    // 头像点击后打开的只读个人资料弹窗。
+    QDialog* user_profile_dialog_ = nullptr;
+    QString profile_dialog_user_id_;
+    QLabel* view_profile_avatar_label_ = nullptr;
+    QLabel* view_profile_name_label_ = nullptr;
+    QLabel* view_profile_id_label_ = nullptr;
+    QLabel* view_profile_nickname_label_ = nullptr;
+    QLabel* view_profile_remark_label_ = nullptr;
+    QLabel* view_profile_gender_label_ = nullptr;
+    QLabel* view_profile_region_label_ = nullptr;
+    QLabel* view_profile_signature_label_ = nullptr;
+    QLabel* view_profile_status_label_ = nullptr;
+    QPushButton* view_profile_message_button_ = nullptr;
+
     // Status
     QLabel* status_label_;
 
@@ -203,6 +254,7 @@ private:
     QHash<QString, QString> contact_remarks_;
     QHash<QString, QString> contact_nicknames_;
     QHash<QString, QString> contact_avatars_;
+    QHash<QString, UserProfileCache> user_profile_cache_;
 
     /**
      * @brief 单个会话的本地 UI 状态

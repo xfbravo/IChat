@@ -47,6 +47,7 @@ enum class MsgType : uint16_t {
     UPDATE_AVATAR        = 0x0013, // 更新头像
     CHANGE_PASSWORD      = 0x0014, // 修改密码
     UPDATE_PROFILE       = 0x0015, // 更新个人信息
+    GET_USER_PROFILE     = 0x0016, // 获取用户个人信息
 
     // 服务端 -> 客户端
     LOGIN_RSP           = 0x8002,  // 登录响应
@@ -61,6 +62,7 @@ enum class MsgType : uint16_t {
     UPDATE_AVATAR_RSP   = 0x8013, // 更新头像响应
     CHANGE_PASSWORD_RSP = 0x8014, // 修改密码响应
     UPDATE_PROFILE_RSP  = 0x8015, // 更新个人信息响应
+    USER_PROFILE_RSP    = 0x8016, // 用户个人信息响应
 };
 
 /**

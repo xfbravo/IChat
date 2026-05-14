@@ -360,6 +360,45 @@ void Server::register_default_handlers() {
         session->send(MsgType::FRIEND_LIST_RSP, friend_list);
     });
 
+    // 获取用户个人信息
+    dispatcher_.register_handler(MsgType::GET_USER_PROFILE, [this](std::shared_ptr<Session> session, const Message& msg) {
+        if (session->user_id().empty()) {
+            session->send(MsgType::USER_PROFILE_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string target_user_id;
+        try {
+            json::object req = parse_json_object(msg.body);
+            target_user_id = json_string(req, "user_id");
+        } catch (const std::exception& e) {
+            session->send(MsgType::USER_PROFILE_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        if (target_user_id.empty()) {
+            session->send(MsgType::USER_PROFILE_RSP, json_response(400, "用户ID不能为空"));
+            return;
+        }
+
+        UserInfo profile = user_service_.get_user_by_id(target_user_id);
+        if (profile.user_id.empty() || profile.status != 1) {
+            session->send(MsgType::USER_PROFILE_RSP, json_response(404, "用户不存在"));
+            return;
+        }
+
+        json::object rsp;
+        rsp["code"] = 0;
+        rsp["message"] = "获取成功";
+        rsp["user_id"] = profile.user_id;
+        rsp["nickname"] = profile.nickname;
+        rsp["avatar_url"] = profile.avatar_url;
+        rsp["gender"] = profile.gender;
+        rsp["region"] = profile.region;
+        rsp["signature"] = profile.signature;
+        session->send(MsgType::USER_PROFILE_RSP, json::serialize(rsp));
+    });
+
     // 获取好友请求列表
     dispatcher_.register_handler(MsgType::GET_FRIEND_REQUESTS, [this](std::shared_ptr<Session> session, const Message& msg) {
         (void)msg;

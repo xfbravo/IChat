@@ -74,6 +74,7 @@ enum class MsgType : uint16_t {
     UPDATE_AVATAR        = 0x0013,  // 更新头像
     CHANGE_PASSWORD      = 0x0014,  // 修改密码
     UPDATE_PROFILE       = 0x0015,  // 更新个人信息
+    GET_USER_PROFILE     = 0x0016,  // 获取用户个人信息
 
     LOGIN_RSP            = 0x8002,  // 登录响应
     REGISTER_RSP         = 0x8003,  // 注册响应
@@ -87,6 +88,7 @@ enum class MsgType : uint16_t {
     UPDATE_AVATAR_RSP    = 0x8013,  // 更新头像响应
     CHANGE_PASSWORD_RSP  = 0x8014,  // 修改密码响应
     UPDATE_PROFILE_RSP   = 0x8015,  // 更新个人信息响应
+    USER_PROFILE_RSP     = 0x8016,  // 用户个人信息响应
 };
 ```
 
@@ -222,7 +224,34 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.6 统一聊天消息
+### 3.6 获取用户个人信息
+
+头像点击、联系人资料查看等场景使用该接口按 `user_id` 拉取只读资料。响应不包含手机号、邮箱等私密字段。
+
+**请求 (GET_USER_PROFILE / 0x0016)**:
+```json
+{
+    "user_id": "user_002"
+}
+```
+
+**响应 (USER_PROFILE_RSP / 0x8016)**:
+```json
+{
+    "code": 0,
+    "message": "获取成功",
+    "user_id": "user_002",
+    "nickname": "李四",
+    "avatar_url": "data:image/jpeg;base64,...",
+    "gender": "女",
+    "region": "上海",
+    "signature": "保持热爱"
+}
+```
+
+---
+
+### 3.7 统一聊天消息
 
 **发送请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -265,7 +294,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.6 群聊消息（规划）
+### 3.8 群聊消息（规划）
 
 当前代码尚未实现群聊专用消息类型。后续实现时仍应复用 `CHAT_MESSAGE` 的正文结构，通过 `chat_type` 和 `group_id` 区分群聊，而不是新增与媒体类型绑定的包头类型。
 
@@ -301,11 +330,11 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.7 文件/媒体消息
+### 3.9 文件/媒体消息
 
 图片、文件、语音、视频都通过 `CHAT_MESSAGE / 0x0005` 发送，`content_type` 决定内容类型。旧的 `IMAGE(0x0006)`、`FILE(0x0007)`、`VOICE(0x0008)` 仅用于兼容旧客户端，服务端会按统一聊天消息处理并以 `CHAT_MESSAGE` 转发。
 
-#### 3.7.1 文件消息
+#### 3.9.1 文件消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -325,7 +354,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.7.2 大文件分片（规划）
+#### 3.9.2 大文件分片（规划）
 
 当前代码尚未实现独立文件分片协议；以下为规划接口，不能与当前正式 v1 代码混用。
 
@@ -355,7 +384,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.7.3 文件分片数据
+#### 3.9.3 文件分片数据
 
 **请求 (FILE_TRANS_DATA)**:
 ```json
@@ -369,7 +398,7 @@ enum class MsgType : uint16_t {
 }
 ```
 
-#### 3.7.4 传输完成
+#### 3.9.4 传输完成
 
 **请求 (FILE_TRANS_END)**:
 ```json
@@ -384,7 +413,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.8 图片消息
+### 3.10 图片消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -415,7 +444,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.9 语音消息
+### 3.11 语音消息
 
 **请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
@@ -437,7 +466,7 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.10 音视频通话
+### 3.12 音视频通话
 
 **呼叫邀请 (CALL_INVITE)**:
 ```json
