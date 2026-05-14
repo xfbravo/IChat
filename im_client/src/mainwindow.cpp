@@ -234,6 +234,12 @@ void MainWindow::onNavigationItemClicked(int index) {
             }
             updateAvatarPreview();
             updateMeProfileText();
+            if (profile_status_label_) {
+                profile_status_label_->setText("正在同步资料...");
+            }
+            if (tcp_client_ && tcp_client_->state() == ClientState::LoggedIn) {
+                tcp_client_->getUserProfile(user_id_);
+            }
             break;
     }
 }

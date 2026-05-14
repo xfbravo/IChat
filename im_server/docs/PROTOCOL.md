@@ -235,17 +235,42 @@ enum class MsgType : uint16_t {
 }
 ```
 
+当前用户进入“我”导航栏或个人信息页时，客户端会带上本地缓存快照。服务端只会在 `client_user_id`、`user_id` 与当前登录会话完全一致时比较本地快照；一致则只返回 ACK，不下发资料字段。
+```json
+{
+    "user_id": "17275536202",
+    "client_user_id": "17275536202",
+    "local_profile": {
+        "nickname": "XFNotFound",
+        "gender": "男",
+        "region": "北京",
+        "signature": "BIT rocks"
+    }
+}
+```
+
 **响应 (USER_PROFILE_RSP / 0x8016)**:
 ```json
 {
     "code": 0,
     "message": "获取成功",
+    "sync_status": "full",
     "user_id": "user_002",
     "nickname": "李四",
     "avatar_url": "data:image/jpeg;base64,...",
     "gender": "女",
     "region": "上海",
     "signature": "保持热爱"
+}
+```
+
+当前用户本地缓存与服务端一致时，服务端仅返回 ACK：
+```json
+{
+    "code": 0,
+    "message": "资料已同步",
+    "sync_status": "same",
+    "user_id": "17275536202"
 }
 ```
 

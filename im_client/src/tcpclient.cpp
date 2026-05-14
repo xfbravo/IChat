@@ -278,8 +278,19 @@ void TcpClient::getUserProfile(const QString& user_id) {
         return;
     }
 
+    pending_user_profile_id_ = user_id;
+
     QJsonObject obj;
     obj["user_id"] = user_id;
+    if (user_id == user_id_) {
+        obj["client_user_id"] = user_id_;
+        QJsonObject local_profile;
+        local_profile["nickname"] = user_nickname_;
+        local_profile["gender"] = user_gender_;
+        local_profile["region"] = user_region_;
+        local_profile["signature"] = user_signature_;
+        obj["local_profile"] = local_profile;
+    }
     QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::GET_USER_PROFILE, body);
 }
@@ -595,14 +606,52 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
             if (doc.isObject()) {
                 QJsonObject obj = doc.object();
-                emit userProfileReceived(obj["code"].toInt(),
+                const int code = obj["code"].toInt();
+                const QString response_user_id = obj["user_id"].toString();
+                const QString profile_user_id = response_user_id.isEmpty()
+                    ? pending_user_profile_id_
+                    : response_user_id;
+                const bool is_current_profile = profile_user_id == user_id_;
+                const QString nickname = obj.contains("nickname")
+                    ? obj["nickname"].toString()
+                    : (is_current_profile ? user_nickname_ : QString());
+                const QString avatar_url = obj.contains("avatar_url")
+                    ? obj["avatar_url"].toString()
+                    : (is_current_profile ? user_avatar_url_ : QString());
+                const QString gender = obj.contains("gender")
+                    ? obj["gender"].toString()
+                    : (is_current_profile ? user_gender_ : QString());
+                const QString region = obj.contains("region")
+                    ? obj["region"].toString()
+                    : (is_current_profile ? user_region_ : QString());
+                const QString signature = obj.contains("signature")
+                    ? obj["signature"].toString()
+                    : (is_current_profile ? user_signature_ : QString());
+
+                if (code == 0 && is_current_profile) {
+                    if (!nickname.isEmpty()) {
+                        user_nickname_ = nickname;
+                    }
+                    if (!avatar_url.isEmpty()) {
+                        user_avatar_url_ = avatar_url;
+                    }
+                    user_gender_ = gender;
+                    user_region_ = region;
+                    user_signature_ = signature;
+                    saveCredentials();
+                }
+
+                emit userProfileReceived(code,
                                          obj["message"].toString(),
-                                         obj["user_id"].toString(),
-                                         obj["nickname"].toString(),
-                                         obj["avatar_url"].toString(),
-                                         obj["gender"].toString(),
-                                         obj["region"].toString(),
-                                         obj["signature"].toString());
+                                         profile_user_id,
+                                         nickname,
+                                         avatar_url,
+                                         gender,
+                                         region,
+                                         signature);
+                if (response_user_id.isEmpty() || response_user_id == pending_user_profile_id_) {
+                    pending_user_profile_id_.clear();
+                }
             }
             break;
         }

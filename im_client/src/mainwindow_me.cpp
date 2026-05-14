@@ -142,7 +142,7 @@ void MainWindow::createMeView() {
             text-align: left;
         }
         QToolButton#profileSummaryButton {
-            min-height: 108px;
+            min-height: 132px;
             font-size: 14px;
             font-weight: 500;
         }
@@ -336,8 +336,14 @@ void MainWindow::createMeView() {
     me_profile_button_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     me_profile_button_->setCursor(Qt::PointingHandCursor);
     me_profile_button_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    connect(me_profile_button_, &QToolButton::clicked, this, [showPage, profile_page]() {
+    connect(me_profile_button_, &QToolButton::clicked, this, [this, showPage, profile_page]() {
         showPage(profile_page);
+        if (profile_status_label_) {
+            profile_status_label_->setText("正在获取最新资料...");
+        }
+        if (tcp_client_ && tcp_client_->state() == ClientState::LoggedIn) {
+            tcp_client_->getUserProfile(user_id_);
+        }
     });
     home_layout->addWidget(me_profile_button_, 0, Qt::AlignTop);
 
@@ -599,7 +605,16 @@ void MainWindow::updateAvatarPreview() {
 void MainWindow::updateMeProfileText() {
     const QString display_name = user_nickname_.isEmpty() ? user_id_ : user_nickname_;
     if (me_profile_button_) {
-        me_profile_button_->setText(QString("%1\n用户ID：%2").arg(display_name, user_id_));
+        QStringList profile_lines;
+        profile_lines << display_name
+                      << QString("用户ID：%1").arg(user_id_);
+        if (!user_region_.trimmed().isEmpty()) {
+            profile_lines << QString("地区：%1").arg(user_region_.trimmed());
+        }
+        if (!user_signature_.trimmed().isEmpty()) {
+            profile_lines << QString("签名：%1").arg(user_signature_.trimmed());
+        }
+        me_profile_button_->setText(profile_lines.join("\n"));
     }
     if (profile_nickname_edit_ && !profile_nickname_edit_->hasFocus()) {
         profile_nickname_edit_->setText(display_name);

@@ -368,9 +368,25 @@ void Server::register_default_handlers() {
         }
 
         std::string target_user_id;
+        std::string client_user_id;
+        std::string local_nickname;
+        std::string local_gender;
+        std::string local_region;
+        std::string local_signature;
+        bool has_local_profile = false;
         try {
             json::object req = parse_json_object(msg.body);
             target_user_id = json_string(req, "user_id");
+            client_user_id = json_string(req, "client_user_id");
+            auto local_it = req.find("local_profile");
+            if (local_it != req.end() && local_it->value().is_object()) {
+                const json::object& local_profile = local_it->value().as_object();
+                local_nickname = json_string(local_profile, "nickname");
+                local_gender = json_string(local_profile, "gender");
+                local_region = json_string(local_profile, "region");
+                local_signature = json_string(local_profile, "signature");
+                has_local_profile = true;
+            }
         } catch (const std::exception& e) {
             session->send(MsgType::USER_PROFILE_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
             return;
@@ -387,16 +403,39 @@ void Server::register_default_handlers() {
             return;
         }
 
+        const bool same_account_sync =
+            has_local_profile
+            && target_user_id == session->user_id()
+            && client_user_id == session->user_id();
+        const bool local_profile_same =
+            same_account_sync
+            && local_nickname == profile.nickname
+            && local_gender == profile.gender
+            && local_region == profile.region
+            && local_signature == profile.signature;
+
         json::object rsp;
         rsp["code"] = 0;
-        rsp["message"] = "获取成功";
         rsp["user_id"] = profile.user_id;
+        if (local_profile_same) {
+            rsp["message"] = "资料已同步";
+            rsp["sync_status"] = "same";
+            const std::string rsp_body = json::serialize(rsp);
+            std::cout << "[Server] 用户资料一致，仅返回ACK: " << rsp_body << std::endl;
+            session->send(MsgType::USER_PROFILE_RSP, rsp_body);
+            return;
+        }
+
+        rsp["message"] = "获取成功";
+        rsp["sync_status"] = same_account_sync ? "server_newer" : "full";
         rsp["nickname"] = profile.nickname;
         rsp["avatar_url"] = profile.avatar_url;
         rsp["gender"] = profile.gender;
         rsp["region"] = profile.region;
         rsp["signature"] = profile.signature;
-        session->send(MsgType::USER_PROFILE_RSP, json::serialize(rsp));
+        const std::string rsp_body = json::serialize(rsp);
+        std::cout << "[Server] 用户资料响应: " << rsp_body << std::endl;
+        session->send(MsgType::USER_PROFILE_RSP, rsp_body);
     });
 
     // 获取好友请求列表

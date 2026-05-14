@@ -407,6 +407,7 @@ private:
     QString pending_profile_gender_;
     QString pending_profile_region_;
     QString pending_profile_signature_;
+    QString pending_user_profile_id_;
 
     QTimer* heartbeat_timer_ = nullptr;
     QTimer* heartbeat_timeout_timer_ = nullptr;

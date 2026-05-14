@@ -706,6 +706,10 @@ void MainWindow::onUserProfileReceived(int code,
 
     if (code != 0)
     {
+        if (target_id == user_id_ && profile_status_label_)
+        {
+            profile_status_label_->setText(message.isEmpty() ? QString("获取资料失败") : message);
+        }
         if (target_id == profile_dialog_user_id_)
         {
             const QString text = message.isEmpty() ? QString("获取资料失败") : message;
@@ -726,9 +730,13 @@ void MainWindow::onUserProfileReceived(int code,
         : profile.remark.trimmed();
 
     mergeUserProfileCache(profile);
+    if (target_id == user_id_ && profile_status_label_ && !profile_save_pending_)
+    {
+        profile_status_label_->setText(message.isEmpty() ? QString("资料已更新") : message);
+    }
     if (target_id == profile_dialog_user_id_)
     {
-        updateUserProfileDialog(profile, false, "资料已更新");
+        updateUserProfileDialog(profile, false, message.isEmpty() ? QString("资料已更新") : message);
     }
 }
 
