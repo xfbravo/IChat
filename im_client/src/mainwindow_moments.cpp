@@ -4,6 +4,7 @@
  */
 
 #include "mainwindow.h"
+#include <QAbstractItemView>
 #include <QBuffer>
 #include <QDateTime>
 #include <QDialog>
@@ -22,6 +23,7 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QAbstractItemModel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QScrollArea>
@@ -194,8 +196,6 @@ void MainWindow::onCreateMomentClicked() {
     dialog.setWindowTitle("发布朋友圈");
     dialog.setMinimumWidth(560);
 
-    QJsonArray images;
-
     QVBoxLayout* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(18, 18, 18, 18);
     root->setSpacing(12);
@@ -214,13 +214,27 @@ void MainWindow::onCreateMomentClicked() {
     )");
     root->addWidget(content_edit);
 
-    QLabel* hint = new QLabel("可发布纯文字、最多九张图片，或文字加图片。图片列表展示缩略图，点击后查看正常大小。", &dialog);
+    QLabel* hint = new QLabel("可发布纯文字、最多九张图片，或文字加图片。图片上传后显示缩略图，点击查看正常大小，拖拽可调整发布顺序。", &dialog);
     hint->setWordWrap(true);
     hint->setStyleSheet("color: #6b7280; font-size: 12px;");
     root->addWidget(hint);
 
     QListWidget* media_list = new QListWidget(&dialog);
-    media_list->setFixedHeight(120);
+    media_list->setFixedHeight(162);
+    media_list->setViewMode(QListView::IconMode);
+    media_list->setMovement(QListView::Snap);
+    media_list->setResizeMode(QListView::Adjust);
+    media_list->setFlow(QListView::LeftToRight);
+    media_list->setWrapping(true);
+    media_list->setIconSize(QSize(88, 88));
+    media_list->setGridSize(QSize(104, 122));
+    media_list->setSpacing(8);
+    media_list->setSelectionMode(QAbstractItemView::SingleSelection);
+    media_list->setDragDropMode(QAbstractItemView::InternalMove);
+    media_list->setDefaultDropAction(Qt::MoveAction);
+    media_list->setDragEnabled(true);
+    media_list->setAcceptDrops(true);
+    media_list->setDropIndicatorShown(true);
     media_list->setStyleSheet(R"(
         QListWidget {
             border: 1px solid #e5e7eb;
@@ -228,20 +242,27 @@ void MainWindow::onCreateMomentClicked() {
             background: #fbfbfc;
             color: #374151;
             font-size: 13px;
+            padding: 8px;
+            outline: none;
+        }
+        QListWidget::item {
+            border-radius: 6px;
+            padding: 4px;
+        }
+        QListWidget::item:selected {
+            background: #dcfce7;
         }
     )");
     root->addWidget(media_list);
 
-    auto refresh_media_list = [&]() {
-        media_list->clear();
-        for (int i = 0; i < images.size(); ++i) {
-            media_list->addItem(QString("图片 %1").arg(i + 1));
-        }
-        if (media_list->count() == 0) {
-            media_list->addItem("未选择图片");
+    auto update_item_titles = [&]() {
+        for (int i = 0; i < media_list->count(); ++i) {
+            QListWidgetItem* item = media_list->item(i);
+            if (item) {
+                item->setText(QString("图片 %1").arg(i + 1));
+            }
         }
     };
-    refresh_media_list();
 
     QHBoxLayout* actions = new QHBoxLayout;
     QPushButton* add_images = new QPushButton("添加图片", &dialog);
@@ -255,7 +276,7 @@ void MainWindow::onCreateMomentClicked() {
         const QStringList paths = QFileDialog::getOpenFileNames(
             &dialog, "选择图片", QString(), imageFilters().join(";;"));
         if (paths.isEmpty()) return;
-        if (images.size() + paths.size() > 9) {
+        if (media_list->count() + paths.size() > 9) {
             QMessageBox::warning(&dialog, "图片过多", "朋友圈图片最多九张。");
             return;
         }
@@ -265,14 +286,35 @@ void MainWindow::onCreateMomentClicked() {
                 QMessageBox::warning(&dialog, "图片处理失败", QFileInfo(path).fileName() + " 无法读取或过大。");
                 return;
             }
-            images.append(encoded);
+            const QString thumb_url = encoded["thumb_url"].toString();
+            QPixmap thumb = imagePixmapFromDataUrl(thumb_url, QSize(88, 88));
+            if (!thumb.isNull()) {
+                thumb = thumb.copy((thumb.width() - 88) / 2, (thumb.height() - 88) / 2, 88, 88);
+            }
+
+            QListWidgetItem* item = new QListWidgetItem;
+            item->setIcon(QIcon(thumb));
+            item->setTextAlignment(Qt::AlignCenter);
+            item->setSizeHint(QSize(104, 122));
+            item->setData(Qt::UserRole, QString::fromUtf8(QJsonDocument(encoded).toJson(QJsonDocument::Compact)));
+            item->setData(Qt::UserRole + 1, encoded["image_url"].toString());
+            item->setFlags(item->flags() | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled | Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+            media_list->addItem(item);
         }
-        refresh_media_list();
+        update_item_titles();
+    });
+
+    connect(media_list, &QListWidget::itemClicked, &dialog, [this](QListWidgetItem* item) {
+        if (!item) return;
+        showMomentImageDialog(item->data(Qt::UserRole + 1).toString());
+    });
+
+    connect(media_list->model(), &QAbstractItemModel::rowsMoved, &dialog, [&]() {
+        update_item_titles();
     });
 
     connect(clear_media, &QPushButton::clicked, &dialog, [&]() {
-        images = QJsonArray();
-        refresh_media_list();
+        media_list->clear();
     });
 
     QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Ok, &dialog);
@@ -283,12 +325,22 @@ void MainWindow::onCreateMomentClicked() {
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
         const QString content = content_edit->toPlainText().trimmed();
-        if (content.isEmpty() && images.isEmpty()) {
+        QJsonArray ordered_images;
+        for (int i = 0; i < media_list->count(); ++i) {
+            QListWidgetItem* item = media_list->item(i);
+            if (!item) continue;
+            QJsonDocument image_doc = QJsonDocument::fromJson(item->data(Qt::UserRole).toString().toUtf8());
+            if (image_doc.isObject()) {
+                ordered_images.append(image_doc.object());
+            }
+        }
+
+        if (content.isEmpty() && ordered_images.isEmpty()) {
             QMessageBox::warning(&dialog, "内容为空", "请填写文字或选择图片。");
             return;
         }
         if (tcp_client_) {
-            tcp_client_->createMoment(content, images);
+            tcp_client_->createMoment(content, ordered_images);
         }
         dialog.accept();
     });
@@ -363,10 +415,43 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
 
     const QString nickname = moment["nickname"].toString(moment["user_id"].toString());
     const QString avatar_url = moment["avatar_url"].toString();
-    QLabel* avatar = new QLabel(card);
+    const QString moment_user_id = moment["user_id"].toString();
+    QToolButton* avatar = new QToolButton(card);
     avatar->setFixedSize(44, 44);
-    avatar->setPixmap(avatarPixmapFromValue(avatar_url, nickname, 44));
-    avatar->setStyleSheet("border: none; background: transparent;");
+    avatar->setIcon(QIcon(avatarPixmapFromValue(avatar_url, nickname, 44)));
+    avatar->setIconSize(QSize(44, 44));
+    avatar->setCursor(Qt::PointingHandCursor);
+    avatar->setToolTip("查看个人信息");
+    avatar->setStyleSheet(R"(
+        QToolButton {
+            border: none;
+            border-radius: 22px;
+            padding: 0;
+            background: transparent;
+        }
+        QToolButton:hover {
+            background: #eef0f2;
+        }
+    )");
+    connect(avatar, &QToolButton::clicked, this, [this, moment_user_id, nickname, avatar_url]() {
+        if (moment_user_id.isEmpty()) {
+            return;
+        }
+
+        UserProfileCache profile = cachedUserProfile(moment_user_id);
+        profile.user_id = moment_user_id;
+        if (!nickname.trimmed().isEmpty()) {
+            profile.nickname = nickname.trimmed();
+            if (profile.display_name.trimmed().isEmpty()) {
+                profile.display_name = profile.nickname;
+            }
+        }
+        if (!avatar_url.trimmed().isEmpty()) {
+            profile.avatar_url = avatar_url.trimmed();
+        }
+        mergeUserProfileCache(profile);
+        showUserProfile(moment_user_id);
+    });
     row->addWidget(avatar, 0, Qt::AlignTop);
 
     QVBoxLayout* body = new QVBoxLayout;
