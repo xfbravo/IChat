@@ -306,7 +306,9 @@ void Server::register_default_handlers() {
             user_service_.update_login_info(login_result.user_id, "0.0.0.0");
 
             std::cout << "[Server] 用户登录成功: " << login_result.user_id << std::endl;
-            session->send(MsgType::LOGIN_RSP, json::serialize(rsp));
+            const std::string rsp_body = json::serialize(rsp);
+            std::cout << "[Server] 登录响应: " << rsp_body << std::endl;
+            session->send(MsgType::LOGIN_RSP, rsp_body);
 
             // 发送离线消息
             std::string offline_msgs = user_service_.get_offline_messages(login_result.user_id);

@@ -398,13 +398,19 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             LoginResponse rsp;
             if (Protocol::parseLoginResponse(body, rsp)) {
                 if (rsp.code == 0) {
+                    const QString previous_user_id = user_id_;
+                    const QString login_user_id = QString::fromStdString(rsp.user_id);
+                    const bool same_saved_user = previous_user_id == login_user_id;
+                    const QString login_gender = QString::fromStdString(rsp.gender);
+                    const QString login_region = QString::fromStdString(rsp.region);
+                    const QString login_signature = QString::fromStdString(rsp.signature);
                     state_ = ClientState::LoggedIn;
-                    user_id_ = QString::fromStdString(rsp.user_id);
+                    user_id_ = login_user_id;
                     user_nickname_ = QString::fromStdString(rsp.nickname);
                     user_avatar_url_ = QString::fromStdString(rsp.avatar_url);
-                    user_gender_ = QString::fromStdString(rsp.gender);
-                    user_region_ = QString::fromStdString(rsp.region);
-                    user_signature_ = QString::fromStdString(rsp.signature);
+                    user_gender_ = login_gender.isEmpty() && same_saved_user ? user_gender_ : login_gender;
+                    user_region_ = login_region.isEmpty() && same_saved_user ? user_region_ : login_region;
+                    user_signature_ = login_signature.isEmpty() && same_saved_user ? user_signature_ : login_signature;
                     token_ = QString::fromStdString(rsp.token);
                     saveCredentials();
                 }

@@ -1114,6 +1114,50 @@ LoginResult UserService::update_profile(const std::string& user_id,
         return result;
     }
 
+    std::ostringstream verify_sql;
+    verify_sql << "SELECT nickname, gender, region, signature, status FROM im_user "
+               << "WHERE user_id = '" << escaped_user_id << "' LIMIT 1";
+    if (mysql_query(mysql, verify_sql.str().c_str())) {
+        std::cerr << "[UserService] 回读个人信息失败: " << mysql_error(mysql) << std::endl;
+        result.code = 5001;
+        result.message = "资料保存后校验失败";
+        return result;
+    }
+
+    MYSQL_RES* verify_res = mysql_store_result(mysql);
+    if (!verify_res) {
+        result.code = 5001;
+        result.message = "资料保存后校验失败";
+        return result;
+    }
+
+    MYSQL_ROW verify_row = mysql_fetch_row(verify_res);
+    if (!verify_row) {
+        mysql_free_result(verify_res);
+        result.code = 404;
+        result.message = "用户不存在，资料未保存";
+        return result;
+    }
+
+    const int db_status = verify_row[4] ? std::stoi(verify_row[4]) : 0;
+    if (db_status != 1) {
+        mysql_free_result(verify_res);
+        result.code = 403;
+        result.message = "账号状态异常，资料未保存";
+        return result;
+    }
+
+    const std::string saved_nickname = row_string(verify_row, 0);
+    const std::string saved_gender = row_string(verify_row, 1);
+    const std::string saved_region = row_string(verify_row, 2);
+    const std::string saved_signature = row_string(verify_row, 3);
+    mysql_free_result(verify_res);
+
+    std::cout << "[UserService] 个人信息已写入数据库: user_id=" << user_id
+              << ", gender=" << saved_gender
+              << ", region=" << saved_region
+              << ", signature=" << saved_signature << std::endl;
+
     std::ostringstream friend_sql;
     friend_sql << "UPDATE im_friend SET friend_nickname = '" << escaped_nickname
                << "' WHERE friend_id = '" << escaped_user_id << "'";
@@ -1124,10 +1168,10 @@ LoginResult UserService::update_profile(const std::string& user_id,
     result.code = 0;
     result.message = "资料已保存";
     result.user_id = user_id;
-    result.nickname = clean_nickname;
-    result.gender = clean_gender;
-    result.region = clean_region;
-    result.signature = clean_signature;
+    result.nickname = saved_nickname;
+    result.gender = saved_gender;
+    result.region = saved_region;
+    result.signature = saved_signature;
     return result;
 }
 
