@@ -557,7 +557,9 @@ void Server::register_default_handlers() {
             rsp["region"] = result.region;
             rsp["signature"] = result.signature;
         }
-        session->send(MsgType::UPDATE_PROFILE_RSP, json::serialize(rsp));
+        const std::string rsp_body = json::serialize(rsp);
+        std::cout << "[Server] 更新个人信息响应: " << rsp_body << std::endl;
+        session->send(MsgType::UPDATE_PROFILE_RSP, rsp_body);
     });
 
     // 修改密码

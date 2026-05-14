@@ -797,13 +797,22 @@ void MainWindow::onProfileUpdateResult(int code,
     const QString saved_nickname = nickname.isEmpty() && profile_nickname_edit_
         ? profile_nickname_edit_->text().trimmed()
         : nickname;
+    const QString saved_gender = gender.isEmpty() && profile_gender_combo_
+        ? profile_gender_combo_->currentText().trimmed()
+        : gender;
+    const QString saved_region = region.isEmpty() && profile_region_edit_
+        ? profile_region_edit_->text().trimmed()
+        : region;
+    const QString saved_signature = signature.isEmpty() && profile_signature_edit_
+        ? profile_signature_edit_->text().trimmed()
+        : signature;
     if (!saved_nickname.isEmpty()) {
         user_nickname_ = saved_nickname;
         setWindowTitle(QString("IChat - %1").arg(user_nickname_));
     }
-    user_gender_ = gender;
-    user_region_ = region;
-    user_signature_ = signature;
+    user_gender_ = saved_gender;
+    user_region_ = saved_region;
+    user_signature_ = saved_signature;
 
     updateMeProfileText();
     updateAvatarPreview();

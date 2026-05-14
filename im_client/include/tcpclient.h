@@ -385,6 +385,11 @@ private:
     quint16 server_port_;
     QString pending_login_user_id_;
     QString pending_login_password_;
+    bool pending_profile_update_ = false;
+    QString pending_profile_nickname_;
+    QString pending_profile_gender_;
+    QString pending_profile_region_;
+    QString pending_profile_signature_;
 
     QTimer* heartbeat_timer_ = nullptr;
     QTimer* heartbeat_timeout_timer_ = nullptr;

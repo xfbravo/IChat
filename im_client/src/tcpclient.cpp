@@ -258,6 +258,12 @@ void TcpClient::updateProfile(const QString& nickname,
         return;
     }
 
+    pending_profile_update_ = true;
+    pending_profile_nickname_ = nickname;
+    pending_profile_gender_ = gender;
+    pending_profile_region_ = region;
+    pending_profile_signature_ = signature;
+
     QJsonObject obj;
     obj["nickname"] = nickname;
     obj["gender"] = gender;
@@ -534,16 +540,16 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 const int code = obj["code"].toInt();
                 const QString nickname = obj.contains("nickname")
                     ? obj["nickname"].toString()
-                    : user_nickname_;
+                    : (pending_profile_update_ ? pending_profile_nickname_ : user_nickname_);
                 const QString gender = obj.contains("gender")
                     ? obj["gender"].toString()
-                    : user_gender_;
+                    : (pending_profile_update_ ? pending_profile_gender_ : user_gender_);
                 const QString region = obj.contains("region")
                     ? obj["region"].toString()
-                    : user_region_;
+                    : (pending_profile_update_ ? pending_profile_region_ : user_region_);
                 const QString signature = obj.contains("signature")
                     ? obj["signature"].toString()
-                    : user_signature_;
+                    : (pending_profile_update_ ? pending_profile_signature_ : user_signature_);
                 if (code == 0) {
                     if (!nickname.isEmpty()) {
                         user_nickname_ = nickname;
@@ -559,6 +565,11 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                                          gender,
                                          region,
                                          signature);
+                pending_profile_update_ = false;
+                pending_profile_nickname_.clear();
+                pending_profile_gender_.clear();
+                pending_profile_region_.clear();
+                pending_profile_signature_.clear();
             }
             break;
         }
