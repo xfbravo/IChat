@@ -94,6 +94,30 @@ int fieldMatchScore(const QString& query, const QString& field) {
     return 0;
 }
 
+QIcon createMenuActionIcon(const QString& type) {
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#2f6f3e"), 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+
+    if (type == "add_friend") {
+        painter.drawEllipse(QRectF(7, 6, 10, 10));
+        painter.drawArc(QRectF(4, 17, 16, 11), 15 * 16, 150 * 16);
+        painter.drawLine(QPointF(23, 9), QPointF(23, 21));
+        painter.drawLine(QPointF(17, 15), QPointF(29, 15));
+    } else if (type == "group") {
+        painter.drawEllipse(QRectF(11, 5, 10, 10));
+        painter.drawEllipse(QRectF(4, 10, 8, 8));
+        painter.drawEllipse(QRectF(20, 10, 8, 8));
+        painter.drawArc(QRectF(7, 18, 18, 10), 10 * 16, 160 * 16);
+    }
+
+    return QIcon(pixmap);
+}
+
 class SearchResultItemWidget : public QWidget {
 public:
     SearchResultItemWidget(const QString& title,
@@ -236,7 +260,7 @@ protected:
         if (check_box_) {
             check_box_->toggle();
         }
-        QWidget::mousePressEvent(event);
+        event->accept();
     }
 
 private:
@@ -318,8 +342,37 @@ void MainWindow::createMessageView() {
     )");
     conversation_add_button->setPopupMode(QToolButton::InstantPopup);
     QMenu* create_menu = new QMenu(conversation_add_button);
+    create_menu->setStyleSheet(R"(
+        QMenu {
+            background-color: #ffffff;
+            border: 1px solid #d9e2dc;
+            border-radius: 6px;
+            padding: 8px 0;
+        }
+        QMenu::item {
+            min-width: 132px;
+            min-height: 30px;
+            padding: 8px 28px 8px 12px;
+            margin: 3px 6px;
+            color: #111111;
+            font-size: 14px;
+            border-radius: 5px;
+        }
+        QMenu::item:selected {
+            background-color: #e8f5e9;
+            color: #111111;
+        }
+        QMenu::icon {
+            padding-left: 6px;
+            padding-right: 10px;
+        }
+    )");
     QAction* add_friend_action = create_menu->addAction("添加好友");
     QAction* create_group_action = create_menu->addAction("发起群聊");
+    add_friend_action->setIcon(createMenuActionIcon("add_friend"));
+    create_group_action->setIcon(createMenuActionIcon("group"));
+    add_friend_action->setIconVisibleInMenu(true);
+    create_group_action->setIconVisibleInMenu(true);
     connect(add_friend_action, &QAction::triggered, this, &MainWindow::onAddContactClicked);
     connect(create_group_action, &QAction::triggered, this, &MainWindow::openCreateGroupDialog);
     conversation_add_button->setMenu(create_menu);
@@ -645,6 +698,45 @@ QList<QString> MainWindow::sortedConversationIds() const {
     return peer_ids;
 }
 
+QList<QString> MainWindow::sortedContactIds() const {
+    QList<QString> contact_ids;
+
+    auto append_contact = [this, &contact_ids](const QString& raw_id) {
+        const QString friend_id = raw_id.trimmed();
+        if (friend_id.isEmpty() || friend_id == user_id_ || contact_ids.contains(friend_id)) {
+            return;
+        }
+        contact_ids.append(friend_id);
+    };
+
+    for (auto it = contact_nicknames_.constBegin(); it != contact_nicknames_.constEnd(); ++it) {
+        append_contact(it.key());
+    }
+    for (auto it = contact_remarks_.constBegin(); it != contact_remarks_.constEnd(); ++it) {
+        append_contact(it.key());
+    }
+    for (auto it = contact_avatars_.constBegin(); it != contact_avatars_.constEnd(); ++it) {
+        append_contact(it.key());
+    }
+    for (auto it = conversations_.constBegin(); it != conversations_.constEnd(); ++it) {
+        if (!isGroupConversation(it.key())) {
+            append_contact(conversationPeerId(it.key()));
+        }
+    }
+
+    std::stable_sort(contact_ids.begin(), contact_ids.end(),
+                     [this](const QString& left, const QString& right) {
+                         const QString left_name = contactDisplayName(left).toCaseFolded();
+                         const QString right_name = contactDisplayName(right).toCaseFolded();
+                         const int name_compare = left_name.localeAwareCompare(right_name);
+                         if (name_compare != 0) {
+                             return name_compare < 0;
+                         }
+                         return left.localeAwareCompare(right) < 0;
+                     });
+    return contact_ids;
+}
+
 QString MainWindow::contactDisplayName(const QString& user_id) const {
     const QString remark = contact_remarks_.value(user_id).trimmed();
     if (!remark.isEmpty()) {
@@ -936,24 +1028,7 @@ void MainWindow::openCreateGroupDialog() {
     member_list->setSelectionMode(QAbstractItemView::NoSelection);
     member_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
-    QList<QString> contact_ids = contact_nicknames_.keys();
-    for (auto it = contact_remarks_.constBegin(); it != contact_remarks_.constEnd(); ++it) {
-        if (!contact_ids.contains(it.key())) {
-            contact_ids.append(it.key());
-        }
-    }
-    for (auto it = conversations_.constBegin(); it != conversations_.constEnd(); ++it) {
-        if (isGroupConversation(it.key())) {
-            continue;
-        }
-        const QString friend_id = conversationPeerId(it.key());
-        if (!friend_id.isEmpty() && friend_id != user_id_ && !contact_ids.contains(friend_id)) {
-            contact_ids.append(friend_id);
-        }
-    }
-    std::stable_sort(contact_ids.begin(), contact_ids.end(), [this](const QString& left, const QString& right) {
-        return contactDisplayName(left).localeAwareCompare(contactDisplayName(right)) < 0;
-    });
+    const QList<QString> contact_ids = sortedContactIds();
 
     for (const QString& friend_id : contact_ids) {
         if (friend_id.isEmpty()) {
@@ -961,8 +1036,8 @@ void MainWindow::openCreateGroupDialog() {
         }
         QListWidgetItem* item = new QListWidgetItem(member_list);
         item->setData(Qt::UserRole, friend_id);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(Qt::Unchecked);
+        item->setData(Qt::UserRole + 1, false);
+        item->setFlags((item->flags() | Qt::ItemIsEnabled) & ~Qt::ItemIsUserCheckable);
         item->setSizeHint(QSize(0, 60));
 
         SelectableContactItemWidget* item_widget = new SelectableContactItemWidget(
@@ -970,7 +1045,7 @@ void MainWindow::openCreateGroupDialog() {
             contactSubtitle(friend_id),
             contact_avatars_.value(friend_id),
             [item](bool checked) {
-                item->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+                item->setData(Qt::UserRole + 1, checked);
             },
             member_list);
         member_list->setItemWidget(item, item_widget);
@@ -996,7 +1071,7 @@ void MainWindow::openCreateGroupDialog() {
         QStringList ids;
         for (int i = 0; i < member_list->count(); ++i) {
             QListWidgetItem* item = member_list->item(i);
-            if (item && item->checkState() == Qt::Checked) {
+            if (item && item->data(Qt::UserRole + 1).toBool()) {
                 ids.append(item->data(Qt::UserRole).toString());
             }
         }

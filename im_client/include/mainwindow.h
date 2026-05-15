@@ -222,6 +222,7 @@ private:
 
     // 搜索只读取本地会话/联系人缓存，点击结果后复用会话切换并定位原列表项。
     QList<QString> sortedConversationIds() const;
+    QList<QString> sortedContactIds() const;
     QString contactDisplayName(const QString& user_id) const;
     QString contactSubtitle(const QString& user_id) const;
     void populateSearchResults(QListWidget* results_widget, const QString& query, bool keep_conversation_order);

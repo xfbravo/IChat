@@ -861,40 +861,7 @@ void MainWindow::rebuildContactList()
 
     contact_tree_widget_->clear();
 
-    QList<QString> contact_ids;
-    if (chat_list_widget_)
-    {
-        for (int i = 0; i < chat_list_widget_->count(); ++i)
-        {
-            QListWidgetItem *chat_item = chat_list_widget_->item(i);
-            const QString conversation_key = chat_item ? chat_item->data(Qt::UserRole).toString() : QString();
-            if (isGroupConversation(conversation_key))
-            {
-                continue;
-            }
-            const QString friend_id = conversationPeerId(conversation_key);
-            if (!friend_id.isEmpty())
-            {
-                contact_ids.append(friend_id);
-            }
-        }
-    }
-
-    if (contact_ids.isEmpty())
-    {
-        for (auto it = conversations_.constBegin(); it != conversations_.constEnd(); ++it)
-        {
-            if (!isGroupConversation(it.key()))
-            {
-                contact_ids.append(conversationPeerId(it.key()));
-            }
-        }
-        std::stable_sort(contact_ids.begin(), contact_ids.end(),
-                         [this](const QString &left, const QString &right)
-                         {
-                             return contactDisplayName(left).localeAwareCompare(contactDisplayName(right)) < 0;
-                         });
-    }
+    const QList<QString> contact_ids = sortedContactIds();
 
     for (const QString &friend_id : contact_ids)
     {
