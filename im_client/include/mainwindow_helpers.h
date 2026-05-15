@@ -65,8 +65,8 @@ public:
     MessageBubble(const QString& text, bool is_mine, int max_text_width, QWidget* parent = nullptr)
         : QWidget(parent)
         , is_mine_(is_mine)
-        , background_(is_mine ? QColor("#95ec69") : QColor("#eeeeee"))
-        , border_(is_mine ? QColor("#95ec69") : QColor("#e2e2e2"))
+        , background_(is_mine ? QColor("#d8f0d4") : QColor("#ffffff"))
+        , border_(is_mine ? QColor("#b9dfb8") : QColor("#dfe7e1"))
     {
         setAttribute(Qt::WA_TranslucentBackground);
 
@@ -167,7 +167,7 @@ public:
         text_layout->addWidget(last_message_label_);
 
         QHBoxLayout* layout = new QHBoxLayout(this);
-        layout->setContentsMargins(15, 10, 15, 10);
+        layout->setContentsMargins(14, 10, 14, 10);
         layout->setSpacing(10);
         layout->addLayout(text_layout, 1);
         layout->addWidget(badge_label_, 0, Qt::AlignRight | Qt::AlignVCenter);
@@ -178,10 +178,10 @@ public:
 
     void setSelected(bool selected) {
         // QListWidget 的自定义 item widget 不会自动继承选中配色，需要手动同步。
-        const QString title_color = selected ? "#ffffff" : "#111111";
-        const QString summary_color = selected ? "#eaf7ea" : "#666666";
+        const QString title_color = selected ? "#ffffff" : "#1d2b22";
+        const QString summary_color = selected ? "#e8f4ea" : "#6b756e";
         title_label_->setStyleSheet(QString(
-            "QLabel { color: %1; font-size: 14px; font-weight: 600; background: transparent; }"
+            "QLabel { color: %1; font-size: 14px; font-weight: 700; background: transparent; }"
         ).arg(title_color));
         last_message_label_->setStyleSheet(QString(
             "QLabel { color: %1; font-size: 12px; background: transparent; }"
@@ -189,7 +189,7 @@ public:
         badge_label_->setStyleSheet(R"(
             QLabel {
                 color: #ffffff;
-                background-color: #f44336;
+                background-color: #d94734;
                 border-radius: 11px;
                 font-size: 11px;
                 font-weight: bold;
@@ -307,7 +307,7 @@ inline QPixmap defaultAvatarPixmap(const QString& display_name, int size) {
     QPainter painter(&result);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor("#4CAF50"));
+    painter.setBrush(QColor("#2f6f3e"));
     painter.drawEllipse(QRectF(0.5, 0.5, size - 1, size - 1));
 
     QFont font = painter.font();

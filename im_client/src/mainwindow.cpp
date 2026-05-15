@@ -148,29 +148,33 @@ MainWindow::MainWindow(TcpClient* tcp_client,
 
 void MainWindow::createNavigationBar() {
     navigation_bar_ = new QWidget;
-    navigation_bar_->setFixedWidth(72);
+    navigation_bar_->setFixedWidth(76);
     navigation_bar_->setStyleSheet(R"(
         QWidget {
-            background-color: #2c3e50;
+            background-color: #16221c;
+            font-family: "Microsoft YaHei", sans-serif;
         }
     )");
 
     QVBoxLayout* layout = new QVBoxLayout(navigation_bar_);
-    layout->setContentsMargins(0, 10, 0, 0);
-    layout->setSpacing(8);
+    layout->setContentsMargins(0, 14, 0, 12);
+    layout->setSpacing(10);
 
     // 标题
     QLabel* title = new QLabel("I");
     title->setStyleSheet(R"(
         QLabel {
-            color: white;
+            color: #16221c;
+            background-color: #e7efe8;
+            border: 1px solid #d2ded5;
+            border-radius: 12px;
             font-size: 18px;
-            font-weight: bold;
-            padding: 8px 0;
+            font-weight: 800;
         }
     )");
+    title->setFixedSize(38, 38);
     title->setAlignment(Qt::AlignCenter);
-    layout->addWidget(title);
+    layout->addWidget(title, 0, Qt::AlignHCenter);
 
     // 导航列表
     nav_list_ = new QListWidget;
@@ -178,30 +182,33 @@ void MainWindow::createNavigationBar() {
     nav_list_->setMovement(QListView::Static);
     nav_list_->setResizeMode(QListView::Adjust);
     nav_list_->setFlow(QListView::TopToBottom);
-    nav_list_->setIconSize(QSize(28, 28));
-    nav_list_->setGridSize(QSize(72, 64));
-    nav_list_->setSpacing(2);
+    nav_list_->setIconSize(QSize(26, 26));
+    nav_list_->setGridSize(QSize(76, 62));
+    nav_list_->setSpacing(4);
     nav_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     nav_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     nav_list_->setTextElideMode(Qt::ElideNone);
     nav_list_->setStyleSheet(R"(
         QListWidget {
-            background-color: #2c3e50;
+            background-color: #16221c;
             border: none;
-            color: white;
+            color: #d6e1d9;
             outline: none;
         }
         QListWidget::item {
-            padding: 6px 0;
+            margin: 3px 8px;
+            padding: 7px 0;
+            border-radius: 8px;
             font-size: 11px;
-            color: #dce6ec;
+            font-weight: 600;
+            color: #d6e1d9;
         }
         QListWidget::item:selected {
-            background-color: #34495e;
-            color: white;
+            background-color: #2f6f3e;
+            color: #ffffff;
         }
         QListWidget::item:hover {
-            background-color: #34495e;
+            background-color: #24362d;
         }
     )");
     // 新增页面时同时更新这里、content_stacked_ 添加顺序和 onNavigationItemClicked。
@@ -209,12 +216,12 @@ void MainWindow::createNavigationBar() {
         {"message", "消息"},
         {"contacts", "联系人"},
         {"moments", "朋友圈"},
-        {"me", "我"}
+        {"me", "设置"}
     };
     for (const auto& item : nav_items) {
         QListWidgetItem* nav_item = new QListWidgetItem(navIcon(item.first), item.second);
         nav_item->setTextAlignment(Qt::AlignCenter);
-        nav_item->setSizeHint(QSize(72, 64));
+        nav_item->setSizeHint(QSize(76, 62));
         nav_list_->addItem(nav_item);
     }
     nav_list_->setCurrentRow(0);

@@ -56,49 +56,49 @@ void MainWindow::createMeView() {
     me_view_->setObjectName("meRoot");
     me_view_->setStyleSheet(R"(
         QWidget#meRoot {
-            background-color: #f7f8fa;
+            background-color: #eef2ef;
             font-family: "Microsoft YaHei", sans-serif;
         }
         QStackedWidget#meStack {
             border: none;
         }
         QScrollArea#meScrollArea {
-            background-color: #f7f8fa;
+            background-color: #eef2ef;
             border: none;
         }
         QWidget#mePage {
-            background-color: #f7f8fa;
+            background-color: #eef2ef;
         }
         QFrame#mePanel,
         QFrame#profilePanel,
         QFrame#passwordPanel,
         QFrame#placeholderPanel {
             background-color: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 6px;
+            border: 1px solid #dbe5de;
+            border-radius: 8px;
         }
         QLabel#meTitle {
-            color: #111827;
+            color: #17211c;
             font-size: 24px;
-            font-weight: 700;
+            font-weight: 800;
         }
         QLabel#meSectionTitle {
-            color: #111827;
+            color: #17211c;
             font-size: 16px;
-            font-weight: 700;
+            font-weight: 800;
         }
         QLabel#meName {
-            color: #111827;
+            color: #17211c;
             font-size: 18px;
-            font-weight: 600;
+            font-weight: 700;
         }
         QLabel#meMeta {
-            color: #6b7280;
+            color: #6b756e;
             font-size: 13px;
         }
         QLabel#meStatus,
         QLabel#passwordStatus {
-            color: #6b7280;
+            color: #6b756e;
             font-size: 12px;
         }
         QLineEdit#profileInput,
@@ -106,38 +106,39 @@ void MainWindow::createMeView() {
             min-height: 34px;
             max-width: 340px;
             padding: 6px 10px;
-            color: #111827;
+            color: #17211c;
             background-color: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             font-size: 14px;
         }
         QLineEdit#profileInput:focus,
         QLineEdit#passwordInput:focus {
-            border-color: #4CAF50;
+            border-color: #2f6f3e;
+            background-color: #fbfdfb;
         }
         QComboBox#profileInput {
             min-height: 34px;
             max-width: 340px;
             padding: 6px 10px;
-            color: #111827;
+            color: #17211c;
             background-color: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             font-size: 14px;
         }
         QComboBox#profileInput:focus {
-            border-color: #4CAF50;
+            border-color: #2f6f3e;
         }
         QToolButton#profileSummaryButton,
         QToolButton#meEntryButton,
         QToolButton#dangerEntryButton {
             min-height: 54px;
             padding: 0 18px;
-            color: #111827;
+            color: #17211c;
             background-color: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
+            border: 1px solid #dbe5de;
+            border-radius: 6px;
             font-size: 15px;
             text-align: left;
         }
@@ -148,8 +149,8 @@ void MainWindow::createMeView() {
         }
         QToolButton#profileSummaryButton:hover,
         QToolButton#meEntryButton:hover {
-            background-color: #f3f4f6;
-            border-color: #d1d5db;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
         QToolButton#dangerEntryButton {
             color: #dc2626;
@@ -162,29 +163,30 @@ void MainWindow::createMeView() {
         QPushButton#backButton {
             min-width: 72px;
             padding: 7px 12px;
-            color: #374151;
+            color: #425247;
             background-color: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             font-size: 13px;
         }
         QPushButton#backButton:hover {
-            background-color: #f3f4f6;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
         QPushButton#avatarUploadButton,
         QPushButton#profileSaveButton {
             min-width: 96px;
             padding: 9px 18px;
             color: #ffffff;
-            background-color: #4CAF50;
+            background-color: #2f6f3e;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 700;
         }
         QPushButton#avatarUploadButton:hover,
         QPushButton#profileSaveButton:hover {
-            background-color: #45a049;
+            background-color: #285f36;
         }
         QPushButton#avatarUploadButton:disabled,
         QPushButton#profileSaveButton:disabled {
@@ -194,17 +196,17 @@ void MainWindow::createMeView() {
             min-width: 96px;
             padding: 9px 18px;
             color: #ffffff;
-            background-color: #2563eb;
+            background-color: #2f6f3e;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 700;
         }
         QPushButton#passwordChangeButton:hover {
-            background-color: #1d4ed8;
+            background-color: #285f36;
         }
         QPushButton#passwordChangeButton:disabled {
-            background-color: #bfdbfe;
+            background-color: #c7d4cb;
         }
     )");
 

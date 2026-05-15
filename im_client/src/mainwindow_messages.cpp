@@ -125,8 +125,8 @@ QPixmap selectionBoxPixmap(bool checked, int size) {
     painter.setRenderHint(QPainter::Antialiasing);
 
     const QRectF box(1.5, 1.5, size - 3, size - 3);
-    painter.setPen(QPen(checked ? QColor("#4CAF50") : QColor("#b8c4bc"), 1.6));
-    painter.setBrush(checked ? QColor("#4CAF50") : QColor("#ffffff"));
+    painter.setPen(QPen(checked ? QColor("#2f6f3e") : QColor("#b8c4bc"), 1.6));
+    painter.setBrush(checked ? QColor("#2f6f3e") : QColor("#ffffff"));
     painter.drawRoundedRect(box, 4, 4);
 
     if (checked) {
@@ -162,9 +162,9 @@ public:
         title_label->setWordWrap(false);
         title_label->setStyleSheet(R"(
             QLabel {
-                color: #111111;
+                color: #17211c;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
                 background: transparent;
             }
         )");
@@ -174,7 +174,7 @@ public:
         subtitle_label->setWordWrap(false);
         subtitle_label->setStyleSheet(R"(
             QLabel {
-                color: #777777;
+                color: #6b756e;
                 font-size: 12px;
                 background: transparent;
             }
@@ -211,7 +211,7 @@ public:
                 background: transparent;
             }
             QWidget:hover {
-                background-color: #f6fbf6;
+                background-color: #eef6ef;
             }
         )");
 
@@ -232,9 +232,9 @@ public:
         title_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
         title_label->setStyleSheet(R"(
             QLabel {
-                color: #111111;
+                color: #17211c;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
                 background: transparent;
             }
         )");
@@ -245,7 +245,7 @@ public:
         subtitle_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
         subtitle_label->setStyleSheet(R"(
             QLabel {
-                color: #777777;
+                color: #6b756e;
                 font-size: 12px;
                 background: transparent;
             }
@@ -291,6 +291,11 @@ private:
 
 void MainWindow::createMessageView() {
     message_view_ = new QWidget;
+    message_view_->setStyleSheet(R"(
+        QWidget {
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+    )");
 
     QHBoxLayout* main_layout = new QHBoxLayout(message_view_);
     main_layout->setContentsMargins(0, 0, 0, 0);
@@ -298,17 +303,17 @@ void MainWindow::createMessageView() {
 
     // 聊天列表 (左侧)
     conversation_panel_ = new QWidget;
-    conversation_panel_->setStyleSheet("QWidget { background-color: #f5f5f5; }");
+    conversation_panel_->setStyleSheet("QWidget { background-color: #f7f9f7; }");
     QVBoxLayout* conversation_layout = new QVBoxLayout(conversation_panel_);
     conversation_layout->setContentsMargins(0, 0, 0, 0);
     conversation_layout->setSpacing(0);
 
     QWidget* conversation_search_bar = new QWidget(conversation_panel_);
-    conversation_search_bar->setFixedHeight(54);
+    conversation_search_bar->setFixedHeight(62);
     conversation_search_bar->setStyleSheet(R"(
         QWidget {
-            background-color: #f5f5f5;
-            border-bottom: 1px solid #e0e0e0;
+            background-color: #f7f9f7;
+            border-bottom: 1px solid #dbe5de;
         }
     )");
     QHBoxLayout* conversation_search_layout = new QHBoxLayout(conversation_search_bar);
@@ -320,16 +325,17 @@ void MainWindow::createMessageView() {
     conversation_search_edit_->setClearButtonEnabled(true);
     conversation_search_edit_->setStyleSheet(R"(
         QLineEdit {
-            min-height: 34px;
-            padding: 0 10px;
-            border: 1px solid #dddddd;
-            border-radius: 4px;
+            min-height: 36px;
+            padding: 0 12px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             background-color: #ffffff;
-            color: #111111;
+            color: #17211c;
             font-size: 14px;
         }
         QLineEdit:focus {
-            border: 1px solid #4CAF50;
+            border: 1px solid #2f6f3e;
+            background-color: #fbfdfb;
         }
     )");
     conversation_search_edit_->installEventFilter(this);
@@ -341,18 +347,20 @@ void MainWindow::createMessageView() {
     conversation_add_button->setText("+");
     conversation_add_button->setToolTip("新建");
     conversation_add_button->setCursor(Qt::PointingHandCursor);
-    conversation_add_button->setFixedSize(34, 34);
+    conversation_add_button->setFixedSize(36, 36);
     conversation_add_button->setStyleSheet(R"(
         QToolButton {
-            border: 1px solid #dddddd;
-            border-radius: 4px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             background-color: #ffffff;
-            color: #333333;
+            color: #2f6f3e;
             font-size: 22px;
+            font-weight: 700;
             padding-bottom: 3px;
         }
         QToolButton:hover {
-            background-color: #eeeeee;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
         QToolButton::menu-indicator {
             image: none;
@@ -364,7 +372,7 @@ void MainWindow::createMessageView() {
     create_menu->setStyleSheet(R"(
         QMenu {
             background-color: #ffffff;
-            border: 1px solid #d9e2dc;
+            border: 1px solid #d5dfd8;
             border-radius: 6px;
             padding: 8px 0;
         }
@@ -373,13 +381,13 @@ void MainWindow::createMessageView() {
             min-height: 30px;
             padding: 8px 28px 8px 12px;
             margin: 3px 6px;
-            color: #111111;
+            color: #17211c;
             font-size: 14px;
             border-radius: 5px;
         }
         QMenu::item:selected {
-            background-color: #e8f5e9;
-            color: #111111;
+            background-color: #eef6ef;
+            color: #17211c;
         }
         QMenu::icon {
             padding-left: 6px;
@@ -403,25 +411,32 @@ void MainWindow::createMessageView() {
     chat_list_widget_->setStyleSheet(R"(
         QListWidget {
             border: none;
-            background-color: #f5f5f5;
-            color: #111111;
+            background-color: #f7f9f7;
+            color: #17211c;
             outline: none;
+            padding: 8px;
         }
         QListWidget::item {
             padding: 0;
-            border-bottom: 1px solid #e0e0e0;
-            color: #111111;
+            margin: 2px 0;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            color: #17211c;
         }
         QListWidget::item:selected {
-            background-color: #4CAF50;
+            background-color: #2f6f3e;
             color: #ffffff;
             border: none;
         }
         QListWidget::item:selected:active,
         QListWidget::item:selected:!active {
-            background-color: #4CAF50;
+            background-color: #2f6f3e;
             color: #ffffff;
             border: none;
+        }
+        QListWidget::item:hover {
+            background-color: #eef6ef;
+            border: 1px solid #dbe5de;
         }
     )");
     connect(chat_list_widget_, &QListWidget::itemClicked,
@@ -438,22 +453,23 @@ void MainWindow::createMessageView() {
     conversation_search_results_->hide();
     conversation_search_results_->setStyleSheet(R"(
         QListWidget {
-            border: 1px solid #dcdcdc;
+            border: 1px solid #d5dfd8;
+            border-radius: 8px;
             background-color: #ffffff;
-            color: #111111;
+            color: #17211c;
             outline: none;
         }
         QListWidget::item {
             padding: 8px 10px;
-            border-bottom: 1px solid #eeeeee;
+            border-bottom: 1px solid #edf2ee;
         }
         QListWidget::item:hover,
         QListWidget::item:selected {
-            background-color: #e8f5e9;
-            color: #111111;
+            background-color: #eef6ef;
+            color: #17211c;
         }
         QListWidget::item:disabled {
-            color: #999999;
+            color: #8b968e;
             background-color: #ffffff;
         }
     )");
@@ -467,11 +483,11 @@ void MainWindow::createMessageView() {
 
     // 聊天标题栏
     QWidget* chat_header = new QWidget;
-    chat_header->setFixedHeight(54);
+    chat_header->setFixedHeight(62);
     chat_header->setStyleSheet(R"(
         QWidget {
-            background-color: #fafafa;
-            border-bottom: 1px solid #e0e0e0;
+            background-color: #fbfcfb;
+            border-bottom: 1px solid #dbe5de;
         }
     )");
     QHBoxLayout* chat_header_layout = new QHBoxLayout(chat_header);
@@ -484,8 +500,8 @@ void MainWindow::createMessageView() {
             background-color: transparent;
             border: none;
             font-size: 16px;
-            font-weight: bold;
-            color: #111111;
+            font-weight: 800;
+            color: #17211c;
         }
     )");
     chat_header_layout->addWidget(chat_target_label_, 1);
@@ -499,8 +515,8 @@ void MainWindow::createMessageView() {
         QToolButton {
             background-color: transparent;
             border: none;
-            border-radius: 4px;
-            color: #333333;
+            border-radius: 6px;
+            color: #425247;
             font-size: 22px;
             font-weight: bold;
             min-width: 32px;
@@ -508,10 +524,10 @@ void MainWindow::createMessageView() {
             padding-bottom: 4px;
         }
         QToolButton:hover {
-            background-color: #eeeeee;
+            background-color: #eef6ef;
         }
         QToolButton:disabled {
-            color: #bbbbbb;
+            color: #b4bdb7;
         }
         QToolButton::menu-indicator {
             image: none;
@@ -522,17 +538,18 @@ void MainWindow::createMessageView() {
     chat_menu->setStyleSheet(R"(
         QMenu {
             background-color: #ffffff;
-            border: 1px solid #dddddd;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             padding: 6px 0;
         }
         QMenu::item {
             min-height: 32px;
             padding: 8px 28px 8px 18px;
-            color: #111111;
+            color: #17211c;
             font-size: 14px;
         }
         QMenu::item:selected {
-            background-color: #f0f0f0;
+            background-color: #eef6ef;
         }
     )");
     QAction* edit_remark_action = chat_menu->addAction("修改联系人备注");
@@ -549,7 +566,7 @@ void MainWindow::createMessageView() {
     chat_scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     chat_scroll_area_->setStyleSheet(R"(
         QScrollArea {
-            background-color: #fafafa;
+            background-color: #fbfcfb;
             border: none;
         }
         QScrollBar:vertical {
@@ -558,7 +575,7 @@ void MainWindow::createMessageView() {
             margin: 4px 0;
         }
         QScrollBar::handle:vertical {
-            background: #d6d6d6;
+            background: #c7d4cb;
             border-radius: 4px;
             min-height: 32px;
         }
@@ -569,7 +586,7 @@ void MainWindow::createMessageView() {
     )");
 
     chat_messages_widget_ = new QWidget;
-    chat_messages_widget_->setStyleSheet("background-color: #fafafa;");
+    chat_messages_widget_->setStyleSheet("background-color: #fbfcfb;");
     chat_messages_layout_ = new QVBoxLayout(chat_messages_widget_);
     chat_messages_layout_->setContentsMargins(16, 12, 16, 12);
     chat_messages_layout_->setSpacing(2);
@@ -579,6 +596,12 @@ void MainWindow::createMessageView() {
 
     // 输入区
     QWidget* input_widget = new QWidget;
+    input_widget->setStyleSheet(R"(
+        QWidget {
+            background-color: #fbfcfb;
+            border-top: 1px solid #dbe5de;
+        }
+    )");
     QHBoxLayout* input_layout = new QHBoxLayout(input_widget);
     input_layout->setContentsMargins(10, 10, 10, 10);
     input_layout->setSpacing(10);
@@ -587,13 +610,17 @@ void MainWindow::createMessageView() {
     message_input_->setPlaceholderText("输入消息...");
     message_input_->setStyleSheet(R"(
         QLineEdit {
-            padding: 10px 15px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            min-height: 38px;
+            padding: 0 14px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
+            background-color: #ffffff;
+            color: #17211c;
             font-size: 14px;
         }
         QLineEdit:focus {
-            border: 1px solid #4CAF50;
+            border: 1px solid #2f6f3e;
+            background-color: #fbfdfb;
         }
     )");
     connect(message_input_, &QLineEdit::returnPressed, this, &MainWindow::onSendClicked);
@@ -607,19 +634,20 @@ void MainWindow::createMessageView() {
         QToolButton {
             min-width: 38px;
             min-height: 38px;
-            border: 1px solid #dddddd;
-            border-radius: 4px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             background-color: #ffffff;
-            color: #333333;
+            color: #2f6f3e;
             font-size: 24px;
+            font-weight: 700;
             padding-bottom: 3px;
         }
         QToolButton:hover {
-            background-color: #f2f2f2;
+            background-color: #eef6ef;
         }
         QToolButton:disabled {
-            color: #bbbbbb;
-            background-color: #f7f7f7;
+            color: #b4bdb7;
+            background-color: #f3f6f4;
         }
     )");
     connect(attach_file_button_, &QToolButton::clicked, this, &MainWindow::onAttachFileClicked);
@@ -627,19 +655,20 @@ void MainWindow::createMessageView() {
     send_button_ = new QPushButton("发送");
     send_button_->setStyleSheet(R"(
         QPushButton {
-            padding: 10px 25px;
-            background-color: #4CAF50;
+            min-height: 38px;
+            padding: 0 24px;
+            background-color: #2f6f3e;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 700;
         }
         QPushButton:hover {
-            background-color: #45a049;
+            background-color: #285f36;
         }
         QPushButton:disabled {
-            background-color: #cccccc;
+            background-color: #c7d4cb;
         }
     )");
     connect(send_button_, &QPushButton::clicked, this, &MainWindow::onSendClicked);
@@ -1020,19 +1049,46 @@ void MainWindow::openCreateGroupDialog() {
     dialog.setWindowTitle("发起群聊");
     dialog.setMinimumSize(420, 520);
     dialog.setStyleSheet(R"(
-        QDialog { background-color: #ffffff; }
-        QListWidget { border: 1px solid #e5e7eb; background: #ffffff; outline: none; }
-        QListWidget::item { border-bottom: 1px solid #eeeeee; }
-        QPushButton {
-            padding: 8px 18px;
-            border: none;
-            border-radius: 4px;
-            font-size: 14px;
-            font-weight: 600;
+        QDialog {
+            background-color: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
         }
-        QPushButton#primary { background-color: #4CAF50; color: #ffffff; }
-        QPushButton#primary:disabled { background-color: #cccccc; }
-        QPushButton#secondary { background-color: #f3f4f6; color: #374151; }
+        QListWidget {
+            border: 1px solid #d5dfd8;
+            border-radius: 8px;
+            background: #ffffff;
+            outline: none;
+        }
+        QListWidget::item {
+            border-bottom: 1px solid #edf2ee;
+        }
+        QPushButton {
+            min-height: 36px;
+            padding: 0 18px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        QPushButton#primary {
+            background-color: #2f6f3e;
+            color: #ffffff;
+        }
+        QPushButton#primary:hover {
+            background-color: #285f36;
+        }
+        QPushButton#primary:disabled {
+            background-color: #c7d4cb;
+        }
+        QPushButton#secondary {
+            background-color: #ffffff;
+            color: #425247;
+            border: 1px solid #d5dfd8;
+        }
+        QPushButton#secondary:hover {
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
+        }
     )");
 
     QVBoxLayout* root = new QVBoxLayout(&dialog);
@@ -1040,7 +1096,7 @@ void MainWindow::openCreateGroupDialog() {
     root->setSpacing(12);
 
     QLabel* title = new QLabel("选择联系人", &dialog);
-    title->setStyleSheet("QLabel { color: #111111; font-size: 18px; font-weight: 700; }");
+    title->setStyleSheet("QLabel { color: #17211c; font-size: 18px; font-weight: 800; background: transparent; }");
     root->addWidget(title);
 
     QListWidget* member_list = new QListWidget(&dialog);
@@ -1072,7 +1128,7 @@ void MainWindow::openCreateGroupDialog() {
     root->addWidget(member_list, 1);
 
     QLabel* count_label = new QLabel("已选择 0 人", &dialog);
-    count_label->setStyleSheet("QLabel { color: #6b7280; font-size: 13px; }");
+    count_label->setStyleSheet("QLabel { color: #6b756e; font-size: 13px; background: transparent; }");
     root->addWidget(count_label);
 
     QHBoxLayout* actions = new QHBoxLayout;
@@ -1566,7 +1622,7 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
             border-radius: 6px;
         }
     )").arg(message.is_mine ? "#dff5df" : "#ffffff",
-           message.is_mine ? "#b9e4bb" : "#dddddd"));
+           message.is_mine ? "#b9dfb8" : "#dfe7e1"));
 
     QHBoxLayout* layout = new QHBoxLayout(card);
     layout->setContentsMargins(12, 10, 12, 10);
@@ -1577,7 +1633,7 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
     icon_label->setAlignment(Qt::AlignCenter);
     icon_label->setStyleSheet(R"(
         QLabel {
-            background-color: #4CAF50;
+            background-color: #2f6f3e;
             color: #ffffff;
             border-radius: 4px;
             font-size: 11px;
@@ -1593,12 +1649,12 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
 
     QLabel* name_label = new QLabel(file_name, text_box);
     name_label->setWordWrap(true);
-    name_label->setStyleSheet("QLabel { color: #111111; font-size: 14px; font-weight: bold; border: none; background: transparent; }");
+    name_label->setStyleSheet("QLabel { color: #17211c; font-size: 14px; font-weight: 700; border: none; background: transparent; }");
     text_layout->addWidget(name_label);
 
     QLabel* meta_label = new QLabel(QString("%1 · %2").arg(humanFileSize(file_size), mime_type), text_box);
     meta_label->setWordWrap(true);
-    meta_label->setStyleSheet("QLabel { color: #777777; font-size: 12px; border: none; background: transparent; }");
+    meta_label->setStyleSheet("QLabel { color: #6b756e; font-size: 12px; border: none; background: transparent; }");
     text_layout->addWidget(meta_label);
 
     layout->addWidget(text_box, 1);
@@ -1610,17 +1666,18 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
         QPushButton {
             padding: 7px 12px;
             background-color: #ffffff;
-            color: #2e7d32;
-            border: 1px solid #b7d7b8;
-            border-radius: 4px;
+            color: #2f6f3e;
+            border: 1px solid #b8cdbc;
+            border-radius: 6px;
             font-size: 13px;
+            font-weight: 700;
         }
         QPushButton:hover {
-            background-color: #f4fbf4;
+            background-color: #eef6ef;
         }
         QPushButton:disabled {
-            color: #aaaaaa;
-            border-color: #dddddd;
+            color: #a0a8a2;
+            border-color: #d5dfd8;
         }
     )");
     connect(download_button, &QPushButton::clicked, this, [this, file_id, file_name]() {
@@ -1762,12 +1819,13 @@ QWidget* MainWindow::createMessageRow(const ChatViewMessage& message) {
     avatar_button->setStyleSheet(R"(
         QToolButton {
             padding: 0;
-            border: none;
+            border: 1px solid #d8e3db;
             border-radius: 18px;
             background: transparent;
         }
         QToolButton:hover {
-            background-color: #eeeeee;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
     )");
     avatar_button->setEnabled(!profile_user_id.isEmpty());

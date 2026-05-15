@@ -16,53 +16,71 @@ AddContactDialog::AddContactDialog(TcpClient* tcp_client, QWidget* parent)
     , tcp_client_(tcp_client)
 {
     setWindowTitle("添加联系人");
-    setMinimumWidth(400);
+    setMinimumWidth(430);
     setStyleSheet(R"(
         QDialog {
-            background-color: white;
+            background-color: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        QLabel {
+            color: #425247;
+            font-size: 13px;
+            font-weight: 700;
+            background: transparent;
         }
         QLineEdit {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            min-height: 38px;
+            padding: 0 12px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
+            background-color: #ffffff;
+            color: #17211c;
             font-size: 14px;
         }
         QLineEdit:focus {
-            border: 1px solid #4CAF50;
+            border: 1px solid #2f6f3e;
+            background-color: #fbfdfb;
         }
         QPushButton {
-            padding: 8px 16px;
+            min-height: 36px;
+            padding: 0 18px;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 700;
         }
         QPushButton#primary {
-            background-color: #4CAF50;
+            background-color: #2f6f3e;
             color: white;
         }
         QPushButton#primary:hover {
-            background-color: #45a049;
+            background-color: #285f36;
+        }
+        QPushButton#primary:disabled {
+            background-color: #c7d4cb;
         }
         QPushButton#secondary {
-            background-color: #f44336;
-            color: white;
+            background-color: #ffffff;
+            color: #425247;
+            border: 1px solid #d5dfd8;
         }
         QPushButton#secondary:hover {
-            background-color: #e53935;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
     )");
 
     QVBoxLayout* main_layout = new QVBoxLayout(this);
-    main_layout->setSpacing(15);
+    main_layout->setContentsMargins(22, 22, 22, 20);
+    main_layout->setSpacing(12);
 
     // 手机号输入
-    QLabel* phone_label = new QLabel("手机号:", this);
+    QLabel* phone_label = new QLabel("手机号", this);
     phone_edit_ = new QLineEdit(this);
     phone_edit_->setPlaceholderText("请输入对方手机号");
 
     // 备注输入
-    QLabel* remark_label = new QLabel("备注 (可选):", this);
+    QLabel* remark_label = new QLabel("验证信息（可选）", this);
     remark_edit_ = new QLineEdit(this);
     remark_edit_->setPlaceholderText("请输入验证信息");
 
@@ -73,6 +91,8 @@ AddContactDialog::AddContactDialog(TcpClient* tcp_client, QWidget* parent)
 
     // 按钮
     QHBoxLayout* btn_layout = new QHBoxLayout();
+    btn_layout->setContentsMargins(0, 8, 0, 0);
+    btn_layout->setSpacing(10);
     btn_layout->addStretch();
 
     cancel_button_ = new QPushButton("取消", this);

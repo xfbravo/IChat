@@ -69,7 +69,7 @@ namespace
         label->setWordWrap(true);
         label->setStyleSheet(R"(
             QLabel {
-                color: #111827;
+                color: #17211c;
                 font-size: 14px;
                 background: transparent;
             }
@@ -102,12 +102,13 @@ namespace
             avatar_button->setStyleSheet(R"(
                 QToolButton {
                     padding: 0;
-                    border: none;
+                    border: 1px solid #d8e3db;
                     border-radius: 22px;
                     background: transparent;
                 }
                 QToolButton:hover {
-                    background-color: #eeeeee;
+                    background-color: #eef6ef;
+                    border-color: #b8cdbc;
                 }
             )");
             QObject::connect(avatar_button, &QToolButton::clicked, this, [avatar_handler = std::move(avatar_handler)]() {
@@ -122,9 +123,9 @@ namespace
             title_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
             title_label->setStyleSheet(R"(
             QLabel {
-                color: #111111;
+                color: #17211c;
                 font-size: 15px;
-                font-weight: 600;
+                font-weight: 700;
                 background: transparent;
             }
         )");
@@ -135,7 +136,7 @@ namespace
             subtitle_label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
             subtitle_label->setStyleSheet(R"(
             QLabel {
-                color: #777777;
+                color: #6b756e;
                 font-size: 12px;
                 background: transparent;
             }
@@ -174,13 +175,25 @@ namespace
 void MainWindow::createContactView()
 {
     contact_view_ = new QWidget;
+    contact_view_->setStyleSheet(R"(
+        QWidget {
+            background-color: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+    )");
 
     QVBoxLayout *layout = new QVBoxLayout(contact_view_);
     layout->setContentsMargins(0, 0, 0, 0);
 
     // 顶部按钮
     QWidget *top_widget = new QWidget;
-    top_widget->setFixedHeight(60);
+    top_widget->setFixedHeight(68);
+    top_widget->setStyleSheet(R"(
+        QWidget {
+            background-color: #eef2ef;
+            border-bottom: 1px solid #dbe5de;
+        }
+    )");
     QHBoxLayout *top_layout = new QHBoxLayout(top_widget);
     top_layout->setContentsMargins(20, 0, 16, 0);
     top_layout->setSpacing(10);
@@ -188,11 +201,12 @@ void MainWindow::createContactView()
     QLabel *title_label = new QLabel("联系人", top_widget);
     title_label->setStyleSheet(R"(
         QLabel {
-            color: #111111;
+            color: #17211c;
             font-family: "SimHei", "Microsoft YaHei", sans-serif;
-            font-size: 20px;
-            font-weight: 700;
+            font-size: 21px;
+            font-weight: 800;
             background: transparent;
+            border: none;
         }
     )");
     top_layout->addWidget(title_label);
@@ -205,16 +219,17 @@ void MainWindow::createContactView()
     contact_search_edit_->setMaximumWidth(360);
     contact_search_edit_->setStyleSheet(R"(
         QLineEdit {
-            min-height: 34px;
-            padding: 0 10px;
-            border: 1px solid #dddddd;
-            border-radius: 4px;
+            min-height: 36px;
+            padding: 0 12px;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             background-color: #ffffff;
-            color: #111111;
+            color: #17211c;
             font-size: 14px;
         }
         QLineEdit:focus {
-            border: 1px solid #4CAF50;
+            border: 1px solid #2f6f3e;
+            background-color: #fbfdfb;
         }
     )");
     contact_search_edit_->installEventFilter(this);
@@ -226,16 +241,17 @@ void MainWindow::createContactView()
     add_contact_button_ = new QPushButton("添加联系人");
     add_contact_button_->setStyleSheet(R"(
         QPushButton {
-            padding: 10px 20px;
-            background-color: #4CAF50;
+            min-height: 36px;
+            padding: 0 18px;
+            background-color: #2f6f3e;
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 700;
         }
         QPushButton:hover {
-            background-color: #45a049;
+            background-color: #285f36;
         }
     )");
     connect(add_contact_button_, &QPushButton::clicked,
@@ -245,16 +261,18 @@ void MainWindow::createContactView()
     QPushButton *view_requests_button = new QPushButton("查看好友请求");
     view_requests_button->setStyleSheet(R"(
         QPushButton {
-            padding: 10px 20px;
-            background-color: #2196F3;
-            color: white;
-            border: none;
-            border-radius: 4px;
+            min-height: 36px;
+            padding: 0 18px;
+            background-color: #ffffff;
+            color: #2f6f3e;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 700;
         }
         QPushButton:hover {
-            background-color: #1976D2;
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
         }
     )");
     connect(view_requests_button, &QPushButton::clicked,
@@ -271,22 +289,23 @@ void MainWindow::createContactView()
     contact_search_results_->hide();
     contact_search_results_->setStyleSheet(R"(
         QListWidget {
-            border: 1px solid #dcdcdc;
+            border: 1px solid #d5dfd8;
+            border-radius: 8px;
             background-color: #ffffff;
-            color: #111111;
+            color: #17211c;
             outline: none;
         }
         QListWidget::item {
             padding: 8px 10px;
-            border-bottom: 1px solid #eeeeee;
+            border-bottom: 1px solid #edf2ee;
         }
         QListWidget::item:hover,
         QListWidget::item:selected {
-            background-color: #e8f5e9;
-            color: #111111;
+            background-color: #eef6ef;
+            color: #17211c;
         }
         QListWidget::item:disabled {
-            color: #999999;
+            color: #8b968e;
             background-color: #ffffff;
         }
     )");
@@ -307,22 +326,28 @@ void MainWindow::createContactView()
     contact_tree_widget_->setStyleSheet(R"(
         QTreeWidget {
             border: none;
-            background-color: white;
+            background-color: #eef2ef;
             font-size: 14px;
             outline: none;
+            padding: 12px;
         }
         QTreeWidget::item {
             padding: 0;
-            border-bottom: 1px solid #eeeeee;
+            margin: 2px 0;
+            border: 1px solid #dfe8e2;
+            border-radius: 8px;
+            background-color: #ffffff;
         }
         QTreeWidget::item:hover {
-            background-color: #f5f5f5;
+            background-color: #f7fbf7;
+            border-color: #cfdcd2;
         }
         QTreeWidget::item:selected,
         QTreeWidget::item:selected:active,
         QTreeWidget::item:selected:!active {
-            background-color: #e8f5e9;
-            color: #111111;
+            background-color: #eef6ef;
+            color: #17211c;
+            border-color: #b8cdbc;
         }
     )");
     connect(contact_tree_widget_, &QTreeWidget::itemDoubleClicked,
@@ -388,64 +413,68 @@ void MainWindow::showUserProfileDialog(const QString &user_id,
         user_profile_dialog_->setMinimumWidth(380);
         user_profile_dialog_->setStyleSheet(R"(
             QDialog {
-                background-color: #f7f8fa;
+                background-color: #eef2ef;
                 font-family: "Microsoft YaHei", sans-serif;
             }
             QFrame#profileCard,
             QFrame#profileEntryPanel {
                 background-color: #ffffff;
-                border: 1px solid #e5e7eb;
+                border: 1px solid #dbe5de;
                 border-radius: 6px;
             }
             QLabel#profileName {
-                color: #111827;
+                color: #17211c;
                 font-size: 18px;
-                font-weight: 700;
+                font-weight: 800;
                 background: transparent;
             }
             QLabel#profileStatus {
-                color: #6b7280;
+                color: #6b756e;
                 font-size: 12px;
                 background: transparent;
             }
             QToolButton#profileMomentButton {
                 min-height: 54px;
                 padding: 0 18px;
-                color: #111827;
+                color: #17211c;
                 background-color: #ffffff;
-                border: none;
-                border-radius: 4px;
+                border: 1px solid #dbe5de;
+                border-radius: 6px;
                 font-size: 15px;
                 text-align: left;
             }
             QToolButton#profileMomentButton:hover {
-                background-color: #f3f4f6;
+                background-color: #eef6ef;
+                border-color: #b8cdbc;
             }
             QPushButton#profileCloseButton {
                 min-width: 86px;
-                padding: 8px 16px;
-                color: #374151;
+                min-height: 36px;
+                padding: 0 16px;
+                color: #425247;
                 background-color: #ffffff;
-                border: 1px solid #d1d5db;
-                border-radius: 4px;
+                border: 1px solid #d5dfd8;
+                border-radius: 6px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
             }
             QPushButton#profileCloseButton:hover {
-                background-color: #f3f4f6;
+                background-color: #eef6ef;
+                border-color: #b8cdbc;
             }
             QPushButton#profileMessageButton {
                 min-width: 96px;
-                padding: 8px 18px;
+                min-height: 36px;
+                padding: 0 18px;
                 color: #ffffff;
-                background-color: #4CAF50;
+                background-color: #2f6f3e;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 font-size: 14px;
-                font-weight: 600;
+                font-weight: 700;
             }
             QPushButton#profileMessageButton:hover {
-                background-color: #45a049;
+                background-color: #285f36;
             }
         )");
 
@@ -1093,17 +1122,34 @@ void MainWindow::onFriendRequestsReceived(const QString &json)
     QDialog dialog(this);
     dialog.setWindowTitle("好友请求列表");
     dialog.setMinimumSize(400, 300);
+    dialog.setStyleSheet(R"(
+        QDialog {
+            background-color: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        QScrollArea {
+            border: none;
+            background-color: #eef2ef;
+        }
+        QWidget {
+            background-color: #eef2ef;
+        }
+    )");
 
     QVBoxLayout *layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(18, 18, 18, 18);
+    layout->setSpacing(12);
 
     QLabel *title = new QLabel(QString("收到 %1 个好友请求").arg(requests.size()));
-    title->setStyleSheet("font-weight: bold; font-size: 14px;");
+    title->setStyleSheet("color: #17211c; font-weight: 800; font-size: 16px; background: transparent;");
     layout->addWidget(title);
 
     QScrollArea *scrollArea = new QScrollArea;
     scrollArea->setWidgetResizable(true);
     QWidget *container = new QWidget;
     QVBoxLayout *containerLayout = new QVBoxLayout(container);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(10);
 
     struct RequestItem
     {
@@ -1131,26 +1177,28 @@ void MainWindow::onFriendRequestsReceived(const QString &json)
 
         QFrame *frame = new QFrame;
         frame->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
-        frame->setStyleSheet("QFrame { background-color: #f5f5f5; border-radius: 4px; padding: 10px; margin: 5px 0; }");
+        frame->setStyleSheet("QFrame { background-color: #ffffff; border: 1px solid #dbe5de; border-radius: 8px; padding: 10px; }");
 
         QVBoxLayout *frameLayout = new QVBoxLayout(frame);
 
         QLabel *nameLabel = new QLabel(from_nickname);
-        nameLabel->setStyleSheet("font-weight: bold; font-size: 14px;");
+        nameLabel->setStyleSheet("color: #17211c; font-weight: 800; font-size: 14px; background: transparent;");
 
         QLabel *remarkLabel = new QLabel(remark.isEmpty() ? "无备注" : remark);
-        remarkLabel->setStyleSheet("color: #666; font-size: 12px;");
+        remarkLabel->setStyleSheet("color: #6b756e; font-size: 12px; background: transparent;");
 
         QHBoxLayout *btnLayout = new QHBoxLayout;
         QPushButton *acceptBtn = new QPushButton("同意");
         acceptBtn->setStyleSheet(R"(
-            QPushButton { background-color: #4CAF50; color: white; border: none; padding: 8px 16px; border-radius: 4px; }
-            QPushButton:hover { background-color: #45a049; }
+            QPushButton { min-height: 34px; background-color: #2f6f3e; color: white; border: none; padding: 0 16px; border-radius: 6px; font-weight: 700; }
+            QPushButton:hover { background-color: #285f36; }
+            QPushButton:disabled { background-color: #c7d4cb; }
         )");
         QPushButton *rejectBtn = new QPushButton("拒绝");
         rejectBtn->setStyleSheet(R"(
-            QPushButton { background-color: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 4px; }
-            QPushButton:hover { background-color: #e53935; }
+            QPushButton { min-height: 34px; background-color: #ffffff; color: #b33a2b; border: 1px solid #e3c8c3; padding: 0 16px; border-radius: 6px; font-weight: 700; }
+            QPushButton:hover { background-color: #fff1ef; border-color: #d7aaa3; }
+            QPushButton:disabled { color: #a0a8a2; background-color: #f3f6f4; border-color: #d5dfd8; }
         )");
 
         // 处理后禁用按钮，避免用户在服务端响应前重复提交同一个请求。
@@ -1190,8 +1238,8 @@ void MainWindow::onFriendRequestsReceived(const QString &json)
 
     QPushButton *closeBtn = new QPushButton("关闭");
     closeBtn->setStyleSheet(R"(
-        QPushButton { padding: 10px 20px; background-color: #9e9e9e; color: white; border: none; border-radius: 4px; }
-        QPushButton:hover { background-color: #757575; }
+        QPushButton { min-height: 36px; padding: 0 20px; background-color: #ffffff; color: #425247; border: 1px solid #d5dfd8; border-radius: 6px; font-weight: 700; }
+        QPushButton:hover { background-color: #eef6ef; border-color: #b8cdbc; }
     )");
     layout->addWidget(closeBtn);
     connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);

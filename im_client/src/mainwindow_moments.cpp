@@ -151,18 +151,23 @@ QSize momentMediaGridSize(int image_count, const QSize& item_size, int spacing) 
 
 void MainWindow::createMomentsView() {
     moments_view_ = new QWidget;
-    moments_view_->setStyleSheet("QWidget { background: #f5f6f7; }");
+    moments_view_->setStyleSheet(R"(
+        QWidget {
+            background: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+    )");
 
     QVBoxLayout* root = new QVBoxLayout(moments_view_);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
     QWidget* top_bar = new QWidget(moments_view_);
-    top_bar->setFixedHeight(58);
+    top_bar->setFixedHeight(68);
     top_bar->setStyleSheet(R"(
         QWidget {
-            background: #ffffff;
-            border-bottom: 1px solid #e8eaed;
+            background: #eef2ef;
+            border-bottom: 1px solid #dbe5de;
         }
     )");
 
@@ -175,16 +180,16 @@ void MainWindow::createMomentsView() {
     create_moment_button_->setToolTip("发布朋友圈");
     create_moment_button_->setStyleSheet(R"(
         QPushButton {
-            background: #1aad19;
+            background: #2f6f3e;
             color: white;
             border: none;
             border-radius: 17px;
             font-size: 24px;
-            font-weight: 500;
+            font-weight: 700;
             padding-bottom: 3px;
         }
-        QPushButton:hover { background: #159b15; }
-        QPushButton:pressed { background: #118411; }
+        QPushButton:hover { background: #285f36; }
+        QPushButton:pressed { background: #214e2d; }
     )");
     connect(create_moment_button_, &QPushButton::clicked,
             this, &MainWindow::onCreateMomentClicked);
@@ -193,9 +198,9 @@ void MainWindow::createMomentsView() {
     moments_title_label_ = new QLabel("朋友圈", top_bar);
     moments_title_label_->setStyleSheet(R"(
         QLabel {
-            color: #111827;
-            font-size: 20px;
-            font-weight: 700;
+            color: #17211c;
+            font-size: 22px;
+            font-weight: 800;
             background: transparent;
             border: none;
         }
@@ -206,7 +211,7 @@ void MainWindow::createMomentsView() {
     moments_status_label_ = new QLabel("正在加载...", top_bar);
     moments_status_label_->setStyleSheet(R"(
         QLabel {
-            color: #6b7280;
+            color: #6b756e;
             font-size: 13px;
             background: transparent;
             border: none;
@@ -221,10 +226,10 @@ void MainWindow::createMomentsView() {
     moments_scroll_area_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     moments_feed_widget_ = new QWidget;
-    moments_feed_widget_->setStyleSheet("background: #f5f6f7;");
+    moments_feed_widget_->setStyleSheet("background: #eef2ef;");
     moments_feed_layout_ = new QVBoxLayout(moments_feed_widget_);
-    moments_feed_layout_->setContentsMargins(24, 20, 24, 24);
-    moments_feed_layout_->setSpacing(14);
+    moments_feed_layout_->setContentsMargins(24, 22, 24, 26);
+    moments_feed_layout_->setSpacing(16);
     moments_feed_layout_->addStretch();
 
     moments_scroll_area_->setWidget(moments_feed_widget_);
@@ -271,6 +276,42 @@ void MainWindow::onCreateMomentClicked() {
     QDialog dialog(this);
     dialog.setWindowTitle("发布朋友圈");
     dialog.setMinimumWidth(560);
+    dialog.setStyleSheet(R"(
+        QDialog {
+            background-color: #eef2ef;
+            font-family: "Microsoft YaHei", sans-serif;
+        }
+        QLabel {
+            color: #56645b;
+            background: transparent;
+        }
+        QPushButton {
+            min-height: 34px;
+            padding: 0 16px;
+            color: #17211c;
+            background-color: #ffffff;
+            border: 1px solid #d5dfd8;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+        }
+        QPushButton:hover {
+            background-color: #eef6ef;
+            border-color: #b8cdbc;
+        }
+        QDialogButtonBox QPushButton {
+            min-width: 78px;
+        }
+        QDialogButtonBox QPushButton:default {
+            color: #ffffff;
+            background-color: #2f6f3e;
+            border-color: #2f6f3e;
+        }
+        QDialogButtonBox QPushButton:default:hover {
+            background-color: #285f36;
+            border-color: #285f36;
+        }
+    )");
 
     QVBoxLayout* root = new QVBoxLayout(&dialog);
     root->setContentsMargins(18, 18, 18, 18);
@@ -281,18 +322,23 @@ void MainWindow::onCreateMomentClicked() {
     content_edit->setFixedHeight(120);
     content_edit->setStyleSheet(R"(
         QPlainTextEdit {
-            border: 1px solid #d7dce2;
+            border: 1px solid #d5dfd8;
             border-radius: 6px;
-            padding: 10px;
+            padding: 11px 12px;
             font-size: 14px;
-            background: white;
+            color: #17211c;
+            background: #ffffff;
+        }
+        QPlainTextEdit:focus {
+            border-color: #2f6f3e;
+            background: #fbfdfb;
         }
     )");
     root->addWidget(content_edit);
 
     QLabel* hint = new QLabel("可发布纯文字、最多九张图片，或文字加图片。图片上传后显示缩略图，点击查看正常大小，拖拽可调整发布顺序。", &dialog);
     hint->setWordWrap(true);
-    hint->setStyleSheet("color: #6b7280; font-size: 12px;");
+    hint->setStyleSheet("color: #6b756e; font-size: 12px;");
     root->addWidget(hint);
 
     MomentMediaList* media_list = new MomentMediaList(&dialog);
@@ -314,10 +360,10 @@ void MainWindow::onCreateMomentClicked() {
     media_list->setDropIndicatorShown(false);
     media_list->setStyleSheet(R"(
         QListWidget {
-            border: 1px solid #e5e7eb;
+            border: 1px solid #d5dfd8;
             border-radius: 6px;
-            background: #fbfbfc;
-            color: #374151;
+            background: #fbfcfb;
+            color: #425247;
             font-size: 13px;
             padding: 8px;
             outline: none;
@@ -327,7 +373,7 @@ void MainWindow::onCreateMomentClicked() {
             padding: 4px;
         }
         QListWidget::item:selected {
-            background: #dcfce7;
+            background: #dff0e2;
         }
     )");
     root->addWidget(media_list);
@@ -456,7 +502,7 @@ void MainWindow::renderMoments(const QJsonArray& moments) {
     if (moments.isEmpty()) {
         QLabel* empty = new QLabel("暂无朋友圈动态", moments_feed_widget_);
         empty->setAlignment(Qt::AlignCenter);
-        empty->setStyleSheet("color: #8a8f98; font-size: 15px; padding: 80px;");
+        empty->setStyleSheet("color: #7a867e; font-size: 15px; padding: 80px;");
         moments_feed_layout_->addWidget(empty);
         moments_feed_layout_->addStretch();
         if (moments_status_label_) {
@@ -483,7 +529,7 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
     card->setStyleSheet(R"(
         QWidget#momentCard {
             background: #ffffff;
-            border: 1px solid #e8eaed;
+            border: 1px solid #dbe5de;
             border-radius: 8px;
         }
     )");
@@ -503,13 +549,14 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
     avatar->setToolTip("查看个人信息");
     avatar->setStyleSheet(R"(
         QToolButton {
-            border: none;
+            border: 1px solid #d8e3db;
             border-radius: 22px;
             padding: 0;
             background: transparent;
         }
         QToolButton:hover {
-            background: #eef0f2;
+            background: #eef6ef;
+            border-color: #b8cdbc;
         }
     )");
     connect(avatar, &QToolButton::clicked, this, [this, moment_user_id, nickname, avatar_url]() {
@@ -540,7 +587,7 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
 
     QLabel* name = new QLabel(nickname, card);
     name->setTextFormat(Qt::PlainText);
-    name->setStyleSheet("color: #1f2937; font-size: 15px; font-weight: 700; border: none; background: transparent;");
+    name->setStyleSheet("color: #22342b; font-size: 15px; font-weight: 800; border: none; background: transparent;");
     body->addWidget(name);
 
     const QString content = moment["content"].toString();
@@ -549,7 +596,7 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
         text->setTextFormat(Qt::PlainText);
         text->setWordWrap(true);
         text->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        text->setStyleSheet("color: #111827; font-size: 14px; line-height: 150%; border: none; background: transparent;");
+        text->setStyleSheet("color: #17211c; font-size: 14px; line-height: 155%; border: none; background: transparent;");
         body->addWidget(text);
     }
 
@@ -589,13 +636,13 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
             image->setIconSize(image_size);
             image->setStyleSheet(R"(
                 QToolButton {
-                    background: #eef0f2;
+                    background: #eef2ef;
                     border: none;
-                    border-radius: 4px;
+                    border-radius: 6px;
                     padding: 0;
                 }
                 QToolButton:hover {
-                    background: #e5e7eb;
+                    background: #dfe8e2;
                 }
             )");
             const QPixmap pixmap = imagePixmapFromDataUrl(thumb_url, image_size);
@@ -616,7 +663,7 @@ QWidget* MainWindow::createMomentCard(const QJsonObject& moment) {
     }
 
     QLabel* time = new QLabel(moment["create_time"].toString(), card);
-    time->setStyleSheet("color: #8a8f98; font-size: 12px; border: none; background: transparent;");
+    time->setStyleSheet("color: #6b756e; font-size: 12px; border: none; background: transparent;");
     body->addWidget(time);
 
     return card;
