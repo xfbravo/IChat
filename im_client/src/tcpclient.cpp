@@ -16,6 +16,7 @@
 #include <QMimeDatabase>
 #include <QDir>
 #include <QBuffer>
+#include <QDateTime>
 #include <QEventLoop>
 #include <QImageReader>
 #include <QMediaPlayer>
@@ -200,13 +201,22 @@ void TcpClient::registerUser(const QString& phone, const QString& nickname, cons
 
 QString TcpClient::sendChatMessage(const QString& to_user_id,
                                   const QString& content_type,
-                                  const QString& content) {
+                                  const QString& content,
+                                  const QString& chat_type) {
     if (state_ != ClientState::LoggedIn) {
         return QString();
     }
 
     QString msg_id = Protocol::generateMsgId();
-    QString body = Protocol::makeChatMessage(msg_id, user_id_, to_user_id, content_type, content);
+    QJsonObject obj;
+    obj["msg_id"] = msg_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["chat_type"] = chat_type == "group" ? "group" : "p2p";
+    obj["content_type"] = content_type;
+    obj["content"] = content;
+    obj["client_time"] = QDateTime::currentSecsSinceEpoch();
+    QString body = QJsonDocument(obj).toJson(QJsonDocument::Compact);
     sendMessage(MsgType::CHAT_MESSAGE, body);
     return msg_id;
 }
@@ -246,7 +256,9 @@ QString TcpClient::makeVideoPosterDataUrl(const QString& file_path) const {
     return poster_data_url;
 }
 
-void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_paths) {
+void TcpClient::sendFiles(const QString& to_user_id,
+                          const QStringList& file_paths,
+                          const QString& chat_type) {
     if (state_ != ClientState::LoggedIn || to_user_id.isEmpty()) {
         return;
     }
@@ -273,6 +285,7 @@ void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_pat
         PendingUpload upload;
         upload.transfer_id = Protocol::generateMsgId();
         upload.to_user_id = to_user_id;
+        upload.chat_type = chat_type == "group" ? "group" : "p2p";
         upload.file_path = info.absoluteFilePath();
         upload.file_name = info.fileName();
         upload.file_size = info.size();
@@ -293,6 +306,7 @@ void TcpClient::sendFiles(const QString& to_user_id, const QStringList& file_pat
         QJsonObject obj;
         obj["transfer_id"] = upload.transfer_id;
         obj["to_user_id"] = to_user_id;
+        obj["chat_type"] = upload.chat_type;
         obj["file_name"] = upload.file_name;
         obj["file_size"] = static_cast<double>(upload.file_size);
         obj["mime_type"] = upload.mime_type;
@@ -388,6 +402,33 @@ void TcpClient::getFriendList() {
         return;
     }
     sendMessage(MsgType::GET_FRIEND_LIST, "{}");
+}
+
+void TcpClient::createGroup(const QString& group_name, const QStringList& member_ids) {
+    if (state_ != ClientState::LoggedIn) {
+        emit groupCreateResult(401, "未登录", QString(), QString(), QString(), 0);
+        return;
+    }
+
+    QJsonArray members;
+    for (const QString& member_id : member_ids) {
+        if (!member_id.trimmed().isEmpty()) {
+            members.append(member_id.trimmed());
+        }
+    }
+
+    QJsonObject obj;
+    obj["group_name"] = group_name;
+    obj["member_ids"] = members;
+    sendMessage(MsgType::CREATE_GROUP, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::getGroupList() {
+    if (state_ != ClientState::LoggedIn) {
+        emit groupListReceived("[]");
+        return;
+    }
+    sendMessage(MsgType::GET_GROUP_LIST, "{}");
 }
 
 void TcpClient::getFriendRequests() {
@@ -519,15 +560,21 @@ void TcpClient::changePassword(const QString& old_password, const QString& new_p
     sendMessage(MsgType::CHANGE_PASSWORD, body);
 }
 
-void TcpClient::getChatHistory(const QString& friend_id, int limit, int64_t before_time) {
+void TcpClient::getChatHistory(const QString& peer_id,
+                               int limit,
+                               int64_t before_time,
+                               const QString& chat_type) {
     if (state_ != ClientState::LoggedIn) {
         return;
     }
 
-    current_chat_history_friend_id_ = friend_id;
+    current_chat_history_peer_id_ = peer_id;
+    current_chat_history_type_ = chat_type == "group" ? "group" : "p2p";
 
     QJsonObject obj;
-    obj["friend_id"] = friend_id;
+    obj["friend_id"] = peer_id;
+    obj["peer_id"] = peer_id;
+    obj["chat_type"] = current_chat_history_type_;
     obj["limit"] = limit;
     if (before_time > 0) {
         obj["before_time"] = before_time;
@@ -682,8 +729,10 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 QString msg_id = obj["msg_id"].toString();
                 qint64 server_timestamp = obj["server_timestamp"].toInteger();
                 QString server_time = obj["server_time"].toString();
+                QString to_user_id = obj["to_user_id"].toString();
+                QString chat_type = obj["chat_type"].toString("p2p");
                 emit chatMessageReceived(from_user_id, content, content_type, msg_id,
-                                         server_timestamp, server_time);
+                                         server_timestamp, server_time, to_user_id, chat_type);
             }
             break;
         }
@@ -728,12 +777,15 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 }
                 const QString content_json = QString::fromUtf8(
                     QJsonDocument(content).toJson(QJsonDocument::Compact));
-                const QString msg_id = sendChatMessage(upload.to_user_id, upload.content_type, content_json);
+                const QString msg_id = sendChatMessage(upload.to_user_id,
+                                                       upload.content_type,
+                                                       content_json,
+                                                       upload.chat_type);
                 if (msg_id.isEmpty()) {
                     emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, false,
                                               "文件已上传，但消息发送失败");
                 } else {
-                    emit fileMessageSent(upload.to_user_id, upload.content_type, content_json, msg_id);
+                    emit fileMessageSent(upload.to_user_id, upload.chat_type, upload.content_type, content_json, msg_id);
                     emit fileTransferFinished(transfer_id, upload.file_name, QString(), true, true, "上传完成");
                 }
                 pending_uploads_.erase(it);
@@ -814,6 +866,26 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
 
         case MsgType::FRIEND_LIST_RSP: {
             emit friendListReceived(body);
+            break;
+        }
+
+        case MsgType::GROUP_LIST_RSP:
+        case MsgType::GROUP_LIST_UPDATE: {
+            emit groupListReceived(body);
+            break;
+        }
+
+        case MsgType::CREATE_GROUP_RSP: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (doc.isObject()) {
+                QJsonObject obj = doc.object();
+                emit groupCreateResult(obj["code"].toInt(),
+                                       obj["message"].toString(),
+                                       obj["group_id"].toString(),
+                                       obj["group_name"].toString(),
+                                       obj["group_avatar"].toString(),
+                                       obj["member_count"].toInt());
+            }
             break;
         }
 
@@ -1000,7 +1072,7 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
         }
 
         case MsgType::CHAT_HISTORY_RSP: {
-            emit chatHistoryReceived(current_chat_history_friend_id_, body);
+            emit chatHistoryReceived(current_chat_history_peer_id_, current_chat_history_type_, body);
             break;
         }
 
@@ -1017,8 +1089,12 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     QString msg_id = obj["msg_id"].toString();
                     QString server_time = obj["server_time"].toString();
                     qint64 server_timestamp = obj["server_timestamp"].toInteger();
+                    QString to_user_id = obj["to_user_id"].toString();
+                    QString chat_type = obj["chat_type"].toInt(1) == 2
+                        ? QStringLiteral("group")
+                        : obj["chat_type"].toString("p2p");
                     emit offlineMessageReceived(from_user_id, content, content_type, msg_id,
-                                                server_timestamp, server_time);
+                                                server_timestamp, server_time, to_user_id, chat_type);
                     ackOfflineMessage(msg_id);
                 }
             }

@@ -54,9 +54,11 @@ private slots:
     void onChatMessageReceived(const QString& from_user_id, const QString& content,
                                const QString& content_type,
                                const QString& msg_id, qint64 server_timestamp,
-                               const QString& server_time);
+                               const QString& server_time,
+                               const QString& to_user_id,
+                               const QString& chat_type);
     void onAttachFileClicked();
-    void onFileMessageSent(const QString& to_user_id, const QString& content_type,
+    void onFileMessageSent(const QString& to_user_id, const QString& chat_type, const QString& content_type,
                            const QString& content, const QString& msg_id);
     void onFileTransferProgress(const QString& transfer_id, const QString& file_name,
                                 qint64 transferred, qint64 total, bool upload);
@@ -65,11 +67,13 @@ private slots:
                                 const QString& message);
     void onChatItemClicked(QListWidgetItem* item);
     void onDisconnected();
-    void onChatHistoryReceived(const QString& friend_id, const QString& history_json);
+    void onChatHistoryReceived(const QString& peer_id, const QString& chat_type, const QString& history_json);
     void onOfflineMessageReceived(const QString& from_user_id, const QString& content,
                                   const QString& content_type,
                                   const QString& msg_id, qint64 server_timestamp,
-                                  const QString& server_time);
+                                  const QString& server_time,
+                                  const QString& to_user_id,
+                                  const QString& chat_type);
     void onMessageAckReceived(const QString& msg_id, const QString& status, int code, const QString& message);
     void onFriendRemarkUpdateResult(int code, const QString& message,
                                     const QString& friend_id, const QString& remark);
@@ -82,6 +86,13 @@ private slots:
     void onFriendListReceived(const QString& json);
     void onFriendRequestReceived(const QString& from_user_id, const QString& from_nickname, const QString& message);
     void onFriendRequestsReceived(const QString& json);
+    void onGroupListReceived(const QString& json);
+    void onGroupCreateResult(int code,
+                             const QString& message,
+                             const QString& group_id,
+                             const QString& group_name,
+                             const QString& group_avatar,
+                             int member_count);
     void onConversationSearchTextChanged(const QString& text);
     void onContactSearchTextChanged(const QString& text);
     void onSearchResultClicked(QListWidgetItem* item);
@@ -202,6 +213,12 @@ private:
     void refreshConversationList();
     void refreshConversationSelectionStyles();
     QString conversationTitle(const QString& peer_id) const;
+    QString conversationKey(const QString& chat_type, const QString& peer_id) const;
+    QString conversationPeerId(const QString& conversation_key) const;
+    QString conversationChatType(const QString& conversation_key) const;
+    bool isGroupConversation(const QString& conversation_key) const;
+    void switchToConversation(const QString& conversation_key, const QString& title);
+    void openCreateGroupDialog();
 
     // 搜索只读取本地会话/联系人缓存，点击结果后复用会话切换并定位原列表项。
     QList<QString> sortedConversationIds() const;
@@ -317,6 +334,9 @@ private:
     QHash<QString, QString> contact_nicknames_;
     QHash<QString, QString> contact_avatars_;
     QHash<QString, UserProfileCache> user_profile_cache_;
+    QHash<QString, QString> group_names_;
+    QHash<QString, QString> group_avatars_;
+    QHash<QString, int> group_member_counts_;
 
     /**
      * @brief 单个会话的本地 UI 状态
@@ -325,6 +345,8 @@ private:
      * 服务端返回好友列表或聊天记录后，也会合并回这个结构。
      */
     struct ConversationState {
+        QString peer_id;
+        QString chat_type = QStringLiteral("p2p");
         QString title;
         QVector<ChatViewMessage> messages;
         int unread = 0;

@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstring>
 #include <cstdint>
+#include <unordered_set>
 #include <boost/json.hpp>
 
 namespace im {
@@ -194,6 +195,72 @@ bool ensure_moments_table(MYSQL* mysql, std::string& error_message) {
         return false;
     }
     return true;
+}
+
+bool ensure_group_tables(MYSQL* mysql, std::string& error_message) {
+    const char* group_sql =
+        "CREATE TABLE IF NOT EXISTS im_group ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增ID',"
+        "group_id VARCHAR(32) NOT NULL COMMENT '群ID',"
+        "group_name VARCHAR(128) NOT NULL DEFAULT '' COMMENT '群名称',"
+        "group_avatar MEDIUMTEXT COMMENT '群头像URL或data URL',"
+        "owner_id VARCHAR(32) NOT NULL COMMENT '群主ID',"
+        "group_type TINYINT NOT NULL DEFAULT 1 COMMENT '群类型',"
+        "member_count INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '成员数量',"
+        "max_member_count INT UNSIGNED NOT NULL DEFAULT 500 COMMENT '最大成员数',"
+        "status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：0解散 1正常',"
+        "apply_type TINYINT NOT NULL DEFAULT 1 COMMENT '加群方式',"
+        "introduction VARCHAR(512) DEFAULT '' COMMENT '群介绍',"
+        "create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',"
+        "update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY uk_group_id (group_id),"
+        "KEY idx_owner_id (owner_id),"
+        "KEY idx_status (status),"
+        "KEY idx_create_time (create_time)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群组表'";
+    if (mysql_query(mysql, group_sql)) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    const char* member_sql =
+        "CREATE TABLE IF NOT EXISTS im_group_member ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增ID',"
+        "group_id VARCHAR(32) NOT NULL COMMENT '群ID',"
+        "user_id VARCHAR(32) NOT NULL COMMENT '用户ID',"
+        "nickname VARCHAR(64) NOT NULL DEFAULT '' COMMENT '群内昵称',"
+        "avatar_url MEDIUMTEXT COMMENT '头像URL或data URL',"
+        "role TINYINT NOT NULL DEFAULT 1 COMMENT '角色：1普通成员 2管理员 3群主',"
+        "join_type TINYINT NOT NULL DEFAULT 1 COMMENT '加入方式',"
+        "inviter_id VARCHAR(32) DEFAULT NULL COMMENT '邀请人ID',"
+        "is_notification TINYINT NOT NULL DEFAULT 1 COMMENT '是否接收通知',"
+        "is_shield TINYINT NOT NULL DEFAULT 0 COMMENT '是否屏蔽群消息',"
+        "join_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '加入时间',"
+        "last_msg_time DATETIME DEFAULT NULL COMMENT '最后消息时间',"
+        "status TINYINT NOT NULL DEFAULT 1 COMMENT '状态：0已退出 1正常',"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY uk_group_user (group_id, user_id),"
+        "KEY idx_group_id (group_id),"
+        "KEY idx_user_id (user_id),"
+        "KEY idx_role (group_id, role),"
+        "KEY idx_last_msg_time (group_id, last_msg_time)"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='群成员表'";
+    if (mysql_query(mysql, member_sql)) {
+        error_message = mysql_error(mysql);
+        return false;
+    }
+
+    return ensure_large_text_column(mysql,
+                                    "im_group",
+                                    "group_avatar",
+                                    "MEDIUMTEXT COMMENT '群头像URL或data URL'",
+                                    error_message)
+        && ensure_large_text_column(mysql,
+                                    "im_group_member",
+                                    "avatar_url",
+                                    "MEDIUMTEXT COMMENT '头像URL或data URL'",
+                                    error_message);
 }
 
 } // namespace
@@ -733,6 +800,252 @@ std::string UserService::get_friend_list(const std::string& user_id) {
     return json::serialize(result);
 }
 
+GroupCreateResult UserService::create_group(const std::string& owner_id,
+                                            const std::string& group_name,
+                                            const std::vector<std::string>& member_ids) {
+    GroupCreateResult result;
+    const std::string clean_name = trim_copy(group_name);
+
+    if (owner_id.empty()) {
+        result.code = 401;
+        result.message = "未登录";
+        return result;
+    }
+    if (clean_name.empty() || clean_name.size() > 128) {
+        result.code = 400;
+        result.message = "群名称不能为空且不能超过128个字符";
+        return result;
+    }
+
+    std::vector<std::string> final_members;
+    std::unordered_set<std::string> seen;
+    final_members.push_back(owner_id);
+    seen.insert(owner_id);
+    for (const std::string& raw_id : member_ids) {
+        const std::string member_id = trim_copy(raw_id);
+        if (member_id.empty() || seen.count(member_id)) {
+            continue;
+        }
+        if (!user_exists(member_id)) {
+            result.code = 404;
+            result.message = "群成员不存在: " + member_id;
+            return result;
+        }
+        if (!are_friends(owner_id, member_id)) {
+            result.code = 403;
+            result.message = "只能邀请好友入群: " + member_id;
+            return result;
+        }
+        final_members.push_back(member_id);
+        seen.insert(member_id);
+    }
+
+    if (final_members.size() < 2) {
+        result.code = 400;
+        result.message = "至少选择一个联系人";
+        return result;
+    }
+    if (final_members.size() > 500) {
+        result.code = 400;
+        result.message = "群成员不能超过500人";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    std::string schema_error;
+    if (!ensure_group_tables(mysql, schema_error)) {
+        result.code = 5002;
+        result.message = "群聊表迁移失败: " + schema_error;
+        return result;
+    }
+
+    const auto now = std::chrono::system_clock::now();
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now.time_since_epoch()).count();
+    const std::string group_id = "g" + std::to_string(millis) + "_" + generate_token(owner_id).substr(0, 8);
+
+    if (mysql_query(mysql, "START TRANSACTION")) {
+        result.code = 5001;
+        result.message = "创建群聊失败";
+        return result;
+    }
+
+    std::ostringstream group_sql;
+    group_sql << "INSERT INTO im_group (group_id, group_name, group_avatar, owner_id, member_count, status) "
+              << "VALUES ('" << sql_escape(mysql, group_id) << "', '"
+              << sql_escape(mysql, clean_name) << "', '', '"
+              << sql_escape(mysql, owner_id) << "', "
+              << final_members.size() << ", 1)";
+    if (mysql_query(mysql, group_sql.str().c_str())) {
+        mysql_query(mysql, "ROLLBACK");
+        result.code = 5001;
+        result.message = "创建群聊失败: " + std::string(mysql_error(mysql));
+        return result;
+    }
+
+    for (const std::string& member_id : final_members) {
+        UserInfo info = get_user_by_id(member_id);
+        const int role = member_id == owner_id ? 3 : 1;
+        std::ostringstream member_sql;
+        member_sql << "INSERT INTO im_group_member (group_id, user_id, nickname, avatar_url, role, join_type, inviter_id, status) "
+                   << "VALUES ('" << sql_escape(mysql, group_id) << "', '"
+                   << sql_escape(mysql, member_id) << "', '"
+                   << sql_escape(mysql, info.nickname) << "', '"
+                   << sql_escape(mysql, info.avatar_url) << "', "
+                   << role << ", 1, '"
+                   << sql_escape(mysql, owner_id) << "', 1)";
+        if (mysql_query(mysql, member_sql.str().c_str())) {
+            mysql_query(mysql, "ROLLBACK");
+            result.code = 5001;
+            result.message = "添加群成员失败: " + std::string(mysql_error(mysql));
+            return result;
+        }
+    }
+
+    if (mysql_query(mysql, "COMMIT")) {
+        mysql_query(mysql, "ROLLBACK");
+        result.code = 5001;
+        result.message = "创建群聊失败";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "群聊已创建";
+    result.group_id = group_id;
+    result.group_name = clean_name;
+    result.group_avatar = "";
+    result.member_count = static_cast<int>(final_members.size());
+    return result;
+}
+
+std::string UserService::get_group_list(const std::string& user_id) {
+    json::array result;
+    if (user_id.empty()) {
+        return json::serialize(result);
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return json::serialize(result);
+
+    std::string schema_error;
+    if (!ensure_group_tables(mysql, schema_error)) {
+        std::cerr << "[UserService] 群聊表检查失败: " << schema_error << std::endl;
+        return json::serialize(result);
+    }
+
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
+    std::ostringstream query;
+    query << "SELECT g.group_id, g.group_name, COALESCE(g.group_avatar, ''), g.owner_id, g.member_count, "
+          << "lm.content, DATE_FORMAT(lm.server_time, '%Y-%m-%d %H:%i:%s'), "
+          << "CAST(UNIX_TIMESTAMP(lm.server_time) * 1000 AS UNSIGNED), lm.content_type "
+          << "FROM im_group_member gm "
+          << "JOIN im_group g ON g.group_id = gm.group_id AND g.status = 1 "
+          << "LEFT JOIN im_message lm ON lm.chat_type = 2 AND lm.to_user_id = g.group_id "
+          << "LEFT JOIN im_message newer ON newer.chat_type = 2 AND newer.to_user_id = g.group_id "
+          << "AND newer.server_time > lm.server_time "
+          << "WHERE gm.user_id = '" << escaped_user_id << "' AND gm.status = 1 "
+          << "AND newer.id IS NULL "
+          << "ORDER BY lm.server_time IS NULL ASC, lm.server_time DESC, g.create_time DESC";
+
+    if (mysql_query(mysql, query.str().c_str())) {
+        std::cerr << "[UserService] 获取群列表失败: " << mysql_error(mysql) << std::endl;
+        return json::serialize(result);
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return json::serialize(result);
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        json::object item;
+        item["group_id"] = row_string(row, 0);
+        item["group_name"] = row_string(row, 1);
+        item["group_avatar"] = row_string(row, 2);
+        item["owner_id"] = row_string(row, 3);
+        item["member_count"] = row_int(row, 4, 0);
+        item["last_msg_content"] = row_string(row, 5);
+        item["last_msg_time"] = row_string(row, 6);
+        item["last_msg_timestamp"] = row_int64(row, 7);
+        item["last_msg_content_type"] = row_string(row, 8, "text");
+        result.push_back(std::move(item));
+    }
+
+    mysql_free_result(res);
+    return json::serialize(result);
+}
+
+bool UserService::is_group_member(const std::string& user_id, const std::string& group_id) {
+    if (user_id.empty() || group_id.empty()) {
+        return false;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return false;
+
+    std::string schema_error;
+    if (!ensure_group_tables(mysql, schema_error)) {
+        return false;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT 1 FROM im_group_member gm "
+        << "JOIN im_group g ON g.group_id = gm.group_id AND g.status = 1 "
+        << "WHERE gm.group_id = '" << sql_escape(mysql, group_id)
+        << "' AND gm.user_id = '" << sql_escape(mysql, user_id)
+        << "' AND gm.status = 1 LIMIT 1";
+    if (mysql_query(mysql, sql.str().c_str())) {
+        return false;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    const bool exists = res && mysql_num_rows(res) > 0;
+    if (res) mysql_free_result(res);
+    return exists;
+}
+
+std::vector<std::string> UserService::get_group_member_ids(const std::string& group_id) {
+    std::vector<std::string> members;
+    if (group_id.empty()) {
+        return members;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+    if (!mysql) return members;
+
+    std::string schema_error;
+    if (!ensure_group_tables(mysql, schema_error)) {
+        return members;
+    }
+
+    std::ostringstream sql;
+    sql << "SELECT user_id FROM im_group_member "
+        << "WHERE group_id = '" << sql_escape(mysql, group_id)
+        << "' AND status = 1 ORDER BY role DESC, join_time ASC";
+    if (mysql_query(mysql, sql.str().c_str())) {
+        return members;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) return members;
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(res))) {
+        members.push_back(row_string(row, 0));
+    }
+    mysql_free_result(res);
+    return members;
+}
+
 std::string UserService::get_friend_requests(const std::string& user_id, int status) {
     json::array result;
 
@@ -1231,7 +1544,7 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
     if (!mysql) return json::serialize(result);
 
     std::ostringstream query;
-    query << "SELECT o.msg_id, o.msg_type, o.chat_type, o.from_user_id, o.content, "
+    query << "SELECT o.msg_id, o.msg_type, o.chat_type, o.from_user_id, o.to_user_id, o.content, "
           << "o.client_time, o.server_time, CAST(UNIX_TIMESTAMP(o.server_time) * 1000 AS UNSIGNED), "
           << "COALESCE(m.content_type, 'text') "
           << "FROM im_offline_message o "
@@ -1253,11 +1566,12 @@ std::string UserService::get_offline_messages(const std::string& user_id) {
         item["msg_type"] = row_int(row, 1, 1);
         item["chat_type"] = row_int(row, 2, 1);
         item["from_user_id"] = row_string(row, 3);
-        item["content"] = row_string(row, 4);
-        item["client_time"] = row_string(row, 5);
-        item["server_time"] = row_string(row, 6);
-        item["server_timestamp"] = row_int64(row, 7);
-        item["content_type"] = row_string(row, 8, "text");
+        item["to_user_id"] = row_string(row, 4);
+        item["content"] = row_string(row, 5);
+        item["client_time"] = row_string(row, 6);
+        item["server_time"] = row_string(row, 7);
+        item["server_timestamp"] = row_int64(row, 8);
+        item["content_type"] = row_string(row, 9, "text");
         result.push_back(std::move(item));
     }
 
@@ -1278,22 +1592,31 @@ void UserService::mark_offline_messages_pushed(const std::string& user_id, const
     mysql_query(mysql, sql.str().c_str());
 }
 
-std::string UserService::get_chat_history(const std::string& user_id, const std::string& friend_id,
-                                 int limit, int64_t before_time) {
+std::string UserService::get_chat_history(const std::string& user_id, const std::string& peer_id,
+                                 int limit, int64_t before_time, int chat_type) {
     json::array result;
 
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
     if (!mysql) return json::serialize(result);
 
+    if (chat_type == 2 && !is_group_member(user_id, peer_id)) {
+        return json::serialize(result);
+    }
+
     std::ostringstream query;
     query << "SELECT msg_id, msg_type, chat_type, from_user_id, to_user_id, content_type, content, "
           << "client_time, server_time, status, CAST(UNIX_TIMESTAMP(server_time) * 1000 AS UNSIGNED) "
-          << "FROM im_message "
-          << "WHERE ((from_user_id = '" << sql_escape(mysql, user_id)
-          << "' AND to_user_id = '" << sql_escape(mysql, friend_id) << "') "
-          << "OR (from_user_id = '" << sql_escape(mysql, friend_id)
-          << "' AND to_user_id = '" << sql_escape(mysql, user_id) << "')) ";
+          << "FROM im_message ";
+
+    if (chat_type == 2) {
+        query << "WHERE chat_type = 2 AND to_user_id = '" << sql_escape(mysql, peer_id) << "' ";
+    } else {
+        query << "WHERE chat_type = 1 AND ((from_user_id = '" << sql_escape(mysql, user_id)
+              << "' AND to_user_id = '" << sql_escape(mysql, peer_id) << "') "
+              << "OR (from_user_id = '" << sql_escape(mysql, peer_id)
+              << "' AND to_user_id = '" << sql_escape(mysql, user_id) << "')) ";
+    }
 
     if (before_time > 0) {
         query << "AND server_time < FROM_UNIXTIME(" << before_time << ") ";

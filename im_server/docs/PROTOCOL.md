@@ -80,6 +80,8 @@ enum class MsgType : uint16_t {
     FILE_UPLOAD_START    = 0x0019,  // 开始文件上传
     FILE_UPLOAD_CHUNK    = 0x001A,  // 上传文件分片
     FILE_DOWNLOAD_REQ    = 0x001B,  // 下载文件请求
+    CREATE_GROUP         = 0x001C,  // 创建群聊
+    GET_GROUP_LIST       = 0x001D,  // 获取群聊列表
 
     LOGIN_RSP            = 0x8002,  // 登录响应
     REGISTER_RSP         = 0x8003,  // 注册响应
@@ -99,6 +101,9 @@ enum class MsgType : uint16_t {
     FILE_UPLOAD_RSP      = 0x8019,  // 文件上传响应
     FILE_DOWNLOAD_RSP    = 0x801A,  // 文件下载响应
     FILE_DOWNLOAD_CHUNK  = 0x801B,  // 文件下载分片
+    CREATE_GROUP_RSP     = 0x801C,  // 创建群聊响应
+    GROUP_LIST_RSP       = 0x801D,  // 群聊列表响应
+    GROUP_LIST_UPDATE    = 0x801E,  // 群聊列表更新通知
 };
 ```
 
@@ -329,20 +334,62 @@ enum class MsgType : uint16_t {
 
 ---
 
-### 3.8 群聊消息（规划）
+### 3.8 群聊
 
-当前代码尚未实现群聊专用消息类型。后续实现时仍应复用 `CHAT_MESSAGE` 的正文结构，通过 `chat_type` 和 `group_id` 区分群聊，而不是新增与媒体类型绑定的包头类型。
+群聊创建使用独立的创建/列表协议；群消息仍复用 `CHAT_MESSAGE`，通过 `chat_type = "group"` 和 `to_user_id = group_id` 区分群聊，不新增媒体相关包头类型。创建群聊时 `member_ids` 只需要包含被邀请的好友，服务端会自动把创建者加入群聊。
 
-**建议请求体 (CHAT_MESSAGE / 0x0005)**:
+**创建群聊请求 (CREATE_GROUP / 0x001C)**:
+```json
+{
+    "group_name": "张三发起的群聊26-05-15",
+    "member_ids": ["user_002", "user_003"]
+}
+```
+
+**创建群聊响应 (CREATE_GROUP_RSP / 0x801C)**:
+```json
+{
+    "code": 0,
+    "message": "群聊已创建",
+    "group_id": "g1780000000000_abcd1234",
+    "group_name": "张三发起的群聊26-05-15",
+    "group_avatar": "",
+    "member_count": 3
+}
+```
+
+**群聊列表请求 (GET_GROUP_LIST / 0x001D)**:
+```json
+{}
+```
+
+**群聊列表响应/更新 (GROUP_LIST_RSP / 0x801D, GROUP_LIST_UPDATE / 0x801E)**:
+```json
+[
+    {
+        "group_id": "g1780000000000_abcd1234",
+        "group_name": "张三发起的群聊26-05-15",
+        "group_avatar": "",
+        "owner_id": "user_001",
+        "member_count": 3,
+        "last_msg_content": "大家好！",
+        "last_msg_time": "2026-05-15 15:30:00",
+        "last_msg_timestamp": 1778830200000,
+        "last_msg_content_type": "text"
+    }
+]
+```
+
+**群聊消息请求 (CHAT_MESSAGE / 0x0005)**:
 ```json
 {
     "msg_id": "uuid-msg-002",
     "from_user_id": "user_001",
-    "group_id": "group_001",
+    "to_user_id": "g1780000000000_abcd1234",
+    "chat_type": "group",
     "content_type": "text",
     "content": "大家好！",
-    "client_time": 1713900000,
-    "client_seq": 1002
+    "client_time": 1778830200
 }
 ```
 
@@ -351,15 +398,13 @@ enum class MsgType : uint16_t {
 {
     "msg_id": "uuid-msg-002",
     "from_user_id": "user_001",
-    "from_nickname": "张三",
-    "from_avatar": "https://cdn.example.com/avatar/user_001.jpg",
-    "group_id": "group_001",
-    "group_name": "测试群",
+    "to_user_id": "g1780000000000_abcd1234",
+    "chat_type": "group",
     "content_type": "text",
     "content": "大家好！",
-    "client_time": 1713900000,
-    "server_time": 1713900001,
-    "member_count": 50                  // 群成员数
+    "client_time": 1778830200,
+    "server_time": "2026-05-15 15:30:00",
+    "server_timestamp": 1778830200000
 }
 ```
 
@@ -376,6 +421,7 @@ enum class MsgType : uint16_t {
 {
     "transfer_id": "uuid-transfer-001",
     "to_user_id": "user_002",
+    "chat_type": "p2p",
     "file_name": "document.pdf",
     "file_size": 1048576,
     "mime_type": "application/pdf",

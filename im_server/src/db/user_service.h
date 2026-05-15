@@ -45,6 +45,15 @@ struct LoginResult {
     std::string token;       // 暂不实现JWT
 };
 
+struct GroupCreateResult {
+    int code = 0;
+    std::string message;
+    std::string group_id;
+    std::string group_name;
+    std::string group_avatar;
+    int member_count = 0;
+};
+
 /**
  * @brief 用户服务类
  */
@@ -117,6 +126,28 @@ public:
     std::string get_friend_list(const std::string& user_id);
 
     /**
+     * @brief 创建群聊，member_ids 不需要包含创建者，服务端会自动加入创建者。
+     */
+    GroupCreateResult create_group(const std::string& owner_id,
+                                   const std::string& group_name,
+                                   const std::vector<std::string>& member_ids);
+
+    /**
+     * @brief 获取当前用户加入的群聊列表
+     */
+    std::string get_group_list(const std::string& user_id);
+
+    /**
+     * @brief 检查用户是否是群成员
+     */
+    bool is_group_member(const std::string& user_id, const std::string& group_id);
+
+    /**
+     * @brief 获取群成员ID列表
+     */
+    std::vector<std::string> get_group_member_ids(const std::string& group_id);
+
+    /**
      * @brief 获取好友请求列表
      */
     std::string get_friend_requests(const std::string& user_id, int status = 0);
@@ -184,8 +215,9 @@ public:
     /**
      * @brief 获取聊天记录
      */
-    std::string get_chat_history(const std::string& user_id, const std::string& friend_id,
-                                 int limit = 20, int64_t before_time = 0);
+    std::string get_chat_history(const std::string& user_id, const std::string& peer_id,
+                                 int limit = 20, int64_t before_time = 0,
+                                 int chat_type = 1);
 
     /**
      * @brief 发布朋友圈

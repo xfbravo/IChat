@@ -780,7 +780,8 @@ void MainWindow::mergeUserProfileCache(const UserProfileCache &profile)
         contact_avatars_[profile.user_id] = profile.avatar_url;
     }
 
-    auto conversation_it = conversations_.find(profile.user_id);
+    const QString conversation_key = conversationKey("p2p", profile.user_id);
+    auto conversation_it = conversations_.find(conversation_key);
     if (conversation_it != conversations_.end())
     {
         const QString remark = contact_remarks_.value(profile.user_id).trimmed();
@@ -788,7 +789,7 @@ void MainWindow::mergeUserProfileCache(const UserProfileCache &profile)
             ? (profile.nickname.isEmpty() ? profile.user_id : profile.nickname)
             : remark;
         conversation_it->title = display_name;
-        if (profile.user_id == current_chat_target_ && chat_target_label_)
+        if (conversation_key == current_chat_target_ && chat_target_label_)
         {
             chat_target_label_->setText(display_name);
         }
@@ -866,7 +867,12 @@ void MainWindow::rebuildContactList()
         for (int i = 0; i < chat_list_widget_->count(); ++i)
         {
             QListWidgetItem *chat_item = chat_list_widget_->item(i);
-            const QString friend_id = chat_item ? chat_item->data(Qt::UserRole).toString() : QString();
+            const QString conversation_key = chat_item ? chat_item->data(Qt::UserRole).toString() : QString();
+            if (isGroupConversation(conversation_key))
+            {
+                continue;
+            }
+            const QString friend_id = conversationPeerId(conversation_key);
             if (!friend_id.isEmpty())
             {
                 contact_ids.append(friend_id);
@@ -876,11 +882,17 @@ void MainWindow::rebuildContactList()
 
     if (contact_ids.isEmpty())
     {
-        contact_ids = conversations_.keys();
+        for (auto it = conversations_.constBegin(); it != conversations_.constEnd(); ++it)
+        {
+            if (!isGroupConversation(it.key()))
+            {
+                contact_ids.append(conversationPeerId(it.key()));
+            }
+        }
         std::stable_sort(contact_ids.begin(), contact_ids.end(),
                          [this](const QString &left, const QString &right)
                          {
-                             return conversationTitle(left).localeAwareCompare(conversationTitle(right)) < 0;
+                             return contactDisplayName(left).localeAwareCompare(contactDisplayName(right)) < 0;
                          });
     }
 
@@ -978,7 +990,10 @@ void MainWindow::onFriendListReceived(const QString &json)
             last_timestamp = timestampFromText(last_time);
         }
 
-        ConversationState &conversation = conversations_[friend_id];
+        const QString conversation_key = conversationKey("p2p", friend_id);
+        ConversationState &conversation = conversations_[conversation_key];
+        conversation.peer_id = friend_id;
+        conversation.chat_type = "p2p";
         conversation.title = display_name;
         contact_avatars_[friend_id] = avatar_url;
         if (last_timestamp > 0 && (last_timestamp > conversation.last_timestamp || conversation.last_timestamp <= 0))
@@ -997,6 +1012,88 @@ void MainWindow::onFriendListReceived(const QString &json)
 
     // 更新联系人列表（不再调用 getFriendList，避免收到列表后再次请求形成循环）。
     rebuildContactList();
+}
+
+void MainWindow::onGroupListReceived(const QString &json)
+{
+    QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray())
+        return;
+
+    const QJsonArray groups = doc.array();
+    for (const QJsonValue &value : groups)
+    {
+        const QJsonObject group_obj = value.toObject();
+        const QString group_id = group_obj["group_id"].toString();
+        if (group_id.isEmpty())
+        {
+            continue;
+        }
+
+        const QString group_name = group_obj["group_name"].toString(group_id);
+        const QString group_avatar = group_obj["group_avatar"].toString();
+        const int member_count = group_obj["member_count"].toInt();
+        group_names_[group_id] = group_name;
+        group_avatars_[group_id] = group_avatar;
+        group_member_counts_[group_id] = member_count;
+
+        const QString conversation_key = conversationKey("group", group_id);
+        ConversationState &conversation = conversations_[conversation_key];
+        conversation.peer_id = group_id;
+        conversation.chat_type = "group";
+        conversation.title = group_name;
+
+        const QString content_type = group_obj["last_msg_content_type"].toString("text");
+        QString last_message = group_obj["last_msg_content"].toString();
+        if ((content_type == "file" || content_type == "image" || content_type == "video") && !last_message.isEmpty())
+        {
+            last_message = QString("[%1] %2").arg(
+                content_type == "image" ? QStringLiteral("图片")
+                : content_type == "video" ? QStringLiteral("视频")
+                : QStringLiteral("文件"),
+                fileMessageTitle(last_message));
+        }
+        const qint64 last_timestamp = group_obj["last_msg_timestamp"].toInteger();
+        if (last_timestamp > 0 && (last_timestamp > conversation.last_timestamp || conversation.last_timestamp <= 0))
+        {
+            conversation.last_message = last_message;
+            conversation.last_timestamp = last_timestamp;
+        }
+    }
+
+    refreshConversationList();
+    if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_))
+    {
+        chat_target_label_->setText(conversations_[current_chat_target_].title);
+    }
+}
+
+void MainWindow::onGroupCreateResult(int code,
+                                     const QString &message,
+                                     const QString &group_id,
+                                     const QString &group_name,
+                                     const QString &group_avatar,
+                                     int member_count)
+{
+    if (code != 0)
+    {
+        QMessageBox::warning(this, "发起群聊", message.isEmpty() ? "创建群聊失败" : message);
+        return;
+    }
+
+    group_names_[group_id] = group_name;
+    group_avatars_[group_id] = group_avatar;
+    group_member_counts_[group_id] = member_count;
+    const QString conversation_key = conversationKey("group", group_id);
+    ConversationState &conversation = conversations_[conversation_key];
+    conversation.peer_id = group_id;
+    conversation.chat_type = "group";
+    conversation.title = group_name;
+    refreshConversationList();
+    switchToConversation(conversation_key, group_name);
+    nav_list_->setCurrentRow(0);
+    content_stacked_->setCurrentWidget(message_view_);
+    tcp_client_->getGroupList();
 }
 
 void MainWindow::onFriendRequestReceived(const QString &from_user_id,
@@ -1163,12 +1260,15 @@ void MainWindow::onFriendRemarkUpdateResult(int code, const QString &message,
     {
         contact_remarks_[friend_id] = trimmed_remark;
     }
-    conversations_[friend_id].title = display_name;
-    if (friend_id == current_chat_target_)
+    const QString conversation_key = conversationKey("p2p", friend_id);
+    conversations_[conversation_key].peer_id = friend_id;
+    conversations_[conversation_key].chat_type = "p2p";
+    conversations_[conversation_key].title = display_name;
+    if (conversation_key == current_chat_target_)
     {
         chat_target_label_->setText(display_name);
     }
-    updateConversationItem(friend_id);
+    updateConversationItem(conversation_key);
     rebuildContactList();
 }
 

@@ -138,6 +138,7 @@ private:
         std::string file_id;
         std::string from_user_id;
         std::string to_user_id;
+        int chat_type = 1;
         std::string file_name;
         std::string mime_type;
         std::uint64_t file_size = 0;

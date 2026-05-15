@@ -43,6 +43,8 @@ enum class MsgType : uint16_t {
     FILE_UPLOAD_START = 0x0019,  // 开始文件上传
     FILE_UPLOAD_CHUNK = 0x001A,  // 上传文件分片
     FILE_DOWNLOAD_REQ = 0x001B,  // 下载文件请求
+    CREATE_GROUP      = 0x001C,  // 创建群聊
+    GET_GROUP_LIST    = 0x001D,  // 获取群聊列表
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应
@@ -63,6 +65,9 @@ enum class MsgType : uint16_t {
     FILE_UPLOAD_RSP   = 0x8019, // 文件上传响应
     FILE_DOWNLOAD_RSP = 0x801A, // 文件下载响应
     FILE_DOWNLOAD_CHUNK = 0x801B, // 文件下载分片
+    CREATE_GROUP_RSP  = 0x801C, // 创建群聊响应
+    GROUP_LIST_RSP    = 0x801D, // 群聊列表响应
+    GROUP_LIST_UPDATE = 0x801E, // 群聊列表更新通知
 };
 
 /**

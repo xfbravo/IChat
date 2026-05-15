@@ -467,6 +467,58 @@ void Server::register_default_handlers() {
         session->send(MsgType::FRIEND_LIST_RSP, friend_list);
     });
 
+    dispatcher_.register_handler(MsgType::GET_GROUP_LIST, [this](std::shared_ptr<Session> session, const Message& msg) {
+        (void)msg;
+        if (session->user_id().empty()) {
+            session->send(MsgType::GROUP_LIST_RSP, "[]");
+            return;
+        }
+        std::string group_list = user_service_.get_group_list(session->user_id());
+        session->send(MsgType::GROUP_LIST_RSP, group_list);
+    });
+
+    dispatcher_.register_handler(MsgType::CREATE_GROUP, [this](std::shared_ptr<Session> session, const Message& msg) {
+        if (session->user_id().empty()) {
+            session->send(MsgType::CREATE_GROUP_RSP, json_response(401, "未登录"));
+            return;
+        }
+
+        std::string group_name;
+        std::vector<std::string> member_ids;
+        try {
+            json::object req = parse_json_object(msg.body);
+            group_name = json_string(req, "group_name");
+            json::array members = json_array_value(req, "member_ids");
+            for (const json::value& value : members) {
+                if (value.is_string()) {
+                    const auto& text = value.as_string();
+                    member_ids.emplace_back(text.data(), text.size());
+                }
+            }
+        } catch (const std::exception& e) {
+            session->send(MsgType::CREATE_GROUP_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
+            return;
+        }
+
+        GroupCreateResult result = user_service_.create_group(session->user_id(), group_name, member_ids);
+        json::object rsp;
+        rsp["code"] = result.code;
+        rsp["message"] = result.message;
+        rsp["group_id"] = result.group_id;
+        rsp["group_name"] = result.group_name;
+        rsp["group_avatar"] = result.group_avatar;
+        rsp["member_count"] = result.member_count;
+        session->send(MsgType::CREATE_GROUP_RSP, json::serialize(rsp));
+
+        if (result.code == 0) {
+            std::vector<std::string> members = user_service_.get_group_member_ids(result.group_id);
+            for (const std::string& member_id : members) {
+                const std::string group_list = user_service_.get_group_list(member_id);
+                send_to_user(member_id, MsgType::GROUP_LIST_UPDATE, group_list);
+            }
+        }
+    });
+
     // 获取用户个人信息
     dispatcher_.register_handler(MsgType::GET_USER_PROFILE, [this](std::shared_ptr<Session> session, const Message& msg) {
         if (session->user_id().empty()) {
@@ -557,12 +609,20 @@ void Server::register_default_handlers() {
     dispatcher_.register_handler(MsgType::GET_CHAT_HISTORY, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到获取聊天记录请求: " << session->user_id() << std::endl;
 
-        std::string friend_id;
+        std::string peer_id;
+        std::string chat_type_text;
         int limit = 20;
         int64_t before_time = 0;
         try {
             json::object req = parse_json_object(msg.body);
-            friend_id = json_string(req, "friend_id");
+            peer_id = json_string(req, "friend_id");
+            if (peer_id.empty()) {
+                peer_id = json_string(req, "peer_id");
+            }
+            if (peer_id.empty()) {
+                peer_id = json_string(req, "group_id");
+            }
+            chat_type_text = json_string(req, "chat_type", "p2p");
             limit = static_cast<int>(json_int64(req, "limit", limit));
             before_time = json_int64(req, "before_time", before_time);
         } catch (const std::exception& e) {
@@ -570,7 +630,8 @@ void Server::register_default_handlers() {
             return;
         }
 
-        std::string history = user_service_.get_chat_history(session->user_id(), friend_id, limit, before_time);
+        const int chat_type = chat_type_text == "group" ? 2 : 1;
+        std::string history = user_service_.get_chat_history(session->user_id(), peer_id, limit, before_time, chat_type);
         session->send(MsgType::CHAT_HISTORY_RSP, history);
     });
 
@@ -883,6 +944,8 @@ void Server::register_default_handlers() {
         constexpr uint64_t max_file_size = 200ULL * 1024ULL * 1024ULL;
         const std::string transfer_id = json_string(req, "transfer_id");
         const std::string to_user_id = json_string(req, "to_user_id");
+        const std::string chat_type_text = json_string(req, "chat_type", "p2p");
+        const int chat_type = chat_type_text == "group" ? 2 : 1;
         const std::string file_name = json_string(req, "file_name", "file");
         const std::string mime_type = json_string(req, "mime_type", "application/octet-stream");
         const uint64_t file_size = json_uint64(req, "file_size");
@@ -901,7 +964,14 @@ void Server::register_default_handlers() {
             session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
             return;
         }
-        if (!user_service_.user_exists(to_user_id) || !user_service_.are_friends(session->user_id(), to_user_id)) {
+        if (chat_type == 2) {
+            if (!user_service_.is_group_member(session->user_id(), to_user_id)) {
+                rsp["code"] = 403;
+                rsp["message"] = "只能给已加入的群聊发送文件";
+                session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
+                return;
+            }
+        } else if (!user_service_.user_exists(to_user_id) || !user_service_.are_friends(session->user_id(), to_user_id)) {
             rsp["code"] = 403;
             rsp["message"] = "只能给好友发送文件";
             session->send(MsgType::FILE_UPLOAD_RSP, json::serialize(rsp));
@@ -935,6 +1005,7 @@ void Server::register_default_handlers() {
         state.file_id = file_id;
         state.from_user_id = session->user_id();
         state.to_user_id = to_user_id;
+        state.chat_type = chat_type;
         state.file_name = file_name;
         state.mime_type = mime_type;
         state.file_size = file_size;
@@ -1187,6 +1258,8 @@ void Server::register_default_handlers() {
 
         std::string msg_id = json_string(payload, "msg_id");
         std::string to_user_id = json_string(payload, "to_user_id");
+        std::string chat_type_text = json_string(payload, "chat_type", "p2p");
+        const int chat_type = chat_type_text == "group" ? 2 : 1;
         std::string content_type = json_string(payload, "content_type", default_content_type(msg.type));
         std::string content = json_string(payload, "content");
         int64_t client_time = json_int64(payload, "client_time", static_cast<int64_t>(time(nullptr)));
@@ -1210,33 +1283,79 @@ void Server::register_default_handlers() {
             return;
         }
 
-        if (!user_service_.user_exists(to_user_id)) {
-            session->send(MsgType::ACK, message_ack(msg_id, "failed", 404, "目标用户不存在"));
-            return;
-        }
+        std::vector<std::string> group_members;
+        if (chat_type == 2) {
+            if (!user_service_.is_group_member(session->user_id(), to_user_id)) {
+                session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "只能给已加入的群聊发送消息"));
+                return;
+            }
+            group_members = user_service_.get_group_member_ids(to_user_id);
+        } else {
+            if (!user_service_.user_exists(to_user_id)) {
+                session->send(MsgType::ACK, message_ack(msg_id, "failed", 404, "目标用户不存在"));
+                return;
+            }
 
-        if (!user_service_.are_friends(session->user_id(), to_user_id)) {
-            session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "只能给好友发送消息"));
-            return;
-        }
+            if (!user_service_.are_friends(session->user_id(), to_user_id)) {
+                session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "只能给好友发送消息"));
+                return;
+            }
 
-        if (user_service_.is_blocked(to_user_id, session->user_id())
-            || user_service_.is_blocked(session->user_id(), to_user_id)) {
-            session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "消息被拦截"));
-            return;
+            if (user_service_.is_blocked(to_user_id, session->user_id())
+                || user_service_.is_blocked(session->user_id(), to_user_id)) {
+                session->send(MsgType::ACK, message_ack(msg_id, "failed", 403, "消息被拦截"));
+                return;
+            }
         }
 
         const int64_t server_timestamp = current_time_millis();
         payload["from_user_id"] = session->user_id();
         payload["content_type"] = content_type;
+        payload["chat_type"] = chat_type == 2 ? "group" : "p2p";
         payload["client_time"] = client_time;
         payload["server_timestamp"] = server_timestamp;
         const std::string forward_body = json::serialize(payload);
         const int msg_type_code = chat_content_type_code(content_type);
 
         if (!user_service_.save_message(
-                msg_id, msg_type_code, 1, session->user_id(), to_user_id, content_type, content, client_time)) {
+                msg_id, msg_type_code, chat_type, session->user_id(), to_user_id, content_type, content, client_time)) {
             session->send(MsgType::ACK, message_ack(msg_id, "failed", 500, "消息保存失败"));
+            return;
+        }
+
+        if (chat_type == 2) {
+            bool delivered_online = false;
+            auto conn_guard = db_pool_.get_connection();
+            MYSQL* mysql = conn_guard.get();
+            for (const std::string& member_id : group_members) {
+                if (member_id == session->user_id()) {
+                    continue;
+                }
+                if (send_to_user(member_id, MsgType::CHAT_MESSAGE, forward_body)) {
+                    delivered_online = true;
+                    continue;
+                }
+                if (!mysql) {
+                    continue;
+                }
+                std::ostringstream sql;
+                sql << "INSERT IGNORE INTO im_offline_message (user_id, msg_id, msg_type, chat_type, "
+                    << "from_user_id, to_user_id, content, client_time, server_time) "
+                    << "VALUES ('" << sql_escape(mysql, member_id) << "', "
+                    << "'" << sql_escape(mysql, msg_id) << "', " << msg_type_code << ", 2, "
+                    << "'" << sql_escape(mysql, session->user_id()) << "', "
+                    << "'" << sql_escape(mysql, to_user_id) << "', "
+                    << "'" << sql_escape(mysql, content) << "', "
+                    << "FROM_UNIXTIME(" << client_time << "), NOW())";
+                if (mysql_query(mysql, sql.str().c_str())) {
+                    std::cerr << "[Server] 保存群离线消息失败: " << mysql_error(mysql) << std::endl;
+                }
+            }
+            session->send(MsgType::ACK,
+                          message_ack(msg_id,
+                                      delivered_online ? "delivered" : "sent",
+                                      0,
+                                      delivered_online ? "群消息已送达" : "群消息已保存"));
             return;
         }
 

@@ -110,6 +110,10 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onDisconnected);
     connect(tcp_client_, &TcpClient::friendListReceived,
             this, &MainWindow::onFriendListReceived);
+    connect(tcp_client_, &TcpClient::groupListReceived,
+            this, &MainWindow::onGroupListReceived);
+    connect(tcp_client_, &TcpClient::groupCreateResult,
+            this, &MainWindow::onGroupCreateResult);
     connect(tcp_client_, &TcpClient::friendRequestReceived,
             this, &MainWindow::onFriendRequestReceived);
     connect(tcp_client_, &TcpClient::friendRequestsReceived,

@@ -91,12 +91,15 @@ public:
      */
     QString sendChatMessage(const QString& to_user_id,
                             const QString& content_type,
-                            const QString& content);
+                            const QString& content,
+                            const QString& chat_type = QStringLiteral("p2p"));
 
     /**
      * @brief 上传文件，上传完成后自动发送 file 类型聊天消息
      */
-    void sendFiles(const QString& to_user_id, const QStringList& file_paths);
+    void sendFiles(const QString& to_user_id,
+                   const QStringList& file_paths,
+                   const QString& chat_type = QStringLiteral("p2p"));
 
     /**
      * @brief 请求下载聊天文件
@@ -119,6 +122,16 @@ public:
      * @brief 获取好友列表
      */
     void getFriendList();
+
+    /**
+     * @brief 创建群聊
+     */
+    void createGroup(const QString& group_name, const QStringList& member_ids);
+
+    /**
+     * @brief 获取群聊列表
+     */
+    void getGroupList();
 
     /**
      * @brief 获取好友请求列表
@@ -177,7 +190,10 @@ public:
      * @param limit 消息数量
      * @param before_time 时间戳（之前的消息）
      */
-    void getChatHistory(const QString& friend_id, int limit = 20, int64_t before_time = 0);
+    void getChatHistory(const QString& peer_id,
+                        int limit = 20,
+                        int64_t before_time = 0,
+                        const QString& chat_type = QStringLiteral("p2p"));
 
     /**
      * @brief 获取当前状态
@@ -266,7 +282,9 @@ signals:
     void chatMessageReceived(const QString& from_user_id, const QString& content,
                              const QString& content_type,
                              const QString& msg_id, qint64 server_timestamp,
-                             const QString& server_time);
+                             const QString& server_time,
+                             const QString& to_user_id,
+                             const QString& chat_type);
 
     /**
      * @brief 心跳响应信号
@@ -333,6 +351,21 @@ signals:
     void friendListReceived(const QString& friend_list_json);
 
     /**
+     * @brief 群聊列表信号
+     */
+    void groupListReceived(const QString& group_list_json);
+
+    /**
+     * @brief 创建群聊结果
+     */
+    void groupCreateResult(int code,
+                           const QString& message,
+                           const QString& group_id,
+                           const QString& group_name,
+                           const QString& group_avatar,
+                           int member_count);
+
+    /**
      * @brief 好友请求列表信号
      */
     void friendRequestsReceived(const QString& requests_json);
@@ -340,7 +373,9 @@ signals:
     /**
      * @brief 聊天记录信号
      */
-    void chatHistoryReceived(const QString& friend_id, const QString& history_json);
+    void chatHistoryReceived(const QString& peer_id,
+                             const QString& chat_type,
+                             const QString& history_json);
 
     /**
      * @brief 收到离线消息信号
@@ -348,7 +383,9 @@ signals:
     void offlineMessageReceived(const QString& from_user_id, const QString& content,
                                 const QString& content_type,
                                 const QString& msg_id, qint64 server_timestamp,
-                                const QString& server_time);
+                                const QString& server_time,
+                                const QString& to_user_id,
+                                const QString& chat_type);
 
     /**
      * @brief 消息发送状态回执
@@ -378,6 +415,7 @@ signals:
      * @brief 文件上传完成后已经发出的聊天文件消息
      */
     void fileMessageSent(const QString& to_user_id,
+                         const QString& chat_type,
                          const QString& content_type,
                          const QString& content,
                          const QString& msg_id);
@@ -453,11 +491,13 @@ private:
     void saveCredentials();
 
     bool expecting_friend_requests_ = false;
-    QString current_chat_history_friend_id_;
+    QString current_chat_history_peer_id_;
+    QString current_chat_history_type_ = QStringLiteral("p2p");
 
     struct PendingUpload {
         QString transfer_id;
         QString to_user_id;
+        QString chat_type = QStringLiteral("p2p");
         QString file_path;
         QString file_name;
         QString mime_type;
