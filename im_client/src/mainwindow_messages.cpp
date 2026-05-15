@@ -27,7 +27,9 @@
 #include <QDialog>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QApplication>
 #include <QListView>
+#include <QAbstractItemView>
 #include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
@@ -45,6 +47,8 @@
 #include <QImage>
 #include <QImageReader>
 #include <QIODevice>
+#include <QEvent>
+#include <QKeyEvent>
 #include <algorithm>
 #include "mainwindow_helpers.h"
 
@@ -69,6 +73,24 @@ QJsonObject messageContentObject(const QString& content) {
     return doc.isObject() ? doc.object() : QJsonObject();
 }
 
+int fieldMatchScore(const QString& query, const QString& field) {
+    const QString normalized_query = query.trimmed().toCaseFolded();
+    const QString normalized_field = field.trimmed().toCaseFolded();
+    if (normalized_query.isEmpty() || normalized_field.isEmpty()) {
+        return 0;
+    }
+    if (normalized_field == normalized_query) {
+        return 300;
+    }
+    if (normalized_field.startsWith(normalized_query)) {
+        return 200;
+    }
+    if (normalized_field.contains(normalized_query)) {
+        return 100;
+    }
+    return 0;
+}
+
 } // namespace
 
 void MainWindow::createMessageView() {
@@ -79,6 +101,67 @@ void MainWindow::createMessageView() {
     main_layout->setSpacing(0);
 
     // 聊天列表 (左侧)
+    conversation_panel_ = new QWidget;
+    conversation_panel_->setStyleSheet("QWidget { background-color: #f5f5f5; }");
+    QVBoxLayout* conversation_layout = new QVBoxLayout(conversation_panel_);
+    conversation_layout->setContentsMargins(0, 0, 0, 0);
+    conversation_layout->setSpacing(0);
+
+    QWidget* conversation_search_bar = new QWidget(conversation_panel_);
+    conversation_search_bar->setFixedHeight(54);
+    conversation_search_bar->setStyleSheet(R"(
+        QWidget {
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #e0e0e0;
+        }
+    )");
+    QHBoxLayout* conversation_search_layout = new QHBoxLayout(conversation_search_bar);
+    conversation_search_layout->setContentsMargins(10, 8, 10, 8);
+    conversation_search_layout->setSpacing(8);
+
+    conversation_search_edit_ = new QLineEdit(conversation_search_bar);
+    conversation_search_edit_->setPlaceholderText("搜索对话");
+    conversation_search_edit_->setClearButtonEnabled(true);
+    conversation_search_edit_->setStyleSheet(R"(
+        QLineEdit {
+            min-height: 34px;
+            padding: 0 10px;
+            border: 1px solid #dddddd;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #111111;
+            font-size: 14px;
+        }
+        QLineEdit:focus {
+            border: 1px solid #4CAF50;
+        }
+    )");
+    conversation_search_edit_->installEventFilter(this);
+    connect(conversation_search_edit_, &QLineEdit::textChanged,
+            this, &MainWindow::onConversationSearchTextChanged);
+    conversation_search_layout->addWidget(conversation_search_edit_, 1);
+
+    QToolButton* conversation_add_button = new QToolButton(conversation_search_bar);
+    conversation_add_button->setText("+");
+    conversation_add_button->setToolTip("新建");
+    conversation_add_button->setCursor(Qt::PointingHandCursor);
+    conversation_add_button->setFixedSize(34, 34);
+    conversation_add_button->setStyleSheet(R"(
+        QToolButton {
+            border: 1px solid #dddddd;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #333333;
+            font-size: 22px;
+            padding-bottom: 3px;
+        }
+        QToolButton:hover {
+            background-color: #eeeeee;
+        }
+    )");
+    conversation_search_layout->addWidget(conversation_add_button);
+    conversation_layout->addWidget(conversation_search_bar);
+
     chat_list_widget_ = new QListWidget;
     chat_list_widget_->setFocusPolicy(Qt::NoFocus);
     chat_list_widget_->setStyleSheet(R"(
@@ -109,6 +192,37 @@ void MainWindow::createMessageView() {
             this, &MainWindow::onChatItemClicked);
     connect(chat_list_widget_, &QListWidget::itemSelectionChanged,
             this, &MainWindow::refreshConversationSelectionStyles);
+    conversation_layout->addWidget(chat_list_widget_, 1);
+
+    conversation_search_results_ = new QListWidget(conversation_panel_);
+    conversation_search_results_->setFocusPolicy(Qt::NoFocus);
+    conversation_search_results_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    conversation_search_results_->setSelectionMode(QAbstractItemView::SingleSelection);
+    conversation_search_results_->installEventFilter(this);
+    conversation_search_results_->hide();
+    conversation_search_results_->setStyleSheet(R"(
+        QListWidget {
+            border: 1px solid #dcdcdc;
+            background-color: #ffffff;
+            color: #111111;
+            outline: none;
+        }
+        QListWidget::item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eeeeee;
+        }
+        QListWidget::item:hover,
+        QListWidget::item:selected {
+            background-color: #e8f5e9;
+            color: #111111;
+        }
+        QListWidget::item:disabled {
+            color: #999999;
+            background-color: #ffffff;
+        }
+    )");
+    connect(conversation_search_results_, &QListWidget::itemClicked,
+            this, &MainWindow::onSearchResultClicked);
 
     // 聊天界面面板 (右侧)
     chat_interface_panel_ = new QWidget;
@@ -302,13 +416,278 @@ void MainWindow::createMessageView() {
 
     // 使用分割器
     message_splitter_ = new QSplitter(Qt::Horizontal);
-    message_splitter_->addWidget(chat_list_widget_);
+    message_splitter_->addWidget(conversation_panel_);
     message_splitter_->addWidget(chat_interface_panel_);
     message_splitter_->setStretchFactor(0, 1);
     message_splitter_->setStretchFactor(1, 3);
     message_splitter_->setHandleWidth(1);
 
     main_layout->addWidget(message_splitter_);
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    const bool is_search_widget =
+        watched == conversation_search_edit_ ||
+        watched == conversation_search_results_ ||
+        watched == contact_search_edit_ ||
+        watched == contact_search_results_;
+
+    if (is_search_widget && event->type() == QEvent::FocusOut) {
+        QTimer::singleShot(0, this, [this]() {
+            QWidget* focused = QApplication::focusWidget();
+            const bool focus_in_conversation_search =
+                focused == conversation_search_edit_ || focused == conversation_search_results_;
+            const bool focus_in_contact_search =
+                focused == contact_search_edit_ || focused == contact_search_results_;
+            if (!focus_in_conversation_search && !focus_in_contact_search) {
+                hideSearchResults();
+            }
+        });
+    }
+
+    if ((watched == conversation_search_edit_ || watched == contact_search_edit_) &&
+        event->type() == QEvent::KeyPress) {
+        QKeyEvent* key_event = static_cast<QKeyEvent*>(event);
+        if (key_event->key() == Qt::Key_Escape) {
+            hideSearchResults();
+            return true;
+        }
+    }
+
+    if (watched == conversation_search_edit_ && event->type() == QEvent::Resize &&
+        conversation_search_results_ && conversation_search_results_->isVisible()) {
+        positionSearchResults(conversation_search_edit_, conversation_search_results_);
+    }
+    if (watched == contact_search_edit_ && event->type() == QEvent::Resize &&
+        contact_search_results_ && contact_search_results_->isVisible()) {
+        positionSearchResults(contact_search_edit_, contact_search_results_);
+    }
+
+    return QMainWindow::eventFilter(watched, event);
+}
+
+QList<QString> MainWindow::sortedConversationIds() const {
+    QList<QString> peer_ids = conversations_.keys();
+    // 会话列表优先按最近消息倒序，其次按标题排序，搜索定位也复用这份原始顺序。
+    std::stable_sort(peer_ids.begin(), peer_ids.end(),
+                     [this](const QString& left, const QString& right) {
+                         const ConversationState& left_conversation = conversations_.constFind(left).value();
+                         const ConversationState& right_conversation = conversations_.constFind(right).value();
+                         if (left_conversation.last_timestamp != right_conversation.last_timestamp) {
+                             return left_conversation.last_timestamp > right_conversation.last_timestamp;
+                         }
+                         return conversationTitle(left).localeAwareCompare(conversationTitle(right)) < 0;
+                     });
+    return peer_ids;
+}
+
+QString MainWindow::contactDisplayName(const QString& user_id) const {
+    const QString remark = contact_remarks_.value(user_id).trimmed();
+    if (!remark.isEmpty()) {
+        return remark;
+    }
+
+    const QString nickname = contact_nicknames_.value(user_id).trimmed();
+    if (!nickname.isEmpty()) {
+        return nickname;
+    }
+
+    const QString title = conversationTitle(user_id).trimmed();
+    return title.isEmpty() ? user_id : title;
+}
+
+QString MainWindow::contactSubtitle(const QString& user_id) const {
+    const QString remark = contact_remarks_.value(user_id).trimmed();
+    const QString nickname = contact_nicknames_.value(user_id).trimmed();
+    if (!remark.isEmpty() && !nickname.isEmpty() && nickname != remark) {
+        return QString("昵称: %1").arg(nickname);
+    }
+    return QString("账号: %1").arg(user_id);
+}
+
+void MainWindow::populateSearchResults(QListWidget* results_widget,
+                                       const QString& query,
+                                       bool keep_conversation_order) {
+    if (!results_widget) {
+        return;
+    }
+
+    results_widget->clear();
+    const QString keyword = query.trimmed();
+    if (keyword.isEmpty()) {
+        results_widget->hide();
+        return;
+    }
+
+    QList<QString> user_ids = keep_conversation_order ? sortedConversationIds() : conversations_.keys();
+    if (!keep_conversation_order) {
+        const QList<QHash<QString, QString>> contact_maps = {
+            contact_remarks_,
+            contact_nicknames_,
+            contact_avatars_
+        };
+        for (const QHash<QString, QString>& map : contact_maps) {
+            for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+                if (!it.key().isEmpty() && !user_ids.contains(it.key())) {
+                    user_ids.append(it.key());
+                }
+            }
+        }
+        for (auto it = user_profile_cache_.constBegin(); it != user_profile_cache_.constEnd(); ++it) {
+            if (!it.key().isEmpty() && it.key() != user_id_ && !user_ids.contains(it.key())) {
+                user_ids.append(it.key());
+            }
+        }
+    }
+
+    struct SearchCandidate {
+        QString user_id;
+        QString display_name;
+        QString subtitle;
+        int score = 0;
+        int order = 0;
+    };
+
+    QList<SearchCandidate> candidates;
+    for (int i = 0; i < user_ids.size(); ++i) {
+        const QString target_id = user_ids.at(i);
+        if (target_id.isEmpty() || target_id == user_id_) {
+            continue;
+        }
+
+        const QString display_name = contactDisplayName(target_id);
+        const QString remark = contact_remarks_.value(target_id);
+        const QString nickname = contact_nicknames_.value(target_id);
+        const QString title = conversationTitle(target_id);
+        int score = 0;
+        for (const QString& field : {display_name, remark, nickname, title, target_id}) {
+            score = qMax(score, fieldMatchScore(keyword, field));
+        }
+        if (score <= 0) {
+            continue;
+        }
+
+        SearchCandidate candidate;
+        candidate.user_id = target_id;
+        candidate.display_name = display_name;
+        candidate.subtitle = contactSubtitle(target_id);
+        candidate.score = score;
+        candidate.order = i;
+        candidates.append(candidate);
+    }
+
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [keep_conversation_order](const SearchCandidate& left,
+                                               const SearchCandidate& right) {
+                         if (left.score != right.score) {
+                             return left.score > right.score;
+                         }
+                         if (keep_conversation_order) {
+                             return left.order < right.order;
+                         }
+                         const int name_compare = left.display_name.localeAwareCompare(right.display_name);
+                         if (name_compare != 0) {
+                             return name_compare < 0;
+                         }
+                         return left.user_id.localeAwareCompare(right.user_id) < 0;
+                     });
+
+    if (candidates.isEmpty()) {
+        QListWidgetItem* empty_item = new QListWidgetItem("无匹配结果");
+        empty_item->setFlags(Qt::NoItemFlags);
+        empty_item->setSizeHint(QSize(0, 44));
+        results_widget->addItem(empty_item);
+        return;
+    }
+
+    for (const SearchCandidate& candidate : candidates) {
+        QListWidgetItem* item = new QListWidgetItem(
+            QString("%1\n%2").arg(candidate.display_name, candidate.subtitle));
+        item->setData(Qt::UserRole, candidate.user_id);
+        item->setData(Qt::AccessibleTextRole, candidate.display_name);
+        item->setSizeHint(QSize(0, 54));
+        item->setToolTip(QString("%1 (%2)").arg(candidate.display_name, candidate.user_id));
+        results_widget->addItem(item);
+    }
+}
+
+void MainWindow::positionSearchResults(QLineEdit* anchor, QListWidget* results_widget) {
+    if (!anchor || !results_widget || results_widget->count() == 0) {
+        return;
+    }
+
+    QWidget* parent = results_widget->parentWidget();
+    if (!parent) {
+        return;
+    }
+
+    const QPoint top_left = anchor->mapTo(parent, QPoint(0, anchor->height() + 4));
+    const int row_height = results_widget->sizeHintForRow(0) > 0 ? results_widget->sizeHintForRow(0) : 54;
+    const int desired_height = qMin(260, qMax(44, row_height * qMin(results_widget->count(), 5) + 2));
+    results_widget->setGeometry(top_left.x(), top_left.y(), anchor->width(), desired_height);
+    results_widget->raise();
+    results_widget->show();
+}
+
+void MainWindow::hideSearchResults() {
+    if (conversation_search_results_) {
+        conversation_search_results_->hide();
+    }
+    if (contact_search_results_) {
+        contact_search_results_->hide();
+    }
+}
+
+void MainWindow::openSearchResultConversation(const QString& user_id, const QString& display_name) {
+    if (user_id.isEmpty()) {
+        return;
+    }
+
+    hideSearchResults();
+    if (conversation_search_edit_) {
+        conversation_search_edit_->clear();
+    }
+    if (contact_search_edit_) {
+        contact_search_edit_->clear();
+    }
+
+    const QString title = display_name.trimmed().isEmpty() ? contactDisplayName(user_id) : display_name.trimmed();
+    switchToChatWith(user_id, title);
+    if (nav_list_) {
+        nav_list_->setCurrentRow(0);
+    }
+    if (content_stacked_ && message_view_) {
+        content_stacked_->setCurrentWidget(message_view_);
+    }
+
+    for (int i = 0; chat_list_widget_ && i < chat_list_widget_->count(); ++i) {
+        QListWidgetItem* item = chat_list_widget_->item(i);
+        if (item && item->data(Qt::UserRole).toString() == user_id) {
+            chat_list_widget_->setCurrentItem(item);
+            chat_list_widget_->scrollToItem(item, QAbstractItemView::PositionAtCenter);
+            break;
+        }
+    }
+}
+
+void MainWindow::onConversationSearchTextChanged(const QString& text) {
+    populateSearchResults(conversation_search_results_, text, true);
+    positionSearchResults(conversation_search_edit_, conversation_search_results_);
+}
+
+void MainWindow::onContactSearchTextChanged(const QString& text) {
+    populateSearchResults(contact_search_results_, text, false);
+    positionSearchResults(contact_search_edit_, contact_search_results_);
+}
+
+void MainWindow::onSearchResultClicked(QListWidgetItem* item) {
+    if (!item || !item->flags().testFlag(Qt::ItemIsEnabled)) {
+        return;
+    }
+
+    const QString user_id = item->data(Qt::UserRole).toString();
+    const QString display_name = item->data(Qt::AccessibleTextRole).toString();
+    openSearchResultConversation(user_id, display_name);
 }
 
 void MainWindow::onSendClicked() {
@@ -639,17 +1018,7 @@ void MainWindow::refreshConversationList() {
         selected_peer = chat_list_widget_->currentItem()->data(Qt::UserRole).toString();
     }
 
-    QList<QString> peer_ids = conversations_.keys();
-    // 会话列表优先按最近消息倒序，其次按标题排序，保持列表稳定。
-    std::stable_sort(peer_ids.begin(), peer_ids.end(),
-                     [this](const QString& left, const QString& right) {
-                         const ConversationState& left_conversation = conversations_[left];
-                         const ConversationState& right_conversation = conversations_[right];
-                         if (left_conversation.last_timestamp != right_conversation.last_timestamp) {
-                             return left_conversation.last_timestamp > right_conversation.last_timestamp;
-                         }
-                         return conversationTitle(left).localeAwareCompare(conversationTitle(right)) < 0;
-                     });
+    const QList<QString> peer_ids = sortedConversationIds();
 
     chat_list_widget_->clear();
 
@@ -674,6 +1043,9 @@ void MainWindow::refreshConversationList() {
     }
 
     refreshConversationSelectionStyles();
+    if (conversation_search_edit_ && !conversation_search_edit_->text().trimmed().isEmpty()) {
+        onConversationSearchTextChanged(conversation_search_edit_->text());
+    }
 }
 
 void MainWindow::refreshConversationSelectionStyles() {

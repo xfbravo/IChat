@@ -223,6 +223,7 @@ void MainWindow::createNavigationBar() {
 
 void MainWindow::onNavigationItemClicked(int index) {
     if (!content_stacked_) return;
+    hideSearchResults();
 
     // 进入页面时按需刷新数据，避免联系人/消息列表长时间停留在旧状态。
     switch (index) {

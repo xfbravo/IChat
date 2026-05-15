@@ -196,6 +196,31 @@ void MainWindow::createContactView()
         }
     )");
     top_layout->addWidget(title_label);
+    top_layout->addSpacing(12);
+
+    contact_search_edit_ = new QLineEdit(top_widget);
+    contact_search_edit_->setPlaceholderText("搜索联系人");
+    contact_search_edit_->setClearButtonEnabled(true);
+    contact_search_edit_->setMinimumWidth(220);
+    contact_search_edit_->setMaximumWidth(360);
+    contact_search_edit_->setStyleSheet(R"(
+        QLineEdit {
+            min-height: 34px;
+            padding: 0 10px;
+            border: 1px solid #dddddd;
+            border-radius: 4px;
+            background-color: #ffffff;
+            color: #111111;
+            font-size: 14px;
+        }
+        QLineEdit:focus {
+            border: 1px solid #4CAF50;
+        }
+    )");
+    contact_search_edit_->installEventFilter(this);
+    connect(contact_search_edit_, &QLineEdit::textChanged,
+            this, &MainWindow::onContactSearchTextChanged);
+    top_layout->addWidget(contact_search_edit_, 1);
     top_layout->addStretch();
 
     add_contact_button_ = new QPushButton("添加联系人");
@@ -237,6 +262,36 @@ void MainWindow::createContactView()
     top_layout->addWidget(view_requests_button);
 
     layout->addWidget(top_widget);
+
+    contact_search_results_ = new QListWidget(contact_view_);
+    contact_search_results_->setFocusPolicy(Qt::NoFocus);
+    contact_search_results_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    contact_search_results_->setSelectionMode(QAbstractItemView::SingleSelection);
+    contact_search_results_->installEventFilter(this);
+    contact_search_results_->hide();
+    contact_search_results_->setStyleSheet(R"(
+        QListWidget {
+            border: 1px solid #dcdcdc;
+            background-color: #ffffff;
+            color: #111111;
+            outline: none;
+        }
+        QListWidget::item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eeeeee;
+        }
+        QListWidget::item:hover,
+        QListWidget::item:selected {
+            background-color: #e8f5e9;
+            color: #111111;
+        }
+        QListWidget::item:disabled {
+            color: #999999;
+            background-color: #ffffff;
+        }
+    )");
+    connect(contact_search_results_, &QListWidget::itemClicked,
+            this, &MainWindow::onSearchResultClicked);
 
     // 联系人树
     contact_tree_widget_ = new QTreeWidget;
@@ -873,6 +928,11 @@ void MainWindow::rebuildContactList()
             },
             contact_tree_widget_);
         contact_tree_widget_->setItemWidget(friend_item, 0, item_widget);
+    }
+
+    if (contact_search_edit_ && !contact_search_edit_->text().trimmed().isEmpty())
+    {
+        onContactSearchTextChanged(contact_search_edit_->text());
     }
 }
 

@@ -30,6 +30,7 @@
 
 class QPropertyAnimation;
 class QDialog;
+class QEvent;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -81,6 +82,9 @@ private slots:
     void onFriendListReceived(const QString& json);
     void onFriendRequestReceived(const QString& from_user_id, const QString& from_nickname, const QString& message);
     void onFriendRequestsReceived(const QString& json);
+    void onConversationSearchTextChanged(const QString& text);
+    void onContactSearchTextChanged(const QString& text);
+    void onSearchResultClicked(QListWidgetItem* item);
 
     void onLogoutClicked();
     void onEditContactRemark();
@@ -108,6 +112,8 @@ private slots:
     void onMomentsReceived(const QString& moments_json);
 
 private:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
     /**
      * @brief 头像点击后展示的只读资料缓存
      *
@@ -196,6 +202,15 @@ private:
     void refreshConversationList();
     void refreshConversationSelectionStyles();
     QString conversationTitle(const QString& peer_id) const;
+
+    // 搜索只读取本地会话/联系人缓存，点击结果后复用会话切换并定位原列表项。
+    QList<QString> sortedConversationIds() const;
+    QString contactDisplayName(const QString& user_id) const;
+    QString contactSubtitle(const QString& user_id) const;
+    void populateSearchResults(QListWidget* results_widget, const QString& query, bool keep_conversation_order);
+    void positionSearchResults(QLineEdit* anchor, QListWidget* results_widget);
+    void hideSearchResults();
+    void openSearchResultConversation(const QString& user_id, const QString& display_name);
     void rebuildContactList();
     void loadChatList();
     void loadContacts();
@@ -220,6 +235,9 @@ private:
     // Message View
     QWidget* message_view_;
     QSplitter* message_splitter_;
+    QWidget* conversation_panel_ = nullptr;
+    QLineEdit* conversation_search_edit_ = nullptr;
+    QListWidget* conversation_search_results_ = nullptr;
     QListWidget* chat_list_widget_;
     QWidget* chat_interface_panel_;
     QLabel* chat_target_label_;
@@ -234,6 +252,8 @@ private:
 
     // Contact View
     QWidget* contact_view_;
+    QLineEdit* contact_search_edit_ = nullptr;
+    QListWidget* contact_search_results_ = nullptr;
     QTreeWidget* contact_tree_widget_;
     QPushButton* add_contact_button_;
 
