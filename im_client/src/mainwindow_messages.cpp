@@ -50,7 +50,6 @@
 #include <QEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QCheckBox>
 #include <algorithm>
 #include <functional>
 #include "mainwindow_helpers.h"
@@ -116,6 +115,30 @@ QIcon createMenuActionIcon(const QString& type) {
     }
 
     return QIcon(pixmap);
+}
+
+QPixmap selectionBoxPixmap(bool checked, int size) {
+    QPixmap pixmap(size, size);
+    pixmap.fill(Qt::transparent);
+
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+
+    const QRectF box(1.5, 1.5, size - 3, size - 3);
+    painter.setPen(QPen(checked ? QColor("#4CAF50") : QColor("#b8c4bc"), 1.6));
+    painter.setBrush(checked ? QColor("#4CAF50") : QColor("#ffffff"));
+    painter.drawRoundedRect(box, 4, 4);
+
+    if (checked) {
+        painter.setPen(QPen(Qt::white, 2.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        QPainterPath tick;
+        tick.moveTo(size * 0.28, size * 0.52);
+        tick.lineTo(size * 0.44, size * 0.68);
+        tick.lineTo(size * 0.74, size * 0.34);
+        painter.drawPath(tick);
+    }
+
+    return pixmap;
 }
 
 class SearchResultItemWidget : public QWidget {
@@ -192,13 +215,10 @@ public:
             }
         )");
 
-        check_box_ = new QCheckBox(this);
-        check_box_->setCursor(Qt::PointingHandCursor);
-        check_box_->setStyleSheet(R"(
-            QCheckBox {
-                background: transparent;
-            }
-        )");
+        check_indicator_ = new QLabel(this);
+        check_indicator_->setFixedSize(22, 22);
+        check_indicator_->setPixmap(selectionBoxPixmap(false, 22));
+        check_indicator_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
         constexpr int avatar_size = 38;
         QLabel* avatar_label = new QLabel(this);
@@ -240,31 +260,30 @@ public:
         QHBoxLayout* layout = new QHBoxLayout(this);
         layout->setContentsMargins(10, 8, 10, 8);
         layout->setSpacing(10);
-        layout->addWidget(check_box_, 0, Qt::AlignVCenter);
+        layout->addWidget(check_indicator_, 0, Qt::AlignVCenter);
         layout->addWidget(avatar_label, 0, Qt::AlignVCenter);
         layout->addLayout(text_layout, 1);
-
-        QObject::connect(check_box_, &QCheckBox::toggled, this, [this](bool checked) {
-            if (toggled_handler_) {
-                toggled_handler_(checked);
-            }
-        });
     }
 
     bool isChecked() const {
-        return check_box_ && check_box_->isChecked();
+        return checked_;
     }
 
 protected:
     void mousePressEvent(QMouseEvent* event) override {
-        if (check_box_) {
-            check_box_->toggle();
+        checked_ = !checked_;
+        if (check_indicator_) {
+            check_indicator_->setPixmap(selectionBoxPixmap(checked_, 22));
+        }
+        if (toggled_handler_) {
+            toggled_handler_(checked_);
         }
         event->accept();
     }
 
 private:
-    QCheckBox* check_box_ = nullptr;
+    QLabel* check_indicator_ = nullptr;
+    bool checked_ = false;
     std::function<void(bool)> toggled_handler_;
 };
 
