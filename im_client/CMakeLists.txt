@@ -22,12 +22,42 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 
 option(ICHAT_WITH_LIBDATACHANNEL "Enable libdatachannel WebRTC signaling adapter" ON)
+set(ICHAT_LIBDATACHANNEL_ROOT "" CACHE PATH "Root directory of the Windows/MinGW libdatachannel install")
 if(ICHAT_WITH_LIBDATACHANNEL)
-    find_package(LibDataChannel CONFIG QUIET)
+    set(_ichat_libdatachannel_hints)
+    if(ICHAT_LIBDATACHANNEL_ROOT)
+        list(APPEND _ichat_libdatachannel_hints
+            "${ICHAT_LIBDATACHANNEL_ROOT}"
+            "${ICHAT_LIBDATACHANNEL_ROOT}/build"
+            "${ICHAT_LIBDATACHANNEL_ROOT}/install"
+        )
+    endif()
+    if(DEFINED ENV{ICHAT_LIBDATACHANNEL_ROOT})
+        list(APPEND _ichat_libdatachannel_hints
+            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}"
+            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}/build"
+            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}/install"
+        )
+    endif()
+
+    # Common local paths used while developing from Qt Creator/MSYS2.
+    list(APPEND _ichat_libdatachannel_hints
+        "C:/deps/libdatachannel"
+        "C:/msys64/home/21023/libdatachannel"
+        "C:/msys64/home/21023/libdatachannel/build"
+        "C:/msys64/home/21023/libdatachannel/install"
+    )
+
+    find_package(LibDataChannel CONFIG QUIET
+        HINTS ${_ichat_libdatachannel_hints}
+    )
+endif()
+if(ICHAT_WITH_LIBDATACHANNEL)
     if(LibDataChannel_FOUND)
         message(STATUS "Found libdatachannel: enabling WebRTC PeerConnection adapter")
     else()
         message(STATUS "libdatachannel not found: building without WebRTC PeerConnection adapter")
+        message(STATUS "Set ICHAT_LIBDATACHANNEL_ROOT or add the install prefix to CMAKE_PREFIX_PATH.")
     endif()
 endif()
 

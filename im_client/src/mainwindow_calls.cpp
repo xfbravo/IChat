@@ -54,7 +54,12 @@ void MainWindow::startOutgoingCall(const QString& call_type) {
     updateCallDialog();
     call_timeout_timer_->start(30000);
     if (!call_media_adapter_->startOffer(active_call_id_, active_call_type_)) {
-        finishActiveCall(QStringLiteral("WebRTC 初始化失败"), false);
+        const QString error = call_media_adapter_->lastErrorMessage().isEmpty()
+            ? QStringLiteral("WebRTC 初始化失败")
+            : call_media_adapter_->lastErrorMessage();
+        if (call_state_ != CallState::Idle) {
+            finishActiveCall(error, false);
+        }
     }
 }
 
@@ -142,10 +147,15 @@ void MainWindow::onAcceptCallClicked() {
     call_state_ = CallState::Connecting;
     updateCallDialog();
     if (!call_media_adapter_->startAnswer(active_call_id_, active_call_type_, active_call_remote_sdp_)) {
-        if (tcp_client_) {
-            tcp_client_->rejectCall(active_call_id_, active_call_peer_id_, QStringLiteral("WebRTC 初始化失败"));
+        const QString error = call_media_adapter_->lastErrorMessage().isEmpty()
+            ? QStringLiteral("WebRTC 初始化失败")
+            : call_media_adapter_->lastErrorMessage();
+        if (tcp_client_ && !active_call_id_.isEmpty() && !active_call_peer_id_.isEmpty()) {
+            tcp_client_->rejectCall(active_call_id_, active_call_peer_id_, error);
         }
-        finishActiveCall(QStringLiteral("WebRTC 初始化失败"), false);
+        if (call_state_ != CallState::Idle) {
+            finishActiveCall(error, false);
+        }
         return;
     }
 }

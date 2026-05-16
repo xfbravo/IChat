@@ -19,6 +19,7 @@ struct CallMediaAdapter::Impl {
     QString call_id;
     QString call_type = QStringLiteral("audio");
     QJsonArray ice_servers;
+    QString last_error_message;
     bool force_relay = false;
 #if defined(ICHAT_WITH_LIBDATACHANNEL)
     std::shared_ptr<rtc::PeerConnection> peer_connection;
@@ -171,8 +172,13 @@ void CallMediaAdapter::setForceRelay(bool force_relay) {
     impl_->force_relay = force_relay;
 }
 
+QString CallMediaAdapter::lastErrorMessage() const {
+    return impl_->last_error_message;
+}
+
 bool CallMediaAdapter::startOffer(const QString& call_id, const QString& call_type) {
 #if defined(ICHAT_WITH_LIBDATACHANNEL)
+    impl_->last_error_message.clear();
     close();
     impl_->call_id = call_id;
     impl_->call_type = call_type == "video" ? QStringLiteral("video") : QStringLiteral("audio");
@@ -215,13 +221,15 @@ bool CallMediaAdapter::startOffer(const QString& call_id, const QString& call_ty
 #else
     Q_UNUSED(call_id);
     Q_UNUSED(call_type);
-    emit errorOccurred(QStringLiteral("当前构建未启用 libdatachannel。"));
+    impl_->last_error_message = QStringLiteral("当前构建未启用 libdatachannel。");
+    emit errorOccurred(impl_->last_error_message);
     return false;
 #endif
 }
 
 bool CallMediaAdapter::startAnswer(const QString& call_id, const QString& call_type, const QJsonObject& remote_sdp) {
 #if defined(ICHAT_WITH_LIBDATACHANNEL)
+    impl_->last_error_message.clear();
     close();
     impl_->call_id = call_id;
     impl_->call_type = call_type == "video" ? QStringLiteral("video") : QStringLiteral("audio");
@@ -268,7 +276,8 @@ bool CallMediaAdapter::startAnswer(const QString& call_id, const QString& call_t
     Q_UNUSED(call_id);
     Q_UNUSED(call_type);
     Q_UNUSED(remote_sdp);
-    emit errorOccurred(QStringLiteral("当前构建未启用 libdatachannel。"));
+    impl_->last_error_message = QStringLiteral("当前构建未启用 libdatachannel。");
+    emit errorOccurred(impl_->last_error_message);
     return false;
 #endif
 }
@@ -276,13 +285,15 @@ bool CallMediaAdapter::startAnswer(const QString& call_id, const QString& call_t
 bool CallMediaAdapter::setRemoteDescription(const QJsonObject& sdp) {
 #if defined(ICHAT_WITH_LIBDATACHANNEL)
     if (!impl_->peer_connection) {
-        emit errorOccurred(QStringLiteral("PeerConnection 尚未创建。"));
+        impl_->last_error_message = QStringLiteral("PeerConnection 尚未创建。");
+        emit errorOccurred(impl_->last_error_message);
         return false;
     }
     const QString sdp_text = sdp["sdp"].toString();
     const QString type = sdp["type"].toString();
     if (sdp_text.isEmpty() || type.isEmpty()) {
-        emit errorOccurred(QStringLiteral("远端 SDP 不完整。"));
+        impl_->last_error_message = QStringLiteral("远端 SDP 不完整。");
+        emit errorOccurred(impl_->last_error_message);
         return false;
     }
     impl_->peer_connection->setRemoteDescription(

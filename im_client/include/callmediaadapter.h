@@ -24,6 +24,7 @@ public:
 
     void setIceServers(const QJsonArray& ice_servers);
     void setForceRelay(bool force_relay);
+    QString lastErrorMessage() const;
 
     bool startOffer(const QString& call_id, const QString& call_type);
     bool startAnswer(const QString& call_id, const QString& call_type, const QJsonObject& remote_sdp);

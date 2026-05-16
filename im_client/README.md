@@ -49,6 +49,48 @@ cmake --build build
 cmake --install build
 ```
 
+## Build From Qt Creator
+
+If your libdatachannel source/build directory is:
+
+```text
+C:\msys64\home\21023\libdatachannel
+```
+
+open the client project in Qt Creator, then configure the CMake project with these variables:
+
+```text
+ICHAT_WITH_LIBDATACHANNEL=ON
+ICHAT_LIBDATACHANNEL_ROOT=C:/msys64/home/21023/libdatachannel
+```
+
+In Qt Creator this is usually under:
+
+```text
+Projects -> Build Settings -> CMake -> Initial Configuration / Current Configuration
+```
+
+If Qt Creator has already configured the project before, clear the previous CMake cache or delete the build directory, then run CMake again.
+
+The CMake output must contain:
+
+```text
+Found libdatachannel: enabling WebRTC PeerConnection adapter
+```
+
+If it still says `libdatachannel not found`, install libdatachannel to a clean prefix and point Qt Creator to that installed directory:
+
+```bash
+cd /home/21023/libdatachannel
+cmake --install build --prefix C:/deps/libdatachannel
+```
+
+Then use this Qt Creator CMake variable instead:
+
+```text
+ICHAT_LIBDATACHANNEL_ROOT=C:/deps/libdatachannel
+```
+
 Build the client:
 
 ```bash
