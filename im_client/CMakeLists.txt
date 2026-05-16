@@ -19,16 +19,15 @@ find_package(Qt6 REQUIRED COMPONENTS
     Qml
     Quick
     QuickControls2
-    WebChannel
-    WebEngineWidgets
 )
 
 # ============================================================
 # libdatachannel / optional native WebRTC experiments
 #
 # 注意：
-# 1. Qt WebEngine is now the primary audio/video WebRTC engine.
-#    libdatachannel is kept optional for the old native signaling adapter.
+# 1. The primary audio/video call path uses an external browser page
+#    served by a local Qt HTTP bridge. libdatachannel is optional and only
+#    kept for the old native signaling adapter.
 #
 # 2. 这里应指向 cmake --install build 之后的安装目录：
 #       C:/deps/libdatachannel
@@ -81,8 +80,8 @@ endif()
 
 # 源文件
 set(SOURCES
+    src/callbrowserbridge.cpp
     src/callmediaadapter.cpp
-    src/callwebbridge.cpp
     src/main.cpp
     src/mainwindow.cpp
     src/mainwindow_messages.cpp
@@ -98,8 +97,8 @@ set(SOURCES
 
 # 头文件
 set(HEADERS
+    include/callbrowserbridge.h
     include/callmediaadapter.h
-    include/callwebbridge.h
     include/mainwindow.h
     include/mainwindow_helpers.h
     include/loginwindow.h
@@ -120,6 +119,12 @@ add_executable(${PROJECT_NAME}
     ${RESOURCES}
 )
 
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_SOURCE_DIR}/web"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/web"
+)
+
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         ${CMAKE_SOURCE_DIR}/include
@@ -136,8 +141,6 @@ target_link_libraries(${PROJECT_NAME}
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
-        Qt6::WebChannel
-        Qt6::WebEngineWidgets
 )
 
 if(ICHAT_WITH_LIBDATACHANNEL AND LibDataChannel_FOUND)

@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IChat Call</title>
-  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
   <style>
     :root {
       color-scheme: dark;
@@ -13,16 +12,12 @@
       --line: #2d4137;
       --text: #f5faf6;
       --muted: #b9c9bf;
-      --accent: #48c774;
       --danger: #e35d6a;
     }
 
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
-    html,
-    body {
+    html, body {
       width: 100%;
       height: 100%;
       margin: 0;
@@ -34,15 +29,12 @@
 
     .stage {
       position: relative;
-      width: 100%;
-      height: 100%;
-      min-height: 210px;
+      width: 100vw;
+      height: 100vh;
       background:
         linear-gradient(135deg, rgba(72, 199, 116, .10), transparent 42%),
         radial-gradient(circle at 85% 18%, rgba(255, 255, 255, .08), transparent 24%),
         var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
       overflow: hidden;
     }
 
@@ -54,16 +46,13 @@
       object-fit: cover;
     }
 
-    #remoteVideo {
-      position: absolute;
-      inset: 0;
-    }
+    #remoteVideo { position: absolute; inset: 0; }
 
     #localVideo {
       position: absolute;
-      right: 12px;
-      bottom: 12px;
-      width: min(32%, 180px);
+      right: 18px;
+      bottom: 18px;
+      width: min(30vw, 240px);
       aspect-ratio: 16 / 10;
       height: auto;
       border: 1px solid rgba(245, 250, 246, .35);
@@ -74,9 +63,7 @@
     }
 
     .audio-only #remoteVideo,
-    .audio-only #localVideo {
-      display: none;
-    }
+    .audio-only #localVideo { display: none; }
 
     .audio-card {
       position: absolute;
@@ -84,42 +71,37 @@
       display: none;
       place-items: center;
       text-align: center;
-      padding: 20px;
+      padding: 24px;
     }
 
-    .audio-only .audio-card {
-      display: grid;
-    }
+    .audio-only .audio-card { display: grid; }
 
     .avatar {
-      width: 76px;
-      height: 76px;
-      margin: 0 auto 14px;
+      width: 92px;
+      height: 92px;
+      margin: 0 auto 16px;
       border-radius: 50%;
       display: grid;
       place-items: center;
       background: #214333;
       color: #dff6e7;
-      font-size: 30px;
+      font-size: 36px;
       font-weight: 800;
       border: 1px solid rgba(245, 250, 246, .18);
     }
 
-    .label {
-      font-size: 15px;
-      font-weight: 700;
-    }
+    .label { font-size: 18px; font-weight: 700; }
 
     .status {
       position: absolute;
-      left: 12px;
-      top: 12px;
-      max-width: calc(100% - 24px);
-      padding: 7px 10px;
+      left: 16px;
+      top: 16px;
+      max-width: calc(100% - 32px);
+      padding: 8px 11px;
       border-radius: 6px;
-      background: rgba(10, 15, 13, .68);
+      background: rgba(10, 15, 13, .70);
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.35;
       backdrop-filter: blur(8px);
     }
@@ -140,16 +122,17 @@
         <div class="label">语音通话中</div>
       </div>
     </section>
-    <div id="status" class="status">正在准备 WebRTC...</div>
+    <div id="status" class="status">正在连接 IChat 客户端...</div>
   </main>
 
   <script>
     const state = {
-      bridge: null,
+      context: null,
       pc: null,
       localStream: null,
       started: false,
       pendingRemoteCandidates: [],
+      polling: false,
     };
 
     const stage = document.getElementById('stage');
@@ -157,27 +140,54 @@
     const remoteVideo = document.getElementById('remoteVideo');
     const statusEl = document.getElementById('status');
 
+    async function api(path, options = {}) {
+      const init = {
+        method: options.method || 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      };
+      if (options.body) {
+        init.body = JSON.stringify(options.body);
+      }
+      const response = await fetch(path, init);
+      if (!response.ok) {
+        throw new Error(`IChat 本地通话服务异常：${response.status}`);
+      }
+      return response.status === 204 ? {} : response.json();
+    }
+
     function setStatus(text, error = false) {
       statusEl.textContent = text;
       statusEl.classList.toggle('error', error);
-      if (state.bridge) {
-        state.bridge.mediaStateChanged(text);
-      }
+      api('/api/media-state', {
+        method: 'POST',
+        body: { state: error ? 'error' : 'state', message: text },
+      }).catch(() => {});
     }
 
     function reportError(error) {
       const message = error && error.message ? error.message : String(error || 'WebRTC 媒体初始化失败');
       setStatus(message, true);
-      if (state.bridge) {
-        state.bridge.mediaError(message);
-      }
+    }
+
+    function normalizeIceServers(servers) {
+      if (!Array.isArray(servers)) return [];
+      return servers.map((server) => {
+        if (server.url) return { urls: server.url };
+        if (server.type === 'turn') {
+          return {
+            urls: `turn:${server.host}:${server.port || 3478}?transport=${server.relay || 'udp'}`,
+            username: server.username || '',
+            credential: server.password || '',
+          };
+        }
+        if (server.host) return { urls: `stun:${server.host}:${server.port || 3478}` };
+        return null;
+      }).filter(Boolean);
     }
 
     function candidateToObject(event) {
       const candidate = event.candidate;
-      if (!candidate) {
-        return null;
-      }
+      if (!candidate) return null;
       return {
         candidate: candidate.candidate,
         sdpMid: candidate.sdpMid || '',
@@ -187,47 +197,19 @@
       };
     }
 
-    function normalizeIceServers(servers) {
-      if (!Array.isArray(servers) || servers.length === 0) {
-        return [];
-      }
-
-      return servers.map((server) => {
-        if (server.url) {
-          return { urls: server.url };
-        }
-
-        if (server.type === 'turn') {
-          const relay = server.relay || 'udp';
-          return {
-            urls: `turn:${server.host}:${server.port || 3478}?transport=${relay}`,
-            username: server.username || '',
-            credential: server.password || '',
-          };
-        }
-
-        if (server.host) {
-          return { urls: `stun:${server.host}:${server.port || 3478}` };
-        }
-
-        return null;
-      }).filter(Boolean);
-    }
-
-    async function ensurePeerConnection(iceServers = []) {
-      if (state.pc) {
-        return state.pc;
-      }
-
+    async function ensurePeerConnection() {
+      if (state.pc) return state.pc;
       const pc = new RTCPeerConnection({
-        iceServers: normalizeIceServers(iceServers),
+        iceServers: normalizeIceServers(state.context.ice_servers),
       });
 
       pc.onicecandidate = (event) => {
-        const obj = candidateToObject(event);
-        if (obj && state.bridge) {
-          state.bridge.localCandidateReady(obj);
-        }
+        const candidate = candidateToObject(event);
+        if (!candidate) return;
+        api('/api/local-candidate', {
+          method: 'POST',
+          body: { call_id: state.context.call_id, candidate },
+        }).catch(reportError);
       };
 
       pc.ontrack = (event) => {
@@ -237,10 +219,7 @@
         }
       };
 
-      pc.onconnectionstatechange = () => {
-        setStatus(`连接状态：${pc.connectionState}`);
-      };
-
+      pc.onconnectionstatechange = () => setStatus(`连接状态：${pc.connectionState}`);
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === 'failed') {
           setStatus('ICE 连接失败，请检查 TURN/STUN 服务。', true);
@@ -251,8 +230,8 @@
       return pc;
     }
 
-    async function startLocalMedia(callType) {
-      const wantVideo = callType === 'video';
+    async function startLocalMedia() {
+      const wantVideo = state.context.call_type === 'video';
       stage.classList.toggle('audio-only', !wantVideo);
       const constraints = {
         audio: {
@@ -264,85 +243,76 @@
           ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
           : false,
       };
-
       setStatus(wantVideo ? '正在打开摄像头和麦克风...' : '正在打开麦克风...');
       state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
       localVideo.srcObject = state.localStream;
-
       const pc = await ensurePeerConnection();
       state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
-      if (state.bridge) {
-        state.bridge.mediaStateChanged('media-started');
-      }
+      await api('/api/media-state', {
+        method: 'POST',
+        body: { state: 'media-started', message: '本地媒体已就绪' },
+      });
       setStatus(wantVideo ? '本地视频已就绪' : '本地音频已就绪');
     }
 
     async function flushRemoteCandidates() {
-      if (!state.pc || !state.pc.remoteDescription) {
-        return;
-      }
+      if (!state.pc || !state.pc.remoteDescription) return;
       const pending = state.pendingRemoteCandidates.splice(0);
       for (const candidate of pending) {
         await state.pc.addIceCandidate(candidate);
       }
     }
 
-    async function startCall(callId, callType, incoming, remoteSdp, iceServers) {
-      if (state.started) {
-        return;
-      }
+    async function startCall() {
+      if (state.started) return;
       state.started = true;
-      const pc = await ensurePeerConnection(iceServers);
-      await startLocalMedia(callType);
+      const pc = await ensurePeerConnection();
+      await startLocalMedia();
 
-      if (incoming) {
-        if (!remoteSdp || !remoteSdp.sdp) {
-          throw new Error('远端 SDP 不完整。');
-        }
+      if (state.context.incoming) {
+        const remoteSdp = state.context.remote_sdp;
+        if (!remoteSdp || !remoteSdp.sdp) throw new Error('远端 SDP 不完整。');
         setStatus('正在生成接听应答...');
         await pc.setRemoteDescription({ type: remoteSdp.type || 'offer', sdp: remoteSdp.sdp });
         await flushRemoteCandidates();
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        state.bridge.localDescriptionReady('answer', answer.sdp);
+        await api('/api/local-description', {
+          method: 'POST',
+          body: { call_id: state.context.call_id, type: 'answer', sdp: answer.sdp },
+        });
       } else {
         setStatus('正在生成呼叫邀请...');
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        state.bridge.localDescriptionReady('offer', offer.sdp);
+        await api('/api/local-description', {
+          method: 'POST',
+          body: { call_id: state.context.call_id, type: 'offer', sdp: offer.sdp },
+        });
       }
     }
 
-    window.applyRemoteDescription = async function(type, sdp) {
-      try {
-        const pc = await ensurePeerConnection();
-        await pc.setRemoteDescription({ type, sdp });
-        await flushRemoteCandidates();
-        setStatus('远端 SDP 已设置');
-      } catch (error) {
-        reportError(error);
-      }
-    };
+    async function applyRemoteDescription(sdp) {
+      const pc = await ensurePeerConnection();
+      await pc.setRemoteDescription({ type: sdp.type || 'answer', sdp: sdp.sdp });
+      await flushRemoteCandidates();
+      setStatus('远端 SDP 已设置');
+    }
 
-    window.addRemoteCandidate = async function(candidate) {
-      try {
-        const pc = await ensurePeerConnection();
-        const ice = {
-          candidate: candidate.candidate,
-          sdpMid: candidate.sdpMid || candidate.mid || '',
-          sdpMLineIndex: candidate.sdpMLineIndex == null ? 0 : candidate.sdpMLineIndex,
-        };
-        if (pc.remoteDescription) {
-          await pc.addIceCandidate(ice);
-        } else {
-          state.pendingRemoteCandidates.push(ice);
-        }
-      } catch (error) {
-        reportError(error);
+    async function addRemoteCandidate(candidate) {
+      const ice = {
+        candidate: candidate.candidate,
+        sdpMid: candidate.sdpMid || candidate.mid || '',
+        sdpMLineIndex: candidate.sdpMLineIndex == null ? 0 : candidate.sdpMLineIndex,
+      };
+      if (state.pc && state.pc.remoteDescription) {
+        await state.pc.addIceCandidate(ice);
+      } else {
+        state.pendingRemoteCandidates.push(ice);
       }
-    };
+    }
 
-    window.endCall = function() {
+    function endCall(reason = '通话已结束') {
       if (state.localStream) {
         state.localStream.getTracks().forEach((track) => track.stop());
         state.localStream = null;
@@ -351,20 +321,46 @@
         state.pc.close();
         state.pc = null;
       }
-      state.started = false;
-      state.pendingRemoteCandidates = [];
       localVideo.srcObject = null;
       remoteVideo.srcObject = null;
-      setStatus('通话已结束');
-    };
+      state.started = false;
+      state.pendingRemoteCandidates = [];
+      setStatus(reason);
+    }
 
-    new QWebChannel(qt.webChannelTransport, (channel) => {
-      state.bridge = channel.objects.callBridge;
-      state.bridge.startRequested.connect((callId, callType, incoming, remoteSdp, iceServers) => {
-        startCall(callId, callType, incoming, remoteSdp, iceServers).catch(reportError);
-      });
-      state.bridge.pageReady();
-    });
+    async function pollEvents() {
+      if (state.polling) return;
+      state.polling = true;
+      while (true) {
+        try {
+          const event = await api('/api/events');
+          if (event.type === 'remote-description') {
+            await applyRemoteDescription(event.sdp);
+          } else if (event.type === 'remote-candidate') {
+            await addRemoteCandidate(event.candidate);
+          } else if (event.type === 'end') {
+            endCall(event.reason);
+            break;
+          }
+        } catch (error) {
+          reportError(error);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+
+    async function boot() {
+      state.context = await api('/api/context');
+      if (!state.context.has_call) {
+        throw new Error('当前没有进行中的 IChat 通话。');
+      }
+      document.title = state.context.call_type === 'video' ? 'IChat 视频通话' : 'IChat 语音通话';
+      await startCall();
+      pollEvents();
+    }
+
+    boot().catch(reportError);
   </script>
 </body>
 </html>

@@ -4,7 +4,8 @@
 
 - Linux server runs `im_server` for login, chat, and call signaling.
 - Linux server also runs `coturn` for STUN/TURN.
-- Windows client uses Qt WebEngine for real WebRTC audio/video calls.
+- Windows client uses the system browser for real WebRTC audio/video calls.
+- The Qt client serves a local call page at `127.0.0.1` and keeps TCP call signaling.
 - `libdatachannel` is optional and only kept for the older native signaling adapter.
 
 Do not link the Linux `libdatachannel.so` into the Windows client. If you enable the optional native adapter, build or install a Windows MinGW version of libdatachannel that matches the Qt MinGW kit.
@@ -34,7 +35,7 @@ Use `ICHAT_RTC_FORCE_RELAY=1` only when you want to force all WebRTC media throu
 
 ## Optional libdatachannel Build With MSYS2 MinGW64
 
-This is not required for the Qt WebEngine audio/video call path. Only install libdatachannel if you want to keep testing the optional native adapter:
+This is not required for the browser audio/video call path. Only install libdatachannel if you want to keep testing the optional native adapter:
 
 ```bash
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-openssl git
@@ -52,16 +53,7 @@ cmake --install build
 
 ## Build From Qt Creator
 
-The real audio/video call UI uses Qt WebEngine, so the selected Qt kit must include:
-
-```text
-Qt WebEngine
-Qt WebChannel
-```
-
-In Qt Maintenance Tool, install the WebEngine component for the same Qt version and MinGW kit that builds the client.
-
-Open the client project in Qt Creator. For the Qt WebEngine call path, keep `ICHAT_WITH_LIBDATACHANNEL` unset or set it to `OFF`.
+The real audio/video call UI opens in the system browser, so Qt WebEngine is not required. Open the client project in Qt Creator and keep `ICHAT_WITH_LIBDATACHANNEL` unset or set it to `OFF`.
 
 In Qt Creator this is usually under:
 
@@ -82,3 +74,5 @@ and make sure the CMake output contains:
 ```text
 Found libdatachannel: C:/deps/libdatachannel
 ```
+
+When building, CMake copies `im_client/web/call.html` next to the executable. Keep that `web` directory beside the client executable when packaging or running outside Qt Creator.

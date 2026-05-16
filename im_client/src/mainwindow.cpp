@@ -5,7 +5,7 @@
 
 #include "mainwindow.h"
 #include "addcontactdialog.h"
-#include "callwebbridge.h"
+#include "callbrowserbridge.h"
 #include "callmediaadapter.h"
 #include <QStatusBar>
 #include <QAction>
@@ -47,7 +47,6 @@
 #include <QImage>
 #include <QImageReader>
 #include <QIODevice>
-#include <QWebChannel>
 #include <algorithm>
 #include "mainwindow_helpers.h"
 
@@ -109,17 +108,17 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     call_timeout_timer_ = new QTimer(this);
     call_timeout_timer_->setSingleShot(true);
     connect(call_timeout_timer_, &QTimer::timeout, this, &MainWindow::onCallTimeout);
-    call_web_bridge_ = new CallWebBridge(this);
+    call_browser_bridge_ = new CallBrowserBridge(this);
     const QJsonArray call_ice_servers =
         CallMediaAdapter::defaultIceServers(tcp_client_ ? tcp_client_->serverHost() : QString());
-    call_web_bridge_->setIceServers(call_ice_servers);
-    connect(call_web_bridge_, &CallWebBridge::localOfferReady,
+    call_browser_bridge_->setIceServers(call_ice_servers);
+    connect(call_browser_bridge_, &CallBrowserBridge::localOfferReady,
             this, [this](const QString& call_id, const QString& sdp) {
                 if (call_id == active_call_id_ && call_state_ == CallState::Outgoing && tcp_client_) {
                     tcp_client_->startCall(active_call_peer_id_, active_call_type_, sdp, active_call_id_);
                 }
             });
-    connect(call_web_bridge_, &CallWebBridge::localAnswerReady,
+    connect(call_browser_bridge_, &CallBrowserBridge::localAnswerReady,
             this, [this](const QString& call_id, const QString& sdp) {
                 if (call_id == active_call_id_ && call_state_ == CallState::Connecting && tcp_client_) {
                     tcp_client_->acceptCall(active_call_id_, active_call_peer_id_, sdp);
@@ -128,13 +127,13 @@ MainWindow::MainWindow(TcpClient* tcp_client,
                     updateCallDialog();
                 }
             });
-    connect(call_web_bridge_, &CallWebBridge::localIceCandidateReady,
+    connect(call_browser_bridge_, &CallBrowserBridge::localIceCandidateReady,
             this, [this](const QString& call_id, const QJsonObject& candidate) {
                 if (call_id == active_call_id_ && tcp_client_) {
                     tcp_client_->sendCallIce(active_call_id_, active_call_peer_id_, candidate);
                 }
             });
-    connect(call_web_bridge_, &CallWebBridge::mediaStarted,
+    connect(call_browser_bridge_, &CallBrowserBridge::mediaStarted,
             this, [this](const QString& call_id) {
                 if (call_id != active_call_id_) {
                     return;
@@ -142,16 +141,16 @@ MainWindow::MainWindow(TcpClient* tcp_client,
                 const QVector<QJsonObject> candidates = pending_call_ice_candidates_;
                 pending_call_ice_candidates_.clear();
                 for (const QJsonObject& candidate : candidates) {
-                    addRemoteCandidateToWebView(candidate);
+                    addRemoteCandidateToBrowser(candidate);
                 }
             });
-    connect(call_web_bridge_, &CallWebBridge::errorOccurred,
+    connect(call_browser_bridge_, &CallBrowserBridge::errorOccurred,
             this, [this](const QString& message) {
                 if (call_state_ != CallState::Idle) {
                     finishActiveCall(message, false);
                 }
             });
-    connect(call_web_bridge_, &CallWebBridge::stateChanged,
+    connect(call_browser_bridge_, &CallBrowserBridge::stateChanged,
             this, [this](const QString& state) {
                 if (call_dialog_ && call_status_label_ && call_state_ != CallState::Idle) {
                     call_status_label_->setText(state);
@@ -164,31 +163,6 @@ MainWindow::MainWindow(TcpClient* tcp_client,
         ? QSettings("IMClient", "TcpClient").value("rtc_force_relay", false).toBool()
         : (force_relay_env == "1" || force_relay_env == "true" || force_relay_env == "yes" || force_relay_env == "on");
     call_media_adapter_->setForceRelay(force_relay);
-    connect(call_media_adapter_, &CallMediaAdapter::localDescriptionReady,
-            this, [this](const QString& call_id, const QJsonObject& sdp) {
-                if (call_id != active_call_id_ || !tcp_client_) {
-                    return;
-                }
-                const QString sdp_text = sdp["sdp"].toString();
-                if (call_state_ == CallState::Outgoing) {
-                    tcp_client_->startCall(active_call_peer_id_, active_call_type_, sdp_text, active_call_id_);
-                } else if (call_state_ == CallState::Connecting && active_call_incoming_) {
-                    tcp_client_->acceptCall(active_call_id_, active_call_peer_id_, sdp_text);
-                    call_state_ = CallState::InCall;
-                    call_timeout_timer_->stop();
-                    updateCallDialog();
-                }
-            });
-    connect(call_media_adapter_, &CallMediaAdapter::localCandidateReady,
-            this, [this](const QString& call_id, const QJsonObject& candidate) {
-                if (call_id == active_call_id_ && tcp_client_) {
-                    tcp_client_->sendCallIce(active_call_id_, active_call_peer_id_, candidate);
-                }
-            });
-    connect(call_media_adapter_, &CallMediaAdapter::errorOccurred,
-            this, [this](const QString& message) {
-                finishActiveCall(message, false);
-            });
 
     // TcpClient 是网络层和窗口层的边界：窗口只处理信号，不直接解析 socket。
     connect(tcp_client_, &TcpClient::chatMessageReceived,

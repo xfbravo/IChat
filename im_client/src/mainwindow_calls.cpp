@@ -4,13 +4,12 @@
  */
 
 #include "mainwindow.h"
-#include "callwebbridge.h"
+#include "callbrowserbridge.h"
 #include "callmediaadapter.h"
+#include <QDesktopServices>
 #include <QDialog>
 #include <QFrame>
 #include <QHBoxLayout>
-#include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
@@ -18,19 +17,6 @@
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
-#include <QWebChannel>
-#include <QWebEnginePage>
-#include <QWebEngineView>
-
-namespace {
-
-QString toJsStringLiteral(const QString& value) {
-    const QJsonArray wrapped{value};
-    const QString json = QString::fromUtf8(QJsonDocument(wrapped).toJson(QJsonDocument::Compact));
-    return json.mid(1, json.size() - 2);
-}
-
-} // namespace
 
 void MainWindow::onAudioCallClicked() {
     startOutgoingCall(QStringLiteral("audio"));
@@ -71,7 +57,7 @@ void MainWindow::startOutgoingCall(const QString& call_type) {
     showCallDialog(callPeerName());
     updateCallDialog();
     call_timeout_timer_->start(30000);
-    startWebRtcPage();
+    startBrowserCallPage();
 }
 
 void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObject& payload) {
@@ -118,7 +104,7 @@ void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObj
 
     if (signal_type == "accept") {
         const QJsonObject remote_sdp = payload["sdp"].toObject();
-        applyRemoteDescriptionToWebView(remote_sdp);
+        applyRemoteDescriptionToBrowser(remote_sdp);
         call_state_ = CallState::InCall;
         call_timeout_timer_->stop();
         updateCallDialog();
@@ -134,7 +120,7 @@ void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObj
     } else if (signal_type == "timeout") {
         finishActiveCall(reason.isEmpty() ? QStringLiteral("呼叫超时") : reason, false);
     } else if (signal_type == "ice") {
-        addRemoteCandidateToWebView(payload["candidate"].toObject());
+        addRemoteCandidateToBrowser(payload["candidate"].toObject());
     }
 }
 
@@ -154,7 +140,7 @@ void MainWindow::onAcceptCallClicked() {
 
     call_state_ = CallState::Connecting;
     updateCallDialog();
-    startWebRtcPage();
+    startBrowserCallPage();
 }
 
 void MainWindow::onRejectCallClicked() {
@@ -184,7 +170,7 @@ void MainWindow::showCallDialog(const QString& title) {
     if (!call_dialog_) {
         call_dialog_ = new QDialog(this);
         call_dialog_->setWindowTitle("IChat 通话");
-        call_dialog_->setMinimumSize(520, 420);
+        call_dialog_->setMinimumSize(420, 260);
         connect(call_dialog_, &QDialog::rejected, this, [this]() {
             if (call_state_ != CallState::Idle) {
                 finishActiveCall(QStringLiteral("通话窗口已关闭"), true);
@@ -214,27 +200,23 @@ void MainWindow::showCallDialog(const QString& title) {
         layout->setContentsMargins(24, 22, 24, 20);
         layout->setSpacing(16);
 
-        call_web_view_ = new QWebEngineView(call_dialog_);
-        call_web_view_->setMinimumHeight(240);
-        call_web_channel_ = new QWebChannel(call_web_view_);
-        call_web_channel_->registerObject(QStringLiteral("callBridge"), call_web_bridge_);
-        call_web_view_->page()->setWebChannel(call_web_channel_);
-        connect(call_web_view_, &QWebEngineView::loadFinished, this, [this](bool ok) {
-            if (!ok && call_status_label_) {
-                call_status_label_->setText(QStringLiteral("WebRTC 页面加载失败，请确认 Qt WebEngine 已正确部署。"));
+        QFrame* browser_panel = new QFrame(call_dialog_);
+        browser_panel->setStyleSheet(R"(
+            QFrame {
+                background-color: #1d2a23;
+                border: 1px solid #304239;
+                border-radius: 8px;
             }
-        });
-        connect(call_web_view_->page(), &QWebEnginePage::featurePermissionRequested,
-                this, [this](const QUrl& security_origin, QWebEnginePage::Feature feature) {
-                    if (!call_web_view_) {
-                        return;
-                    }
-                    call_web_view_->page()->setFeaturePermission(
-                        security_origin,
-                        feature,
-                        QWebEnginePage::PermissionGrantedByUser);
-                });
-        layout->addWidget(call_web_view_, 1);
+        )");
+        QVBoxLayout* browser_layout = new QVBoxLayout(browser_panel);
+        browser_layout->setContentsMargins(16, 14, 16, 14);
+        browser_layout->setSpacing(8);
+        call_browser_hint_label_ = new QLabel("通话画面将在系统浏览器中打开", browser_panel);
+        call_browser_hint_label_->setAlignment(Qt::AlignCenter);
+        call_browser_hint_label_->setWordWrap(true);
+        call_browser_hint_label_->setStyleSheet("QLabel { color: #b9c9bf; font-size: 13px; }");
+        browser_layout->addWidget(call_browser_hint_label_);
+        layout->addWidget(browser_panel);
 
         call_title_label_ = new QLabel(title, call_dialog_);
         call_title_label_->setAlignment(Qt::AlignCenter);
@@ -272,49 +254,46 @@ void MainWindow::showCallDialog(const QString& title) {
     call_dialog_->activateWindow();
 }
 
-void MainWindow::startWebRtcPage() {
-    if (!call_web_view_ || !call_web_bridge_ || active_call_id_.isEmpty()) {
+void MainWindow::startBrowserCallPage() {
+    if (!call_browser_bridge_ || active_call_id_.isEmpty()) {
         return;
     }
 
-    call_web_bridge_->setCallContext(
+    QString error_message;
+    if (!call_browser_bridge_->startServer(&error_message)) {
+        finishActiveCall(QStringLiteral("无法启动本地浏览器通话服务：%1").arg(error_message), false);
+        return;
+    }
+
+    call_browser_bridge_->setCallContext(
         active_call_id_,
         active_call_type_,
         active_call_incoming_,
         active_call_remote_sdp_);
-    call_web_view_->load(QUrl(QStringLiteral("qrc:/web/call.html")));
+    const QUrl url = call_browser_bridge_->callUrl();
+    if (call_browser_hint_label_) {
+        call_browser_hint_label_->setText(QStringLiteral("浏览器通话页：%1").arg(url.toString()));
+    }
+    QDesktopServices::openUrl(url);
 }
 
-void MainWindow::applyRemoteDescriptionToWebView(const QJsonObject& sdp) {
-    if (!call_web_view_ || sdp.isEmpty()) {
+void MainWindow::applyRemoteDescriptionToBrowser(const QJsonObject& sdp) {
+    if (!call_browser_bridge_ || sdp.isEmpty()) {
         return;
     }
-
-    const QString type = sdp["type"].toString(QStringLiteral("answer"));
-    const QString sdp_text = sdp["sdp"].toString();
-    if (sdp_text.isEmpty()) {
-        return;
-    }
-
-    const QString script = QStringLiteral("window.applyRemoteDescription(%1, %2);")
-        .arg(toJsStringLiteral(type), toJsStringLiteral(sdp_text));
-    call_web_view_->page()->runJavaScript(script);
+    call_browser_bridge_->queueRemoteDescription(sdp);
 }
 
-void MainWindow::addRemoteCandidateToWebView(const QJsonObject& candidate) {
+void MainWindow::addRemoteCandidateToBrowser(const QJsonObject& candidate) {
     if (candidate.isEmpty()) {
         return;
     }
 
-    if (!call_web_view_ || call_state_ == CallState::Ringing) {
+    if (!call_browser_bridge_ || call_state_ == CallState::Ringing) {
         pending_call_ice_candidates_.append(candidate);
         return;
     }
-
-    const QString candidate_json = QString::fromUtf8(
-        QJsonDocument(candidate).toJson(QJsonDocument::Compact));
-    call_web_view_->page()->runJavaScript(
-        QStringLiteral("window.addRemoteCandidate(%1);").arg(candidate_json));
+    call_browser_bridge_->queueRemoteCandidate(candidate);
 }
 
 void MainWindow::updateCallDialog() {
@@ -364,11 +343,9 @@ void MainWindow::finishActiveCall(const QString& reason, bool notify_peer) {
     active_call_remote_sdp_ = QJsonObject();
     pending_call_ice_candidates_.clear();
     active_call_incoming_ = false;
-    if (call_web_bridge_) {
-        call_web_bridge_->resetCallContext();
-    }
-    if (call_web_view_) {
-        call_web_view_->page()->runJavaScript(QStringLiteral("window.endCall && window.endCall();"));
+    if (call_browser_bridge_) {
+        call_browser_bridge_->resetCallContext();
+        call_browser_bridge_->queueEndCall(reason);
     }
     if (call_media_adapter_) {
         call_media_adapter_->close();

@@ -1,5 +1,4 @@
 <RCC>
     <qresource prefix="/">
-        <file>web/call.html</file>
     </qresource>
 </RCC>
