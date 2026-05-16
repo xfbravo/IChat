@@ -146,7 +146,7 @@ public:
         : QWidget(parent)
     {
         setAttribute(Qt::WA_StyledBackground, true);
-        setStyleSheet("background: transparent;");
+        setObjectName("conversationListItem");
 
         title_label_ = new QLabel(title, this);
         title_label_->setTextFormat(Qt::PlainText);
@@ -178,6 +178,14 @@ public:
 
     void setSelected(bool selected) {
         // QListWidget 的自定义 item widget 不会自动继承选中配色，需要手动同步。
+        setStyleSheet(QString(R"(
+            QWidget#conversationListItem {
+                background-color: %1;
+                border: 1px solid %2;
+                border-radius: 8px;
+            }
+        )").arg(selected ? "#2f6f3e" : "#ffffff",
+               selected ? "#2f6f3e" : "#dfe8e2"));
         const QString title_color = selected ? "#ffffff" : "#1d2b22";
         const QString summary_color = selected ? "#e8f4ea" : "#6b756e";
         title_label_->setStyleSheet(QString(

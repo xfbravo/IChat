@@ -28,6 +28,7 @@
 #include <QScrollBar>
 #include <QListView>
 #include <QAbstractItemView>
+#include <QMap>
 #include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
@@ -77,6 +78,66 @@ namespace
         return label;
     }
 
+    QString contactSectionKey(const QString &display_name)
+    {
+        const QString trimmed = display_name.trimmed();
+        if (trimmed.isEmpty()) {
+            return QStringLiteral("#");
+        }
+
+        const QChar first = trimmed.front().toUpper();
+        if (first >= QChar('A') && first <= QChar('Z')) {
+            return QString(first);
+        }
+        return QStringLiteral("#");
+    }
+
+    class ContactSectionHeaderWidget : public QWidget
+    {
+    public:
+        ContactSectionHeaderWidget(const QString &title,
+                                   const QString &detail,
+                                   QWidget *parent = nullptr)
+            : QWidget(parent)
+        {
+            setAttribute(Qt::WA_StyledBackground, true);
+            setObjectName("contactSectionHeader");
+            setStyleSheet(R"(
+                QWidget#contactSectionHeader {
+                    background: transparent;
+                }
+            )");
+
+            QLabel *title_label = new QLabel(title, this);
+            title_label->setTextFormat(Qt::PlainText);
+            title_label->setStyleSheet(R"(
+                QLabel {
+                    color: #425247;
+                    font-size: 13px;
+                    font-weight: 800;
+                    background: transparent;
+                }
+            )");
+
+            QLabel *detail_label = new QLabel(detail, this);
+            detail_label->setTextFormat(Qt::PlainText);
+            detail_label->setStyleSheet(R"(
+                QLabel {
+                    color: #7a867e;
+                    font-size: 12px;
+                    background: transparent;
+                }
+            )");
+
+            QHBoxLayout *layout = new QHBoxLayout(this);
+            layout->setContentsMargins(10, 6, 12, 4);
+            layout->setSpacing(8);
+            layout->addWidget(title_label);
+            layout->addStretch();
+            layout->addWidget(detail_label);
+        }
+    };
+
     class ContactListItemWidget : public QWidget
     {
     public:
@@ -85,12 +146,24 @@ namespace
                               const QString &avatar_url,
                               std::function<void()> avatar_handler,
                               std::function<void()> double_click_handler,
-                              QWidget *parent = nullptr)
+                              QWidget *parent = nullptr,
+                              const QString &avatar_tooltip = QStringLiteral("查看个人信息"))
             : QWidget(parent)
             , double_click_handler_(std::move(double_click_handler))
         {
             setAttribute(Qt::WA_StyledBackground, true);
-            setStyleSheet("background: transparent;");
+            setObjectName("contactListItem");
+            setStyleSheet(R"(
+                QWidget#contactListItem {
+                    background-color: #ffffff;
+                    border: 1px solid #dfe8e2;
+                    border-radius: 8px;
+                }
+                QWidget#contactListItem:hover {
+                    background-color: #f7fbf7;
+                    border-color: #cfdcd2;
+                }
+            )");
 
             constexpr int avatar_size = 44;
             QToolButton *avatar_button = new QToolButton(this);
@@ -98,7 +171,7 @@ namespace
             avatar_button->setIcon(QIcon(avatarPixmapFromValue(avatar_url, title, avatar_size)));
             avatar_button->setIconSize(QSize(avatar_size, avatar_size));
             avatar_button->setCursor(Qt::PointingHandCursor);
-            avatar_button->setToolTip("查看个人信息");
+            avatar_button->setToolTip(avatar_tooltip);
             avatar_button->setStyleSheet(R"(
                 QToolButton {
                     padding: 0;
@@ -318,8 +391,8 @@ void MainWindow::createContactView()
     contact_tree_widget_->setHeaderHidden(true);
     contact_tree_widget_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     contact_tree_widget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    contact_tree_widget_->setRootIsDecorated(false);
-    contact_tree_widget_->setIndentation(0);
+    contact_tree_widget_->setRootIsDecorated(true);
+    contact_tree_widget_->setIndentation(18);
     contact_tree_widget_->setFocusPolicy(Qt::NoFocus);
     contact_tree_widget_->setSelectionMode(QAbstractItemView::SingleSelection);
     contact_tree_widget_->setCursor(Qt::PointingHandCursor);
@@ -329,18 +402,18 @@ void MainWindow::createContactView()
             background-color: #eef2ef;
             font-size: 14px;
             outline: none;
-            padding: 12px;
+            padding: 14px 18px 18px 18px;
         }
         QTreeWidget::item {
             padding: 0;
-            margin: 2px 0;
-            border: 1px solid #dfe8e2;
+            margin: 3px 0;
+            border: 1px solid transparent;
             border-radius: 8px;
-            background-color: #ffffff;
+            background-color: transparent;
         }
         QTreeWidget::item:hover {
             background-color: #f7fbf7;
-            border-color: #cfdcd2;
+            border-color: #dfe8e2;
         }
         QTreeWidget::item:selected,
         QTreeWidget::item:selected:active,
@@ -365,8 +438,35 @@ void MainWindow::onAddContactClicked()
 void MainWindow::onContactItemDoubleClicked(QTreeWidgetItem *item, int column)
 {
     Q_UNUSED(column);
+    if (!item)
+    {
+        return;
+    }
+
+    const QString item_type = item->data(0, Qt::UserRole + 1).toString();
+    if (item_type == "section")
+    {
+        item->setExpanded(!item->isExpanded());
+        return;
+    }
+
     QString user_id = item->data(0, Qt::UserRole).toString();
     QString nickname = item->data(0, Qt::AccessibleTextRole).toString();
+    if (item_type == "group")
+    {
+        if (nickname.isEmpty())
+        {
+            nickname = group_names_.value(user_id, user_id);
+        }
+        if (!user_id.isEmpty())
+        {
+            switchToConversation(conversationKey("group", user_id), nickname);
+            nav_list_->setCurrentRow(0);
+            content_stacked_->setCurrentWidget(message_view_);
+        }
+        return;
+    }
+
     if (nickname.isEmpty())
     {
         nickname = conversationTitle(user_id);
@@ -890,7 +990,79 @@ void MainWindow::rebuildContactList()
 
     contact_tree_widget_->clear();
 
+    auto open_group = [this](const QString &group_id, const QString &title)
+    {
+        switchToConversation(conversationKey("group", group_id), title);
+        nav_list_->setCurrentRow(0);
+        content_stacked_->setCurrentWidget(message_view_);
+    };
+
+    QTreeWidgetItem *group_root = new QTreeWidgetItem(contact_tree_widget_);
+    group_root->setText(0, QString());
+    group_root->setData(0, Qt::UserRole + 1, QStringLiteral("section"));
+    group_root->setFlags(Qt::ItemIsEnabled);
+    group_root->setSizeHint(0, QSize(0, 42));
+    group_root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+    contact_tree_widget_->setItemWidget(
+        group_root,
+        0,
+        new ContactSectionHeaderWidget(
+            QStringLiteral("群聊"),
+            QString("%1 个群聊").arg(group_names_.size()),
+            contact_tree_widget_));
+
+    QList<QString> group_ids = group_names_.keys();
+    std::stable_sort(group_ids.begin(), group_ids.end(),
+                     [this](const QString &left, const QString &right)
+                     {
+                         const QString left_name = group_names_.value(left, left);
+                         const QString right_name = group_names_.value(right, right);
+                         const int name_compare = left_name.localeAwareCompare(right_name);
+                         if (name_compare != 0)
+                         {
+                             return name_compare < 0;
+                         }
+                         return left.localeAwareCompare(right) < 0;
+                     });
+
+    for (const QString &group_id : group_ids)
+    {
+        if (group_id.isEmpty())
+        {
+            continue;
+        }
+
+        const QString title = group_names_.value(group_id, group_id);
+        const int member_count = group_member_counts_.value(group_id, 0);
+
+        QTreeWidgetItem *group_item = new QTreeWidgetItem(group_root);
+        group_item->setText(0, QString());
+        group_item->setData(0, Qt::UserRole, group_id);
+        group_item->setData(0, Qt::UserRole + 1, QStringLiteral("group"));
+        group_item->setData(0, Qt::AccessibleTextRole, title);
+        group_item->setToolTip(0, title);
+        group_item->setSizeHint(0, QSize(0, 68));
+
+        ContactListItemWidget *group_widget = new ContactListItemWidget(
+            title,
+            member_count > 0 ? QString("群聊 · %1人").arg(member_count) : QStringLiteral("群聊"),
+            group_avatars_.value(group_id),
+            [open_group, group_id, title]()
+            {
+                open_group(group_id, title);
+            },
+            [open_group, group_id, title]()
+            {
+                open_group(group_id, title);
+            },
+            contact_tree_widget_,
+            QStringLiteral("打开群聊"));
+        contact_tree_widget_->setItemWidget(group_item, 0, group_widget);
+    }
+    group_root->setExpanded(false);
+
     const QList<QString> contact_ids = sortedContactIds();
+    QMap<QString, QList<QString>> contacts_by_section;
 
     for (const QString &friend_id : contact_ids)
     {
@@ -909,33 +1081,95 @@ void MainWindow::rebuildContactList()
             title = friend_id;
         }
 
-        const QString subtitle = !saved_remark.isEmpty() && !nickname.isEmpty() && nickname != saved_remark
-                                     ? QString("昵称: %1").arg(nickname)
-                                     : QString("账号: %1").arg(friend_id);
+        contacts_by_section[contactSectionKey(title)].append(friend_id);
+    }
 
-        QTreeWidgetItem *friend_item = new QTreeWidgetItem(contact_tree_widget_);
-        friend_item->setText(0, QString());
-        friend_item->setData(0, Qt::UserRole, friend_id);
-        friend_item->setData(0, Qt::AccessibleTextRole, title);
-        friend_item->setToolTip(0, title);
-        friend_item->setSizeHint(0, QSize(0, 68));
+    QStringList section_keys;
+    for (ushort code = 'A'; code <= 'Z'; ++code)
+    {
+        const QString key(QChar(code));
+        if (contacts_by_section.contains(key))
+        {
+            section_keys.append(key);
+        }
+    }
+    if (contacts_by_section.contains(QStringLiteral("#")))
+    {
+        section_keys.append(QStringLiteral("#"));
+    }
 
-        ContactListItemWidget *item_widget = new ContactListItemWidget(
-            title,
-            subtitle,
-            contact_avatars_.value(friend_id),
-            [this, friend_id]()
+    for (const QString &section_key : section_keys)
+    {
+        QList<QString> section_contacts = contacts_by_section.value(section_key);
+        std::stable_sort(section_contacts.begin(), section_contacts.end(),
+                         [this](const QString &left, const QString &right)
+                         {
+                             const QString left_name = contactDisplayName(left);
+                             const QString right_name = contactDisplayName(right);
+                             const int name_compare = left_name.localeAwareCompare(right_name);
+                             if (name_compare != 0)
+                             {
+                                 return name_compare < 0;
+                             }
+                             return left.localeAwareCompare(right) < 0;
+                         });
+
+        QTreeWidgetItem *section_item = new QTreeWidgetItem(contact_tree_widget_);
+        section_item->setText(0, QString());
+        section_item->setData(0, Qt::UserRole + 1, QStringLiteral("section"));
+        section_item->setFlags(Qt::ItemIsEnabled);
+        section_item->setSizeHint(0, QSize(0, 34));
+        contact_tree_widget_->setItemWidget(
+            section_item,
+            0,
+            new ContactSectionHeaderWidget(
+                section_key,
+                QString("%1 位联系人").arg(section_contacts.size()),
+                contact_tree_widget_));
+
+        for (const QString &friend_id : section_contacts)
+        {
+            const QString saved_remark = contact_remarks_.value(friend_id).trimmed();
+            const QString nickname = contact_nicknames_.value(friend_id).trimmed();
+            QString title = saved_remark.isEmpty() ? nickname : saved_remark;
+            if (title.isEmpty())
             {
-                showUserProfile(friend_id);
-            },
-            [this, friend_id, title]()
+                title = conversationTitle(friend_id);
+            }
+            if (title.isEmpty())
             {
-                switchToChatWith(friend_id, title);
-                nav_list_->setCurrentRow(0);
-                content_stacked_->setCurrentWidget(message_view_);
-            },
-            contact_tree_widget_);
-        contact_tree_widget_->setItemWidget(friend_item, 0, item_widget);
+                title = friend_id;
+            }
+
+            const QString subtitle = !saved_remark.isEmpty() && !nickname.isEmpty() && nickname != saved_remark
+                                         ? QString("昵称: %1").arg(nickname)
+                                         : QString("账号: %1").arg(friend_id);
+
+            QTreeWidgetItem *friend_item = new QTreeWidgetItem(contact_tree_widget_);
+            friend_item->setText(0, QString());
+            friend_item->setData(0, Qt::UserRole, friend_id);
+            friend_item->setData(0, Qt::UserRole + 1, QStringLiteral("p2p"));
+            friend_item->setData(0, Qt::AccessibleTextRole, title);
+            friend_item->setToolTip(0, title);
+            friend_item->setSizeHint(0, QSize(0, 68));
+
+            ContactListItemWidget *item_widget = new ContactListItemWidget(
+                title,
+                subtitle,
+                contact_avatars_.value(friend_id),
+                [this, friend_id]()
+                {
+                    showUserProfile(friend_id);
+                },
+                [this, friend_id, title]()
+                {
+                    switchToChatWith(friend_id, title);
+                    nav_list_->setCurrentRow(0);
+                    content_stacked_->setCurrentWidget(message_view_);
+                },
+                contact_tree_widget_);
+            contact_tree_widget_->setItemWidget(friend_item, 0, item_widget);
+        }
     }
 
     if (contact_search_edit_ && !contact_search_edit_->text().trimmed().isEmpty())
@@ -1017,6 +1251,9 @@ void MainWindow::onGroupListReceived(const QString &json)
         return;
 
     const QJsonArray groups = doc.array();
+    group_names_.clear();
+    group_avatars_.clear();
+    group_member_counts_.clear();
     for (const QJsonValue &value : groups)
     {
         const QJsonObject group_obj = value.toObject();
@@ -1058,6 +1295,7 @@ void MainWindow::onGroupListReceived(const QString &json)
     }
 
     refreshConversationList();
+    rebuildContactList();
     if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_))
     {
         chat_target_label_->setText(conversations_[current_chat_target_].title);
@@ -1086,6 +1324,7 @@ void MainWindow::onGroupCreateResult(int code,
     conversation.chat_type = "group";
     conversation.title = group_name;
     refreshConversationList();
+    rebuildContactList();
     switchToConversation(conversation_key, group_name);
     nav_list_->setCurrentRow(0);
     content_stacked_->setCurrentWidget(message_view_);
@@ -1289,6 +1528,7 @@ void MainWindow::onFriendRemarkUpdateResult(int code, const QString &message,
 
 void MainWindow::loadContacts()
 {
+    tcp_client_->getGroupList();
     // 如果聊天列表已有数据，直接从 conversations_ 构造联系人树，减少一次网络请求。
     if (chat_list_widget_->count() > 0)
     {
