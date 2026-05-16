@@ -635,7 +635,17 @@ void MainWindow::onEditContactRemark() {
         return;
     }
 
-    const QString old_remark = conversations_.value(current_chat_target_).title;
+    if (conversationChatType(current_chat_target_) != "p2p") {
+        QMessageBox::information(this, "修改联系人备注", "请选择一个好友会话后再修改备注。");
+        return;
+    }
+
+    const QString friend_id = conversationPeerId(current_chat_target_);
+    if (friend_id.isEmpty()) {
+        return;
+    }
+
+    const QString old_remark = contact_remarks_.value(friend_id, conversations_.value(current_chat_target_).title);
     bool ok = false;
     QString new_remark = QInputDialog::getText(this,
                                                "修改联系人备注",
@@ -648,7 +658,7 @@ void MainWindow::onEditContactRemark() {
     }
 
     // 备注属于联系人关系，服务端确认成功后再更新本地缓存。
-    tcp_client_->updateFriendRemark(current_chat_target_, new_remark);
+    tcp_client_->updateFriendRemark(friend_id, new_remark);
 }
 
 void MainWindow::onUploadAvatarClicked() {

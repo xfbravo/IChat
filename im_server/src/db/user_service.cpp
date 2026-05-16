@@ -1185,19 +1185,34 @@ LoginResult UserService::handle_friend_request(const std::string& request_id,
         UserInfo from_user = get_user_by_id(from_user_id);
         UserInfo to_user = get_user_by_id(user_id);
 
-        // A添加B，A的friend_id是B，B的friend_id是A
+        // A添加B，A的friend_id是B，B的friend_id是A；若曾删除过关系，则恢复为正常状态。
         std::ostringstream insert_sql1;
         insert_sql1 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
                     << "VALUES ('" << sql_escape(mysql, from_user_id) << "', '" << sql_escape(mysql, user_id)
                     << "', '" << sql_escape(mysql, remark) << "', '" << sql_escape(mysql, to_user.nickname)
-                    << "', '" << sql_escape(mysql, to_user.avatar_url) << "')";
-        mysql_query(mysql, insert_sql1.str().c_str());
+                    << "', '" << sql_escape(mysql, to_user.avatar_url) << "') "
+                    << "ON DUPLICATE KEY UPDATE remark = VALUES(remark), "
+                    << "friend_nickname = VALUES(friend_nickname), "
+                    << "friend_avatar = VALUES(friend_avatar), status = 1, update_time = NOW()";
+        if (mysql_query(mysql, insert_sql1.str().c_str())) {
+            std::cerr << "[UserService] 添加申请方好友关系失败: " << mysql_error(mysql) << std::endl;
+            result.code = 5001;
+            result.message = "添加好友关系失败";
+            return result;
+        }
 
         std::ostringstream insert_sql2;
         insert_sql2 << "INSERT INTO im_friend (user_id, friend_id, remark, friend_nickname, friend_avatar) "
                     << "VALUES ('" << sql_escape(mysql, user_id) << "', '" << sql_escape(mysql, from_user_id)
-                    << "', '', '" << sql_escape(mysql, from_nickname) << "', '" << sql_escape(mysql, from_user.avatar_url) << "')";
-        mysql_query(mysql, insert_sql2.str().c_str());
+                    << "', '', '" << sql_escape(mysql, from_nickname) << "', '" << sql_escape(mysql, from_user.avatar_url) << "') "
+                    << "ON DUPLICATE KEY UPDATE friend_nickname = VALUES(friend_nickname), "
+                    << "friend_avatar = VALUES(friend_avatar), status = 1, update_time = NOW()";
+        if (mysql_query(mysql, insert_sql2.str().c_str())) {
+            std::cerr << "[UserService] 添加接收方好友关系失败: " << mysql_error(mysql) << std::endl;
+            result.code = 5001;
+            result.message = "添加好友关系失败";
+            return result;
+        }
 
         result.code = 0;
         result.message = "已同意好友请求";
