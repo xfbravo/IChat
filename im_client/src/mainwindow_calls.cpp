@@ -4,16 +4,33 @@
  */
 
 #include "mainwindow.h"
+#include "callwebbridge.h"
 #include "callmediaadapter.h"
 #include <QDialog>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
+#include <QWebChannel>
+#include <QWebEnginePage>
+#include <QWebEngineView>
+
+namespace {
+
+QString toJsStringLiteral(const QString& value) {
+    const QJsonArray wrapped{value};
+    const QString json = QString::fromUtf8(QJsonDocument(wrapped).toJson(QJsonDocument::Compact));
+    return json.mid(1, json.size() - 2);
+}
+
+} // namespace
 
 void MainWindow::onAudioCallClicked() {
     startOutgoingCall(QStringLiteral("audio"));
@@ -48,19 +65,13 @@ void MainWindow::startOutgoingCall(const QString& call_type) {
     active_call_peer_id_ = peer_id;
     active_call_type_ = call_type == "video" ? QStringLiteral("video") : QStringLiteral("audio");
     active_call_remote_sdp_ = QJsonObject();
+    pending_call_ice_candidates_.clear();
     active_call_incoming_ = false;
     call_state_ = CallState::Outgoing;
     showCallDialog(callPeerName());
     updateCallDialog();
     call_timeout_timer_->start(30000);
-    if (!call_media_adapter_->startOffer(active_call_id_, active_call_type_)) {
-        const QString error = call_media_adapter_->lastErrorMessage().isEmpty()
-            ? QStringLiteral("WebRTC 初始化失败")
-            : call_media_adapter_->lastErrorMessage();
-        if (call_state_ != CallState::Idle) {
-            finishActiveCall(error, false);
-        }
-    }
+    startWebRtcPage();
 }
 
 void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObject& payload) {
@@ -92,6 +103,7 @@ void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObj
         active_call_peer_id_ = from_user_id;
         active_call_type_ = call_type;
         active_call_remote_sdp_ = payload["sdp"].toObject();
+        pending_call_ice_candidates_.clear();
         active_call_incoming_ = true;
         call_state_ = CallState::Ringing;
         showCallDialog(callPeerName());
@@ -106,9 +118,7 @@ void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObj
 
     if (signal_type == "accept") {
         const QJsonObject remote_sdp = payload["sdp"].toObject();
-        if (!remote_sdp.isEmpty() && call_media_adapter_) {
-            call_media_adapter_->setRemoteDescription(remote_sdp);
-        }
+        applyRemoteDescriptionToWebView(remote_sdp);
         call_state_ = CallState::InCall;
         call_timeout_timer_->stop();
         updateCallDialog();
@@ -124,9 +134,7 @@ void MainWindow::onCallSignalReceived(const QString& signal_type, const QJsonObj
     } else if (signal_type == "timeout") {
         finishActiveCall(reason.isEmpty() ? QStringLiteral("呼叫超时") : reason, false);
     } else if (signal_type == "ice") {
-        if (call_media_adapter_) {
-            call_media_adapter_->addRemoteCandidate(payload["candidate"].toObject());
-        }
+        addRemoteCandidateToWebView(payload["candidate"].toObject());
     }
 }
 
@@ -146,18 +154,7 @@ void MainWindow::onAcceptCallClicked() {
 
     call_state_ = CallState::Connecting;
     updateCallDialog();
-    if (!call_media_adapter_->startAnswer(active_call_id_, active_call_type_, active_call_remote_sdp_)) {
-        const QString error = call_media_adapter_->lastErrorMessage().isEmpty()
-            ? QStringLiteral("WebRTC 初始化失败")
-            : call_media_adapter_->lastErrorMessage();
-        if (tcp_client_ && !active_call_id_.isEmpty() && !active_call_peer_id_.isEmpty()) {
-            tcp_client_->rejectCall(active_call_id_, active_call_peer_id_, error);
-        }
-        if (call_state_ != CallState::Idle) {
-            finishActiveCall(error, false);
-        }
-        return;
-    }
+    startWebRtcPage();
 }
 
 void MainWindow::onRejectCallClicked() {
@@ -187,7 +184,7 @@ void MainWindow::showCallDialog(const QString& title) {
     if (!call_dialog_) {
         call_dialog_ = new QDialog(this);
         call_dialog_->setWindowTitle("IChat 通话");
-        call_dialog_->setMinimumSize(360, 260);
+        call_dialog_->setMinimumSize(520, 420);
         connect(call_dialog_, &QDialog::rejected, this, [this]() {
             if (call_state_ != CallState::Idle) {
                 finishActiveCall(QStringLiteral("通话窗口已关闭"), true);
@@ -217,22 +214,27 @@ void MainWindow::showCallDialog(const QString& title) {
         layout->setContentsMargins(24, 22, 24, 20);
         layout->setSpacing(16);
 
-        QFrame* preview = new QFrame(call_dialog_);
-        preview->setFixedHeight(96);
-        preview->setStyleSheet(R"(
-            QFrame {
-                background-color: #1d2a23;
-                border: 1px solid #304239;
-                border-radius: 8px;
+        call_web_view_ = new QWebEngineView(call_dialog_);
+        call_web_view_->setMinimumHeight(240);
+        call_web_channel_ = new QWebChannel(call_web_view_);
+        call_web_channel_->registerObject(QStringLiteral("callBridge"), call_web_bridge_);
+        call_web_view_->page()->setWebChannel(call_web_channel_);
+        connect(call_web_view_, &QWebEngineView::loadFinished, this, [this](bool ok) {
+            if (!ok && call_status_label_) {
+                call_status_label_->setText(QStringLiteral("WebRTC 页面加载失败，请确认 Qt WebEngine 已正确部署。"));
             }
-        )");
-        QVBoxLayout* preview_layout = new QVBoxLayout(preview);
-        preview_layout->setContentsMargins(16, 12, 16, 12);
-        QLabel* preview_label = new QLabel("WebRTC 媒体适配器待接入", preview);
-        preview_label->setAlignment(Qt::AlignCenter);
-        preview_label->setStyleSheet("QLabel { color: #b9c9bf; font-size: 13px; }");
-        preview_layout->addWidget(preview_label);
-        layout->addWidget(preview);
+        });
+        connect(call_web_view_->page(), &QWebEnginePage::featurePermissionRequested,
+                this, [this](const QUrl& security_origin, QWebEnginePage::Feature feature) {
+                    if (!call_web_view_) {
+                        return;
+                    }
+                    call_web_view_->page()->setFeaturePermission(
+                        security_origin,
+                        feature,
+                        QWebEnginePage::PermissionGrantedByUser);
+                });
+        layout->addWidget(call_web_view_, 1);
 
         call_title_label_ = new QLabel(title, call_dialog_);
         call_title_label_->setAlignment(Qt::AlignCenter);
@@ -268,6 +270,51 @@ void MainWindow::showCallDialog(const QString& title) {
     call_dialog_->show();
     call_dialog_->raise();
     call_dialog_->activateWindow();
+}
+
+void MainWindow::startWebRtcPage() {
+    if (!call_web_view_ || !call_web_bridge_ || active_call_id_.isEmpty()) {
+        return;
+    }
+
+    call_web_bridge_->setCallContext(
+        active_call_id_,
+        active_call_type_,
+        active_call_incoming_,
+        active_call_remote_sdp_);
+    call_web_view_->load(QUrl(QStringLiteral("qrc:/web/call.html")));
+}
+
+void MainWindow::applyRemoteDescriptionToWebView(const QJsonObject& sdp) {
+    if (!call_web_view_ || sdp.isEmpty()) {
+        return;
+    }
+
+    const QString type = sdp["type"].toString(QStringLiteral("answer"));
+    const QString sdp_text = sdp["sdp"].toString();
+    if (sdp_text.isEmpty()) {
+        return;
+    }
+
+    const QString script = QStringLiteral("window.applyRemoteDescription(%1, %2);")
+        .arg(toJsStringLiteral(type), toJsStringLiteral(sdp_text));
+    call_web_view_->page()->runJavaScript(script);
+}
+
+void MainWindow::addRemoteCandidateToWebView(const QJsonObject& candidate) {
+    if (candidate.isEmpty()) {
+        return;
+    }
+
+    if (!call_web_view_ || call_state_ == CallState::Ringing) {
+        pending_call_ice_candidates_.append(candidate);
+        return;
+    }
+
+    const QString candidate_json = QString::fromUtf8(
+        QJsonDocument(candidate).toJson(QJsonDocument::Compact));
+    call_web_view_->page()->runJavaScript(
+        QStringLiteral("window.addRemoteCandidate(%1);").arg(candidate_json));
 }
 
 void MainWindow::updateCallDialog() {
@@ -315,7 +362,14 @@ void MainWindow::finishActiveCall(const QString& reason, bool notify_peer) {
     active_call_peer_id_.clear();
     active_call_type_ = QStringLiteral("audio");
     active_call_remote_sdp_ = QJsonObject();
+    pending_call_ice_candidates_.clear();
     active_call_incoming_ = false;
+    if (call_web_bridge_) {
+        call_web_bridge_->resetCallContext();
+    }
+    if (call_web_view_) {
+        call_web_view_->page()->runJavaScript(QStringLiteral("window.endCall && window.endCall();"));
+    }
     if (call_media_adapter_) {
         call_media_adapter_->close();
     }
@@ -341,9 +395,7 @@ QString MainWindow::callStateText() const {
         case CallState::Connecting:
             return QString("正在建立%1通话...").arg(media);
         case CallState::InCall:
-            return CallMediaAdapter::webRtcAvailable()
-                ? QString("%1通话已接通。").arg(media)
-                : QString("%1通话信令已接通，等待 WebRTC 媒体适配器接入。").arg(media);
+            return QString("%1通话已接通。").arg(media);
         case CallState::Ended:
             return QStringLiteral("通话已结束");
         case CallState::Idle:

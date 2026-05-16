@@ -19,23 +19,28 @@ find_package(Qt6 REQUIRED COMPONENTS
     Qml
     Quick
     QuickControls2
+    WebChannel
+    WebEngineWidgets
 )
 
 # ============================================================
-# libdatachannel / WebRTC
+# libdatachannel / optional native WebRTC experiments
 #
 # 注意：
-# 1. 这里应指向 cmake --install build 之后的安装目录：
+# 1. Qt WebEngine is now the primary audio/video WebRTC engine.
+#    libdatachannel is kept optional for the old native signaling adapter.
+#
+# 2. 这里应指向 cmake --install build 之后的安装目录：
 #       C:/deps/libdatachannel
 #    不要指向源码目录：
 #       C:/msys64/home/21023/libdatachannel
 #    也不要指向 build 目录。
 #
-# 2. 你的 Qt 工程使用的是 Qt 自带 MinGW：
+# 3. 你的 Qt 工程使用的是 Qt 自带 MinGW：
 #       D:/QT/Tools/mingw1310_64
 #    所以 libdatachannel 也必须用同一套 MinGW 编译并安装。
 # ============================================================
-option(ICHAT_WITH_LIBDATACHANNEL "Enable libdatachannel WebRTC signaling adapter" ON)
+option(ICHAT_WITH_LIBDATACHANNEL "Enable optional libdatachannel signaling adapter" OFF)
 set(ICHAT_LIBDATACHANNEL_ROOT "C:/deps/libdatachannel" CACHE PATH
     "Root directory of the Windows/MinGW libdatachannel install"
 )
@@ -51,26 +56,33 @@ if(ICHAT_WITH_LIBDATACHANNEL)
     # 让 find_package 优先从安装目录查找 LibDataChannelConfig.cmake
     list(PREPEND CMAKE_PREFIX_PATH "${ICHAT_LIBDATACHANNEL_ROOT}")
 
-    find_package(LibDataChannel CONFIG REQUIRED)
+    find_package(LibDataChannel CONFIG QUIET)
 
-    if(TARGET LibDataChannel::LibDataChannel)
+    if(NOT LibDataChannel_FOUND)
+        message(STATUS "libdatachannel not found: optional native adapter disabled")
+    endif()
+
+    if(LibDataChannel_FOUND AND TARGET LibDataChannel::LibDataChannel)
         set(ICHAT_LIBDATACHANNEL_TARGET LibDataChannel::LibDataChannel)
-    elseif(TARGET datachannel)
+    elseif(LibDataChannel_FOUND AND TARGET datachannel)
         set(ICHAT_LIBDATACHANNEL_TARGET datachannel)
-    else()
+    elseif(LibDataChannel_FOUND)
         message(FATAL_ERROR
             "LibDataChannel was found, but no usable imported target exists. "
             "Expected target: LibDataChannel::LibDataChannel or datachannel."
         )
     endif()
 
-    message(STATUS "Found libdatachannel: ${ICHAT_LIBDATACHANNEL_ROOT}")
-    message(STATUS "Using libdatachannel target: ${ICHAT_LIBDATACHANNEL_TARGET}")
+    if(LibDataChannel_FOUND)
+        message(STATUS "Found libdatachannel: ${ICHAT_LIBDATACHANNEL_ROOT}")
+        message(STATUS "Using libdatachannel target: ${ICHAT_LIBDATACHANNEL_TARGET}")
+    endif()
 endif()
 
 # 源文件
 set(SOURCES
     src/callmediaadapter.cpp
+    src/callwebbridge.cpp
     src/main.cpp
     src/mainwindow.cpp
     src/mainwindow_messages.cpp
@@ -87,6 +99,7 @@ set(SOURCES
 # 头文件
 set(HEADERS
     include/callmediaadapter.h
+    include/callwebbridge.h
     include/mainwindow.h
     include/mainwindow_helpers.h
     include/loginwindow.h
@@ -123,9 +136,11 @@ target_link_libraries(${PROJECT_NAME}
         Qt6::Qml
         Qt6::Quick
         Qt6::QuickControls2
+        Qt6::WebChannel
+        Qt6::WebEngineWidgets
 )
 
-if(ICHAT_WITH_LIBDATACHANNEL)
+if(ICHAT_WITH_LIBDATACHANNEL AND LibDataChannel_FOUND)
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
             ${ICHAT_LIBDATACHANNEL_TARGET}

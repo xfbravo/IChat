@@ -4,9 +4,10 @@
 
 - Linux server runs `im_server` for login, chat, and call signaling.
 - Linux server also runs `coturn` for STUN/TURN.
-- Windows client links Qt and Windows-build `libdatachannel`.
+- Windows client uses Qt WebEngine for real WebRTC audio/video calls.
+- `libdatachannel` is optional and only kept for the older native signaling adapter.
 
-Do not link the Linux `libdatachannel.so` into the Windows client. Build or install a Windows MinGW version of libdatachannel that matches the Qt MinGW kit.
+Do not link the Linux `libdatachannel.so` into the Windows client. If you enable the optional native adapter, build or install a Windows MinGW version of libdatachannel that matches the Qt MinGW kit.
 
 ## Windows Environment Variables
 
@@ -31,9 +32,9 @@ set ICHAT_RTC_FORCE_RELAY=0
 
 Use `ICHAT_RTC_FORCE_RELAY=1` only when you want to force all WebRTC media through TURN for testing.
 
-## Build With MSYS2 MinGW64
+## Optional libdatachannel Build With MSYS2 MinGW64
 
-Install libdatachannel for Windows:
+This is not required for the Qt WebEngine audio/video call path. Only install libdatachannel if you want to keep testing the optional native adapter:
 
 ```bash
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-openssl git
@@ -51,18 +52,16 @@ cmake --install build
 
 ## Build From Qt Creator
 
-If your libdatachannel source/build directory is:
+The real audio/video call UI uses Qt WebEngine, so the selected Qt kit must include:
 
 ```text
-C:\msys64\home\21023\libdatachannel
+Qt WebEngine
+Qt WebChannel
 ```
 
-open the client project in Qt Creator, then configure the CMake project with these variables:
+In Qt Maintenance Tool, install the WebEngine component for the same Qt version and MinGW kit that builds the client.
 
-```text
-ICHAT_WITH_LIBDATACHANNEL=ON
-ICHAT_LIBDATACHANNEL_ROOT=C:/msys64/home/21023/libdatachannel
-```
+Open the client project in Qt Creator. For the Qt WebEngine call path, keep `ICHAT_WITH_LIBDATACHANNEL` unset or set it to `OFF`.
 
 In Qt Creator this is usually under:
 
@@ -72,33 +71,14 @@ Projects -> Build Settings -> CMake -> Initial Configuration / Current Configura
 
 If Qt Creator has already configured the project before, clear the previous CMake cache or delete the build directory, then run CMake again.
 
-The CMake output must contain:
-
-```text
-Found libdatachannel: enabling WebRTC PeerConnection adapter
-```
-
-If it still says `libdatachannel not found`, install libdatachannel to a clean prefix and point Qt Creator to that installed directory:
-
-```bash
-cd /home/21023/libdatachannel
-cmake --install build --prefix C:/deps/libdatachannel
-```
-
-Then use this Qt Creator CMake variable instead:
+If you explicitly enable the optional native adapter with `ICHAT_WITH_LIBDATACHANNEL=ON`, set:
 
 ```text
 ICHAT_LIBDATACHANNEL_ROOT=C:/deps/libdatachannel
 ```
 
-Build the client:
+and make sure the CMake output contains:
 
-```bash
-cmake -S im_client -B build -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_PREFIX_PATH="C:/Qt/6.5.3/mingw_64;C:/deps/libdatachannel" \
-  -DICHAT_WITH_LIBDATACHANNEL=ON
-cmake --build build
+```text
+Found libdatachannel: C:/deps/libdatachannel
 ```
-
-If `libdatachannel` is not found, the client still builds, but real WebRTC PeerConnection support is disabled.

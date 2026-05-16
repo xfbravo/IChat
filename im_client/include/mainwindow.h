@@ -32,6 +32,9 @@ class QPropertyAnimation;
 class QDialog;
 class QEvent;
 class QTimer;
+class QWebChannel;
+class QWebEngineView;
+class CallWebBridge;
 class CallMediaAdapter;
 
 class MainWindow : public QMainWindow {
@@ -239,6 +242,9 @@ private:
     void openCreateGroupDialog();
     void startOutgoingCall(const QString& call_type);
     void showCallDialog(const QString& title);
+    void startWebRtcPage();
+    void applyRemoteDescriptionToWebView(const QJsonObject& sdp);
+    void addRemoteCandidateToWebView(const QJsonObject& candidate);
     void updateCallDialog();
     void finishActiveCall(const QString& reason, bool notify_peer);
     bool ensureCallDevices(const QString& call_type, QString* error_message) const;
@@ -353,12 +359,13 @@ private:
     // Status
     QLabel* status_label_;
 
-    // 一对一实时音视频通话 UI 状态。媒体传输由后续 WebRTC 适配器接入。
+    // 一对一实时音视频通话 UI 状态。WebEngine 页面承载 WebRTC 媒体管线。
     CallState call_state_ = CallState::Idle;
     QString active_call_id_;
     QString active_call_peer_id_;
     QString active_call_type_ = QStringLiteral("audio");
     QJsonObject active_call_remote_sdp_;
+    QVector<QJsonObject> pending_call_ice_candidates_;
     bool active_call_incoming_ = false;
     QDialog* call_dialog_ = nullptr;
     QLabel* call_title_label_ = nullptr;
@@ -367,6 +374,9 @@ private:
     QPushButton* call_reject_button_ = nullptr;
     QPushButton* call_hangup_button_ = nullptr;
     QTimer* call_timeout_timer_ = nullptr;
+    QWebEngineView* call_web_view_ = nullptr;
+    QWebChannel* call_web_channel_ = nullptr;
+    CallWebBridge* call_web_bridge_ = nullptr;
     CallMediaAdapter* call_media_adapter_ = nullptr;
 
     // 当前右侧聊天窗口正在展示的消息，以及 msg_id 到下标的快速索引。

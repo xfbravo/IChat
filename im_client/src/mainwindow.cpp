@@ -5,6 +5,7 @@
 
 #include "mainwindow.h"
 #include "addcontactdialog.h"
+#include "callwebbridge.h"
 #include "callmediaadapter.h"
 #include <QStatusBar>
 #include <QAction>
@@ -46,6 +47,7 @@
 #include <QImage>
 #include <QImageReader>
 #include <QIODevice>
+#include <QWebChannel>
 #include <algorithm>
 #include "mainwindow_helpers.h"
 
@@ -107,9 +109,56 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     call_timeout_timer_ = new QTimer(this);
     call_timeout_timer_->setSingleShot(true);
     connect(call_timeout_timer_, &QTimer::timeout, this, &MainWindow::onCallTimeout);
+    call_web_bridge_ = new CallWebBridge(this);
+    const QJsonArray call_ice_servers =
+        CallMediaAdapter::defaultIceServers(tcp_client_ ? tcp_client_->serverHost() : QString());
+    call_web_bridge_->setIceServers(call_ice_servers);
+    connect(call_web_bridge_, &CallWebBridge::localOfferReady,
+            this, [this](const QString& call_id, const QString& sdp) {
+                if (call_id == active_call_id_ && call_state_ == CallState::Outgoing && tcp_client_) {
+                    tcp_client_->startCall(active_call_peer_id_, active_call_type_, sdp, active_call_id_);
+                }
+            });
+    connect(call_web_bridge_, &CallWebBridge::localAnswerReady,
+            this, [this](const QString& call_id, const QString& sdp) {
+                if (call_id == active_call_id_ && call_state_ == CallState::Connecting && tcp_client_) {
+                    tcp_client_->acceptCall(active_call_id_, active_call_peer_id_, sdp);
+                    call_state_ = CallState::InCall;
+                    call_timeout_timer_->stop();
+                    updateCallDialog();
+                }
+            });
+    connect(call_web_bridge_, &CallWebBridge::localIceCandidateReady,
+            this, [this](const QString& call_id, const QJsonObject& candidate) {
+                if (call_id == active_call_id_ && tcp_client_) {
+                    tcp_client_->sendCallIce(active_call_id_, active_call_peer_id_, candidate);
+                }
+            });
+    connect(call_web_bridge_, &CallWebBridge::mediaStarted,
+            this, [this](const QString& call_id) {
+                if (call_id != active_call_id_) {
+                    return;
+                }
+                const QVector<QJsonObject> candidates = pending_call_ice_candidates_;
+                pending_call_ice_candidates_.clear();
+                for (const QJsonObject& candidate : candidates) {
+                    addRemoteCandidateToWebView(candidate);
+                }
+            });
+    connect(call_web_bridge_, &CallWebBridge::errorOccurred,
+            this, [this](const QString& message) {
+                if (call_state_ != CallState::Idle) {
+                    finishActiveCall(message, false);
+                }
+            });
+    connect(call_web_bridge_, &CallWebBridge::stateChanged,
+            this, [this](const QString& state) {
+                if (call_dialog_ && call_status_label_ && call_state_ != CallState::Idle) {
+                    call_status_label_->setText(state);
+                }
+            });
     call_media_adapter_ = new CallMediaAdapter(this);
-    call_media_adapter_->setIceServers(
-        CallMediaAdapter::defaultIceServers(tcp_client_ ? tcp_client_->serverHost() : QString()));
+    call_media_adapter_->setIceServers(call_ice_servers);
     const QString force_relay_env = qEnvironmentVariable("ICHAT_RTC_FORCE_RELAY").trimmed().toLower();
     const bool force_relay = force_relay_env.isEmpty()
         ? QSettings("IMClient", "TcpClient").value("rtc_force_relay", false).toBool()

@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IChat Call</title>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101613;
+      --panel: #17221d;
+      --line: #2d4137;
+      --text: #f5faf6;
+      --muted: #b9c9bf;
+      --accent: #48c774;
+      --danger: #e35d6a;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 210px;
+      background:
+        linear-gradient(135deg, rgba(72, 199, 116, .10), transparent 42%),
+        radial-gradient(circle at 85% 18%, rgba(255, 255, 255, .08), transparent 24%),
+        var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background: #0a0f0d;
+      object-fit: cover;
+    }
+
+    #remoteVideo {
+      position: absolute;
+      inset: 0;
+    }
+
+    #localVideo {
+      position: absolute;
+      right: 12px;
+      bottom: 12px;
+      width: min(32%, 180px);
+      aspect-ratio: 16 / 10;
+      height: auto;
+      border: 1px solid rgba(245, 250, 246, .35);
+      border-radius: 8px;
+      box-shadow: 0 12px 28px rgba(0, 0, 0, .35);
+      background: #0a0f0d;
+      object-fit: cover;
+    }
+
+    .audio-only #remoteVideo,
+    .audio-only #localVideo {
+      display: none;
+    }
+
+    .audio-card {
+      position: absolute;
+      inset: 0;
+      display: none;
+      place-items: center;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .audio-only .audio-card {
+      display: grid;
+    }
+
+    .avatar {
+      width: 76px;
+      height: 76px;
+      margin: 0 auto 14px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: #214333;
+      color: #dff6e7;
+      font-size: 30px;
+      font-weight: 800;
+      border: 1px solid rgba(245, 250, 246, .18);
+    }
+
+    .label {
+      font-size: 15px;
+      font-weight: 700;
+    }
+
+    .status {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      max-width: calc(100% - 24px);
+      padding: 7px 10px;
+      border-radius: 6px;
+      background: rgba(10, 15, 13, .68);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+      backdrop-filter: blur(8px);
+    }
+
+    .status.error {
+      color: #ffd8dc;
+      background: rgba(99, 32, 40, .78);
+    }
+  </style>
+</head>
+<body>
+  <main id="stage" class="stage">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <section class="audio-card" aria-hidden="true">
+      <div>
+        <div class="avatar">☎</div>
+        <div class="label">语音通话中</div>
+      </div>
+    </section>
+    <div id="status" class="status">正在准备 WebRTC...</div>
+  </main>
+
+  <script>
+    const state = {
+      bridge: null,
+      pc: null,
+      localStream: null,
+      started: false,
+      pendingRemoteCandidates: [],
+    };
+
+    const stage = document.getElementById('stage');
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+    const statusEl = document.getElementById('status');
+
+    function setStatus(text, error = false) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle('error', error);
+      if (state.bridge) {
+        state.bridge.mediaStateChanged(text);
+      }
+    }
+
+    function reportError(error) {
+      const message = error && error.message ? error.message : String(error || 'WebRTC 媒体初始化失败');
+      setStatus(message, true);
+      if (state.bridge) {
+        state.bridge.mediaError(message);
+      }
+    }
+
+    function candidateToObject(event) {
+      const candidate = event.candidate;
+      if (!candidate) {
+        return null;
+      }
+      return {
+        candidate: candidate.candidate,
+        sdpMid: candidate.sdpMid || '',
+        mid: candidate.sdpMid || '',
+        sdpMLineIndex: candidate.sdpMLineIndex == null ? 0 : candidate.sdpMLineIndex,
+        usernameFragment: candidate.usernameFragment || '',
+      };
+    }
+
+    function normalizeIceServers(servers) {
+      if (!Array.isArray(servers) || servers.length === 0) {
+        return [];
+      }
+
+      return servers.map((server) => {
+        if (server.url) {
+          return { urls: server.url };
+        }
+
+        if (server.type === 'turn') {
+          const relay = server.relay || 'udp';
+          return {
+            urls: `turn:${server.host}:${server.port || 3478}?transport=${relay}`,
+            username: server.username || '',
+            credential: server.password || '',
+          };
+        }
+
+        if (server.host) {
+          return { urls: `stun:${server.host}:${server.port || 3478}` };
+        }
+
+        return null;
+      }).filter(Boolean);
+    }
+
+    async function ensurePeerConnection(iceServers = []) {
+      if (state.pc) {
+        return state.pc;
+      }
+
+      const pc = new RTCPeerConnection({
+        iceServers: normalizeIceServers(iceServers),
+      });
+
+      pc.onicecandidate = (event) => {
+        const obj = candidateToObject(event);
+        if (obj && state.bridge) {
+          state.bridge.localCandidateReady(obj);
+        }
+      };
+
+      pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+          remoteVideo.srcObject = event.streams[0];
+          setStatus('远端媒体已接入');
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        setStatus(`连接状态：${pc.connectionState}`);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'failed') {
+          setStatus('ICE 连接失败，请检查 TURN/STUN 服务。', true);
+        }
+      };
+
+      state.pc = pc;
+      return pc;
+    }
+
+    async function startLocalMedia(callType) {
+      const wantVideo = callType === 'video';
+      stage.classList.toggle('audio-only', !wantVideo);
+      const constraints = {
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: wantVideo
+          ? { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
+          : false,
+      };
+
+      setStatus(wantVideo ? '正在打开摄像头和麦克风...' : '正在打开麦克风...');
+      state.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      localVideo.srcObject = state.localStream;
+
+      const pc = await ensurePeerConnection();
+      state.localStream.getTracks().forEach((track) => pc.addTrack(track, state.localStream));
+      if (state.bridge) {
+        state.bridge.mediaStateChanged('media-started');
+      }
+      setStatus(wantVideo ? '本地视频已就绪' : '本地音频已就绪');
+    }
+
+    async function flushRemoteCandidates() {
+      if (!state.pc || !state.pc.remoteDescription) {
+        return;
+      }
+      const pending = state.pendingRemoteCandidates.splice(0);
+      for (const candidate of pending) {
+        await state.pc.addIceCandidate(candidate);
+      }
+    }
+
+    async function startCall(callId, callType, incoming, remoteSdp, iceServers) {
+      if (state.started) {
+        return;
+      }
+      state.started = true;
+      const pc = await ensurePeerConnection(iceServers);
+      await startLocalMedia(callType);
+
+      if (incoming) {
+        if (!remoteSdp || !remoteSdp.sdp) {
+          throw new Error('远端 SDP 不完整。');
+        }
+        setStatus('正在生成接听应答...');
+        await pc.setRemoteDescription({ type: remoteSdp.type || 'offer', sdp: remoteSdp.sdp });
+        await flushRemoteCandidates();
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        state.bridge.localDescriptionReady('answer', answer.sdp);
+      } else {
+        setStatus('正在生成呼叫邀请...');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        state.bridge.localDescriptionReady('offer', offer.sdp);
+      }
+    }
+
+    window.applyRemoteDescription = async function(type, sdp) {
+      try {
+        const pc = await ensurePeerConnection();
+        await pc.setRemoteDescription({ type, sdp });
+        await flushRemoteCandidates();
+        setStatus('远端 SDP 已设置');
+      } catch (error) {
+        reportError(error);
+      }
+    };
+
+    window.addRemoteCandidate = async function(candidate) {
+      try {
+        const pc = await ensurePeerConnection();
+        const ice = {
+          candidate: candidate.candidate,
+          sdpMid: candidate.sdpMid || candidate.mid || '',
+          sdpMLineIndex: candidate.sdpMLineIndex == null ? 0 : candidate.sdpMLineIndex,
+        };
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(ice);
+        } else {
+          state.pendingRemoteCandidates.push(ice);
+        }
+      } catch (error) {
+        reportError(error);
+      }
+    };
+
+    window.endCall = function() {
+      if (state.localStream) {
+        state.localStream.getTracks().forEach((track) => track.stop());
+        state.localStream = null;
+      }
+      if (state.pc) {
+        state.pc.close();
+        state.pc = null;
+      }
+      state.started = false;
+      state.pendingRemoteCandidates = [];
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+      setStatus('通话已结束');
+    };
+
+    new QWebChannel(qt.webChannelTransport, (channel) => {
+      state.bridge = channel.objects.callBridge;
+      state.bridge.startRequested.connect((callId, callType, incoming, remoteSdp, iceServers) => {
+        startCall(callId, callType, incoming, remoteSdp, iceServers).catch(reportError);
+      });
+      state.bridge.pageReady();
+    });
+  </script>
+</body>
+</html>
