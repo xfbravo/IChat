@@ -9,7 +9,8 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStringList>
-
+#include <QAudioDevice>
+#include <QCameraDevice>
 #if defined(ICHAT_WITH_LIBDATACHANNEL)
 #include <rtc/rtc.hpp>
 #endif
