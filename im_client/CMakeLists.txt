@@ -21,14 +21,26 @@ find_package(Qt6 REQUIRED COMPONENTS
     QuickControls2
 )
 
+option(ICHAT_WITH_LIBDATACHANNEL "Enable libdatachannel WebRTC signaling adapter" ON)
+if(ICHAT_WITH_LIBDATACHANNEL)
+    find_package(LibDataChannel CONFIG QUIET)
+    if(LibDataChannel_FOUND)
+        message(STATUS "Found libdatachannel: enabling WebRTC PeerConnection adapter")
+    else()
+        message(STATUS "libdatachannel not found: building without WebRTC PeerConnection adapter")
+    endif()
+endif()
+
 # 源文件
 set(SOURCES
+    src/callmediaadapter.cpp
     src/main.cpp
     src/mainwindow.cpp
     src/mainwindow_messages.cpp
     src/mainwindow_contacts.cpp
     src/mainwindow_me.cpp
     src/mainwindow_moments.cpp
+    src/mainwindow_calls.cpp
     src/loginwindow.cpp
     src/tcpclient.cpp
     src/protocol.cpp
@@ -37,6 +49,7 @@ set(SOURCES
 
 # 头文件
 set(HEADERS
+    include/callmediaadapter.h
     include/mainwindow.h
     include/mainwindow_helpers.h
     include/loginwindow.h
@@ -71,6 +84,11 @@ target_link_libraries(${PROJECT_NAME}
     Qt6::Quick
     Qt6::QuickControls2
 )
+
+if(ICHAT_WITH_LIBDATACHANNEL AND LibDataChannel_FOUND)
+    target_link_libraries(${PROJECT_NAME} LibDataChannel::LibDataChannel)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ICHAT_WITH_LIBDATACHANNEL=1)
+endif()
 
 # Windows 特定配置
 if(WIN32)

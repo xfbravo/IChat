@@ -10,13 +10,25 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QDebug>
+#include <QSettings>
 
 LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     : QWidget(parent)
     , tcp_client_(tcp_client)
-    , server_host_("192.168.40.128")
-    , server_port_(8080)
+    , server_host_(qEnvironmentVariable("ICHAT_SERVER_HOST").trimmed().isEmpty()
+        ? QSettings("IMClient", "TcpClient").value("server_host", "61.184.13.118").toString()
+        : qEnvironmentVariable("ICHAT_SERVER_HOST").trimmed())
+    , server_port_(static_cast<quint16>(qEnvironmentVariable("ICHAT_SERVER_PORT").trimmed().isEmpty()
+        ? QSettings("IMClient", "TcpClient").value("server_port", 8080).toUInt()
+        : qEnvironmentVariable("ICHAT_SERVER_PORT").trimmed().toUInt()))
 {
+    if (server_host_.trimmed().isEmpty()) {
+        server_host_ = "61.184.13.118";
+    }
+    if (server_port_ == 0) {
+        server_port_ = 8080;
+    }
+
     setWindowTitle("IM 客户端 - 登录");
     setMinimumSize(400, 320);
     setStyleSheet(R"(

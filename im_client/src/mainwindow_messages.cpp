@@ -506,6 +506,41 @@ void MainWindow::createMessageView() {
     )");
     chat_header_layout->addWidget(chat_target_label_, 1);
 
+    auto make_call_button = [](const QString& text, const QString& tooltip) {
+        QToolButton* button = new QToolButton;
+        button->setText(text);
+        button->setToolTip(tooltip);
+        button->setEnabled(false);
+        button->setCursor(Qt::PointingHandCursor);
+        button->setStyleSheet(R"(
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+                color: #2f6f3e;
+                font-size: 17px;
+                font-weight: 800;
+                min-width: 34px;
+                min-height: 32px;
+            }
+            QToolButton:hover {
+                background-color: #eef6ef;
+            }
+            QToolButton:disabled {
+                color: #b4bdb7;
+            }
+        )");
+        return button;
+    };
+
+    audio_call_button_ = make_call_button("☎", "语音通话");
+    connect(audio_call_button_, &QToolButton::clicked, this, &MainWindow::onAudioCallClicked);
+    chat_header_layout->addWidget(audio_call_button_);
+
+    video_call_button_ = make_call_button("▣", "视频通话");
+    connect(video_call_button_, &QToolButton::clicked, this, &MainWindow::onVideoCallClicked);
+    chat_header_layout->addWidget(video_call_button_);
+
     chat_more_button_ = new QToolButton;
     chat_more_button_->setText("⋯");
     chat_more_button_->setToolTip("更多");
@@ -1401,6 +1436,9 @@ void MainWindow::switchToConversation(const QString& conversation_key, const QSt
     chat_target_label_->setText(display_name);
     chat_more_button_->setEnabled(true);
     attach_file_button_->setEnabled(true);
+    const bool can_call = chat_type == "p2p";
+    if (audio_call_button_) audio_call_button_->setEnabled(can_call);
+    if (video_call_button_) video_call_button_->setEnabled(can_call);
     conversations_[conversation_key].peer_id = peer_id;
     conversations_[conversation_key].chat_type = chat_type;
     conversations_[conversation_key].title = display_name;
@@ -1421,7 +1459,12 @@ void MainWindow::onDisconnected() {
     status_label_->setText("离线");
     message_input_->setEnabled(false);
     attach_file_button_->setEnabled(false);
+    if (audio_call_button_) audio_call_button_->setEnabled(false);
+    if (video_call_button_) video_call_button_->setEnabled(false);
     send_button_->setEnabled(false);
+    if (call_state_ != CallState::Idle) {
+        finishActiveCall("连接已断开", false);
+    }
     markSendingMessagesFailed("连接已断开");
 }
 

@@ -64,6 +64,7 @@ im_server/
 | CHAT_MESSAGE | 0x0005 | 双向 | 统一聊天消息，使用 content_type 区分 text/image/video/file/voice |
 | FILE_UPLOAD_START / FILE_UPLOAD_CHUNK | 0x0019 / 0x001A | C→S | 文件分片上传，单文件最大 200MB |
 | FILE_DOWNLOAD_REQ | 0x001B | C→S | 文件下载请求 |
+| CALL_INVITE / CALL_ACCEPT / CALL_REJECT / CALL_CANCEL / CALL_HANGUP / CALL_ICE / CALL_TIMEOUT | 0x001E-0x0024 | 双向 | 一对一音视频通话 WebRTC 信令 |
 | LOGIN_RSP | 0x8002 | S→C | 登录响应 |
 | REGISTER_RSP | 0x8003 | S→C | 注册响应 |
 | FILE_UPLOAD_RSP | 0x8019 | S→C | 文件上传进度/完成响应 |
@@ -116,6 +117,19 @@ Release\im_server.exe 8080
 # 指定线程数
 ./im_server 8080 8
 ```
+
+## 音视频通话部署
+
+`im_server` 只负责通话信令转发，不承载音视频媒体流。公网一对一通话还需要在 Linux 服务器部署 coturn，并让 Windows 客户端通过环境变量配置 TURN：
+
+```text
+ICHAT_TURN_HOST=服务器公网IP或域名
+ICHAT_TURN_PORT=3478
+ICHAT_TURN_USER=ichat
+ICHAT_TURN_PASSWORD=your_turn_password
+```
+
+服务器防火墙需要开放 `TCP/UDP 3478` 和 coturn 配置的 UDP relay 端口范围。
 
 ## 线程模型
 

@@ -31,6 +31,8 @@
 class QPropertyAnimation;
 class QDialog;
 class QEvent;
+class QTimer;
+class CallMediaAdapter;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -121,6 +123,13 @@ private slots:
     void onCreateMomentClicked();
     void onMomentCreateResult(int code, const QString& message);
     void onMomentsReceived(const QString& moments_json);
+    void onAudioCallClicked();
+    void onVideoCallClicked();
+    void onCallSignalReceived(const QString& signal_type, const QJsonObject& payload);
+    void onAcceptCallClicked();
+    void onRejectCallClicked();
+    void onHangupCallClicked();
+    void onCallTimeout();
 
 private:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -157,6 +166,15 @@ private:
         QString status;
         qint64 timestamp = 0;
         bool is_mine = false;
+    };
+
+    enum class CallState {
+        Idle,
+        Outgoing,
+        Ringing,
+        Connecting,
+        InCall,
+        Ended
     };
 
     // 页面创建入口，具体实现分别位于 mainwindow*.cpp。
@@ -219,6 +237,13 @@ private:
     bool isGroupConversation(const QString& conversation_key) const;
     void switchToConversation(const QString& conversation_key, const QString& title);
     void openCreateGroupDialog();
+    void startOutgoingCall(const QString& call_type);
+    void showCallDialog(const QString& title);
+    void updateCallDialog();
+    void finishActiveCall(const QString& reason, bool notify_peer);
+    bool ensureCallDevices(const QString& call_type, QString* error_message) const;
+    QString callPeerName() const;
+    QString callStateText() const;
 
     // 搜索只读取本地会话/联系人缓存，点击结果后复用会话切换并定位原列表项。
     QList<QString> sortedConversationIds() const;
@@ -260,6 +285,8 @@ private:
     QWidget* chat_interface_panel_;
     QLabel* chat_target_label_;
     QToolButton* chat_more_button_;
+    QToolButton* audio_call_button_ = nullptr;
+    QToolButton* video_call_button_ = nullptr;
     QScrollArea* chat_scroll_area_;
     QWidget* chat_messages_widget_;
     QVBoxLayout* chat_messages_layout_;
@@ -325,6 +352,22 @@ private:
 
     // Status
     QLabel* status_label_;
+
+    // 一对一实时音视频通话 UI 状态。媒体传输由后续 WebRTC 适配器接入。
+    CallState call_state_ = CallState::Idle;
+    QString active_call_id_;
+    QString active_call_peer_id_;
+    QString active_call_type_ = QStringLiteral("audio");
+    QJsonObject active_call_remote_sdp_;
+    bool active_call_incoming_ = false;
+    QDialog* call_dialog_ = nullptr;
+    QLabel* call_title_label_ = nullptr;
+    QLabel* call_status_label_ = nullptr;
+    QPushButton* call_accept_button_ = nullptr;
+    QPushButton* call_reject_button_ = nullptr;
+    QPushButton* call_hangup_button_ = nullptr;
+    QTimer* call_timeout_timer_ = nullptr;
+    CallMediaAdapter* call_media_adapter_ = nullptr;
 
     // 当前右侧聊天窗口正在展示的消息，以及 msg_id 到下标的快速索引。
     QVector<ChatViewMessage> current_messages_;

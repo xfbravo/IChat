@@ -149,6 +149,15 @@ private:
         std::string final_path;
     };
 
+    struct CallState {
+        std::string call_id;
+        std::string caller_id;
+        std::string callee_id;
+        std::string call_type;
+        std::int64_t created_at = 0;
+        bool accepted = false;
+    };
+
     uint16_t port_;                              // 监听端口
     ThreadPool thread_pool_;                     // 线程池（必须在 acceptor_ 之前初始化）
     boost::asio::ip::tcp::acceptor acceptor_;    // 接受器
@@ -162,6 +171,9 @@ private:
     mutable std::mutex session_mutex_;                       // 保护 sessions_
     std::unordered_map<std::string, FileUploadState> file_uploads_;
     std::mutex file_upload_mutex_;
+    std::unordered_map<std::string, CallState> active_calls_;
+    std::unordered_map<std::string, std::string> active_call_by_user_;
+    std::mutex call_mutex_;
 
     bool running_{false};                                    // 运行状态
 };

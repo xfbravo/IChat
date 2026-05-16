@@ -583,6 +583,120 @@ void TcpClient::getChatHistory(const QString& peer_id,
     sendMessage(MsgType::GET_CHAT_HISTORY, body);
 }
 
+QString TcpClient::startCall(const QString& to_user_id,
+                             const QString& call_type,
+                             const QString& sdp,
+                             const QString& fixed_call_id) {
+    if (state_ != ClientState::LoggedIn || to_user_id.isEmpty()) {
+        return QString();
+    }
+
+    const QString call_id = fixed_call_id.isEmpty() ? Protocol::generateMsgId() : fixed_call_id;
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["call_type"] = call_type == "video" ? QStringLiteral("video") : QStringLiteral("audio");
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    if (!sdp.isEmpty()) {
+        QJsonObject sdp_obj;
+        sdp_obj["type"] = "offer";
+        sdp_obj["sdp"] = sdp;
+        obj["sdp"] = sdp_obj;
+    }
+    sendMessage(MsgType::CALL_INVITE, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    return call_id;
+}
+
+void TcpClient::acceptCall(const QString& call_id, const QString& to_user_id, const QString& sdp) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    if (!sdp.isEmpty()) {
+        QJsonObject sdp_obj;
+        sdp_obj["type"] = "answer";
+        sdp_obj["sdp"] = sdp;
+        obj["sdp"] = sdp_obj;
+    }
+    sendMessage(MsgType::CALL_ACCEPT, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::rejectCall(const QString& call_id, const QString& to_user_id, const QString& reason) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["reason"] = reason;
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    sendMessage(MsgType::CALL_REJECT, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::cancelCall(const QString& call_id, const QString& to_user_id, const QString& reason) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["reason"] = reason;
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    sendMessage(MsgType::CALL_CANCEL, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::hangupCall(const QString& call_id, const QString& to_user_id, const QString& reason) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["reason"] = reason;
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    sendMessage(MsgType::CALL_HANGUP, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::timeoutCall(const QString& call_id, const QString& to_user_id) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["reason"] = "呼叫超时";
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    sendMessage(MsgType::CALL_TIMEOUT, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
+void TcpClient::sendCallIce(const QString& call_id, const QString& to_user_id, const QJsonObject& candidate) {
+    if (state_ != ClientState::LoggedIn || call_id.isEmpty() || to_user_id.isEmpty()) {
+        return;
+    }
+
+    QJsonObject obj;
+    obj["call_id"] = call_id;
+    obj["from_user_id"] = user_id_;
+    obj["to_user_id"] = to_user_id;
+    obj["candidate"] = candidate;
+    obj["timestamp"] = QDateTime::currentSecsSinceEpoch();
+    sendMessage(MsgType::CALL_ICE, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+}
+
 void TcpClient::onConnected() {
     qDebug() << "Connected to server successfully";
     reconnect_attempts_ = 0;
@@ -1068,6 +1182,33 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
 
         case MsgType::MOMENTS_RSP: {
             emit momentsReceived(body);
+            break;
+        }
+
+        case MsgType::CALL_INVITE:
+        case MsgType::CALL_ACCEPT:
+        case MsgType::CALL_REJECT:
+        case MsgType::CALL_CANCEL:
+        case MsgType::CALL_HANGUP:
+        case MsgType::CALL_ICE:
+        case MsgType::CALL_TIMEOUT: {
+            QJsonDocument doc = QJsonDocument::fromJson(body.toUtf8());
+            if (!doc.isObject()) {
+                break;
+            }
+
+            QString signal_type;
+            switch (type) {
+                case MsgType::CALL_INVITE: signal_type = "invite"; break;
+                case MsgType::CALL_ACCEPT: signal_type = "accept"; break;
+                case MsgType::CALL_REJECT: signal_type = "reject"; break;
+                case MsgType::CALL_CANCEL: signal_type = "cancel"; break;
+                case MsgType::CALL_HANGUP: signal_type = "hangup"; break;
+                case MsgType::CALL_ICE: signal_type = "ice"; break;
+                case MsgType::CALL_TIMEOUT: signal_type = "timeout"; break;
+                default: break;
+            }
+            emit callSignalReceived(signal_type, doc.object());
             break;
         }
 

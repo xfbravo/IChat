@@ -5,6 +5,7 @@
 
 #include "mainwindow.h"
 #include "addcontactdialog.h"
+#include "callmediaadapter.h"
 #include <QStatusBar>
 #include <QAction>
 #include <QVBoxLayout>
@@ -26,6 +27,7 @@
 #include <QDialog>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QSettings>
 #include <QListView>
 #include <QIcon>
 #include <QPainter>
@@ -102,6 +104,42 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     // 状态栏
     status_label_ = new QLabel("在线");
     statusBar()->addWidget(status_label_);
+    call_timeout_timer_ = new QTimer(this);
+    call_timeout_timer_->setSingleShot(true);
+    connect(call_timeout_timer_, &QTimer::timeout, this, &MainWindow::onCallTimeout);
+    call_media_adapter_ = new CallMediaAdapter(this);
+    call_media_adapter_->setIceServers(
+        CallMediaAdapter::defaultIceServers(tcp_client_ ? tcp_client_->serverHost() : QString()));
+    const QString force_relay_env = qEnvironmentVariable("ICHAT_RTC_FORCE_RELAY").trimmed().toLower();
+    const bool force_relay = force_relay_env.isEmpty()
+        ? QSettings("IMClient", "TcpClient").value("rtc_force_relay", false).toBool()
+        : (force_relay_env == "1" || force_relay_env == "true" || force_relay_env == "yes" || force_relay_env == "on");
+    call_media_adapter_->setForceRelay(force_relay);
+    connect(call_media_adapter_, &CallMediaAdapter::localDescriptionReady,
+            this, [this](const QString& call_id, const QJsonObject& sdp) {
+                if (call_id != active_call_id_ || !tcp_client_) {
+                    return;
+                }
+                const QString sdp_text = sdp["sdp"].toString();
+                if (call_state_ == CallState::Outgoing) {
+                    tcp_client_->startCall(active_call_peer_id_, active_call_type_, sdp_text, active_call_id_);
+                } else if (call_state_ == CallState::Connecting && active_call_incoming_) {
+                    tcp_client_->acceptCall(active_call_id_, active_call_peer_id_, sdp_text);
+                    call_state_ = CallState::InCall;
+                    call_timeout_timer_->stop();
+                    updateCallDialog();
+                }
+            });
+    connect(call_media_adapter_, &CallMediaAdapter::localCandidateReady,
+            this, [this](const QString& call_id, const QJsonObject& candidate) {
+                if (call_id == active_call_id_ && tcp_client_) {
+                    tcp_client_->sendCallIce(active_call_id_, active_call_peer_id_, candidate);
+                }
+            });
+    connect(call_media_adapter_, &CallMediaAdapter::errorOccurred,
+            this, [this](const QString& message) {
+                finishActiveCall(message, false);
+            });
 
     // TcpClient 是网络层和窗口层的边界：窗口只处理信号，不直接解析 socket。
     connect(tcp_client_, &TcpClient::chatMessageReceived,
@@ -144,6 +182,8 @@ MainWindow::MainWindow(TcpClient* tcp_client,
             this, &MainWindow::onMomentCreateResult);
     connect(tcp_client_, &TcpClient::momentsReceived,
             this, &MainWindow::onMomentsReceived);
+    connect(tcp_client_, &TcpClient::callSignalReceived,
+            this, &MainWindow::onCallSignalReceived);
 }
 
 void MainWindow::createNavigationBar() {

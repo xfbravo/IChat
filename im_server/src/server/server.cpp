@@ -1229,6 +1229,158 @@ void Server::register_default_handlers() {
         session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(done_rsp));
     });
 
+    auto call_reject_body = [](const std::string& call_id,
+                               const std::string& from_user_id,
+                               const std::string& to_user_id,
+                               const std::string& reason,
+                               int code) {
+        json::object rsp;
+        rsp["call_id"] = call_id;
+        rsp["from_user_id"] = from_user_id;
+        rsp["to_user_id"] = to_user_id;
+        rsp["reason"] = reason;
+        rsp["code"] = code;
+        rsp["timestamp"] = static_cast<int64_t>(time(nullptr));
+        return json::serialize(rsp);
+    };
+
+    auto call_handler = [this, call_reject_body](std::shared_ptr<Session> session, const Message& msg) {
+        const std::string sender_id = session->user_id();
+        if (sender_id.empty()) {
+            session->send(MsgType::CALL_REJECT, call_reject_body("", "", "", "未登录", 401));
+            return;
+        }
+
+        json::object payload;
+        try {
+            payload = parse_json_object(msg.body);
+        } catch (const std::exception& e) {
+            session->send(MsgType::CALL_REJECT,
+                          call_reject_body("", sender_id, sender_id, std::string("无效 JSON: ") + e.what(), 400));
+            return;
+        }
+
+        std::string call_id = json_string(payload, "call_id");
+        std::string to_user_id = json_string(payload, "to_user_id");
+        std::string call_type = json_string(payload, "call_type", "audio");
+        if (call_type != "video") {
+            call_type = "audio";
+        }
+        if (call_id.empty()) {
+            call_id = random_hex_id();
+        }
+
+        payload["call_id"] = call_id;
+        payload["from_user_id"] = sender_id;
+        payload["call_type"] = call_type;
+        payload["server_timestamp"] = current_time_millis();
+        if (payload.find("timestamp") == payload.end()) {
+            payload["timestamp"] = static_cast<int64_t>(time(nullptr));
+        }
+
+        if (msg.type == MsgType::CALL_INVITE) {
+            if (to_user_id.empty()) {
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, sender_id, sender_id, "缺少 to_user_id", 400));
+                return;
+            }
+            if (!user_service_.user_exists(to_user_id)) {
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, to_user_id, sender_id, "目标用户不存在", 404));
+                return;
+            }
+            if (!user_service_.are_friends(sender_id, to_user_id)) {
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, to_user_id, sender_id, "只能呼叫好友", 403));
+                return;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(call_mutex_);
+                if (active_call_by_user_.count(sender_id) > 0) {
+                    session->send(MsgType::CALL_REJECT,
+                                  call_reject_body(call_id, sender_id, sender_id, "你正在通话中", 409));
+                    return;
+                }
+                if (active_call_by_user_.count(to_user_id) > 0) {
+                    session->send(MsgType::CALL_REJECT,
+                                  call_reject_body(call_id, to_user_id, sender_id, "对方正在通话中", 486));
+                    return;
+                }
+                active_calls_[call_id] = CallState{
+                    call_id,
+                    sender_id,
+                    to_user_id,
+                    call_type,
+                    static_cast<std::int64_t>(time(nullptr)),
+                    false
+                };
+                active_call_by_user_[sender_id] = call_id;
+                active_call_by_user_[to_user_id] = call_id;
+            }
+
+            payload["to_user_id"] = to_user_id;
+            if (!send_to_user(to_user_id, MsgType::CALL_INVITE, json::serialize(payload))) {
+                {
+                    std::lock_guard<std::mutex> lock(call_mutex_);
+                    active_calls_.erase(call_id);
+                    active_call_by_user_.erase(sender_id);
+                    active_call_by_user_.erase(to_user_id);
+                }
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, to_user_id, sender_id, "对方不在线", 480));
+            }
+            return;
+        }
+
+        CallState call;
+        bool should_cleanup = false;
+        {
+            std::lock_guard<std::mutex> lock(call_mutex_);
+            auto it = active_calls_.find(call_id);
+            if (it == active_calls_.end()) {
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, sender_id, sender_id, "通话不存在或已结束", 404));
+                return;
+            }
+            call = it->second;
+            if (sender_id != call.caller_id && sender_id != call.callee_id) {
+                session->send(MsgType::CALL_REJECT,
+                              call_reject_body(call_id, sender_id, sender_id, "无权操作该通话", 403));
+                return;
+            }
+            if (msg.type == MsgType::CALL_ACCEPT) {
+                it->second.accepted = true;
+                call.accepted = true;
+            } else if (msg.type == MsgType::CALL_REJECT
+                       || msg.type == MsgType::CALL_CANCEL
+                       || msg.type == MsgType::CALL_HANGUP
+                       || msg.type == MsgType::CALL_TIMEOUT) {
+                should_cleanup = true;
+            }
+        }
+
+        const std::string target_id = sender_id == call.caller_id ? call.callee_id : call.caller_id;
+        payload["to_user_id"] = target_id;
+        payload["call_type"] = call.call_type;
+        send_to_user(target_id, msg.type, json::serialize(payload));
+
+        if (should_cleanup) {
+            std::lock_guard<std::mutex> lock(call_mutex_);
+            active_calls_.erase(call_id);
+            active_call_by_user_.erase(call.caller_id);
+            active_call_by_user_.erase(call.callee_id);
+        }
+    };
+
+    dispatcher_.register_handler(MsgType::CALL_INVITE, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_ACCEPT, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_REJECT, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_CANCEL, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_HANGUP, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_ICE, call_handler);
+    dispatcher_.register_handler(MsgType::CALL_TIMEOUT, call_handler);
+
     // 登出消息处理
     dispatcher_.register_handler(MsgType::LOGOUT, [this](std::shared_ptr<Session> session, const Message& msg) {
         (void)msg;
@@ -1422,19 +1574,59 @@ bool Server::send_to_user(const std::string& user_id, MsgType type, const std::s
 }
 
 void Server::remove_session(Session::Ptr session) {
-    std::lock_guard<std::mutex> lock(session_mutex_);
-    if (!session->user_id().empty()) {
-        auto it = sessions_.find(session->user_id());
-        if (it != sessions_.end() && it->second == session) {
-            sessions_.erase(it);
+    std::string departed_user_id = session->user_id();
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        if (!departed_user_id.empty()) {
+            auto it = sessions_.find(departed_user_id);
+            if (it != sessions_.end() && it->second == session) {
+                sessions_.erase(it);
+            }
+        }
+        for (auto it = endpoints_.begin(); it != endpoints_.end(); ) {
+            if (it->second == session) {
+                it = endpoints_.erase(it);
+            } else {
+                ++it;
+            }
         }
     }
-    for (auto it = endpoints_.begin(); it != endpoints_.end(); ) {
-        if (it->second == session) {
-            it = endpoints_.erase(it);
-        } else {
-            ++it;
+
+    if (departed_user_id.empty()) {
+        return;
+    }
+
+    std::vector<std::pair<std::string, std::string>> hangup_notifications;
+    {
+        std::lock_guard<std::mutex> lock(call_mutex_);
+        auto active_it = active_call_by_user_.find(departed_user_id);
+        if (active_it == active_call_by_user_.end()) {
+            return;
         }
+
+        const std::string call_id = active_it->second;
+        auto call_it = active_calls_.find(call_id);
+        if (call_it != active_calls_.end()) {
+            const CallState call = call_it->second;
+            const std::string peer_id = departed_user_id == call.caller_id ? call.callee_id : call.caller_id;
+            json::object payload;
+            payload["call_id"] = call.call_id;
+            payload["from_user_id"] = departed_user_id;
+            payload["to_user_id"] = peer_id;
+            payload["call_type"] = call.call_type;
+            payload["reason"] = "对方已离线";
+            payload["timestamp"] = static_cast<int64_t>(time(nullptr));
+            hangup_notifications.emplace_back(peer_id, json::serialize(payload));
+            active_call_by_user_.erase(call.caller_id);
+            active_call_by_user_.erase(call.callee_id);
+            active_calls_.erase(call_it);
+        } else {
+            active_call_by_user_.erase(active_it);
+        }
+    }
+
+    for (const auto& notification : hangup_notifications) {
+        send_to_user(notification.first, MsgType::CALL_HANGUP, notification.second);
     }
 }
 

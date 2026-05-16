@@ -45,6 +45,13 @@ enum class MsgType : uint16_t {
     FILE_DOWNLOAD_REQ = 0x001B,  // 下载文件请求
     CREATE_GROUP      = 0x001C,  // 创建群聊
     GET_GROUP_LIST    = 0x001D,  // 获取群聊列表
+    CALL_INVITE       = 0x001E,  // 发起一对一音视频通话
+    CALL_ACCEPT       = 0x001F,  // 接听通话
+    CALL_REJECT       = 0x0020,  // 拒绝通话
+    CALL_CANCEL       = 0x0021,  // 取消呼叫
+    CALL_HANGUP       = 0x0022,  // 挂断通话
+    CALL_ICE          = 0x0023,  // WebRTC ICE 候选
+    CALL_TIMEOUT      = 0x0024,  // 呼叫超时
 
     // 服务端 -> 客户端
     LOGIN_RSP        = 0x8002,  // 登录响应

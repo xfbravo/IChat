@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QStringList>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QHash>
 #include <memory>
 
@@ -195,6 +196,17 @@ public:
                         int64_t before_time = 0,
                         const QString& chat_type = QStringLiteral("p2p"));
 
+    QString startCall(const QString& to_user_id,
+                      const QString& call_type,
+                      const QString& sdp = QString(),
+                      const QString& fixed_call_id = QString());
+    void acceptCall(const QString& call_id, const QString& to_user_id, const QString& sdp = QString());
+    void rejectCall(const QString& call_id, const QString& to_user_id, const QString& reason);
+    void cancelCall(const QString& call_id, const QString& to_user_id, const QString& reason);
+    void hangupCall(const QString& call_id, const QString& to_user_id, const QString& reason);
+    void timeoutCall(const QString& call_id, const QString& to_user_id);
+    void sendCallIce(const QString& call_id, const QString& to_user_id, const QJsonObject& candidate);
+
     /**
      * @brief 获取当前状态
      */
@@ -234,6 +246,11 @@ public:
      * @brief 获取保存的用户ID
      */
     const QString& savedUserId() const { return user_id_; }
+
+    /**
+     * @brief 当前信令服务器地址
+     */
+    const QString& serverHost() const { return server_host_; }
 
     /**
      * @brief 加载本地保存的登录凭证
@@ -429,6 +446,13 @@ signals:
      * @brief 朋友圈时间流
      */
     void momentsReceived(const QString& moments_json);
+
+    /**
+     * @brief 一对一音视频通话信令
+     *
+     * signal_type 使用 invite/accept/reject/cancel/hangup/ice/timeout。
+     */
+    void callSignalReceived(const QString& signal_type, const QJsonObject& payload);
 
 private slots:
     /**
