@@ -28,6 +28,8 @@
 #include <QScrollBar>
 #include <QListView>
 #include <QAbstractItemView>
+#include <QCollator>
+#include <QLocale>
 #include <QMap>
 #include <QIcon>
 #include <QPainter>
@@ -48,6 +50,7 @@
 #include <QImageReader>
 #include <QIODevice>
 #include <QMouseEvent>
+#include <QStringEncoder>
 #include <algorithm>
 #include <functional>
 #include "mainwindow_helpers.h"
@@ -78,6 +81,65 @@ namespace
         return label;
     }
 
+    QString chinesePinyinInitial(const QChar &character)
+    {
+        const uint unicode = character.unicode();
+        if (unicode < 0x4e00 || unicode > 0x9fff)
+        {
+            return QString();
+        }
+
+        static const QList<QPair<int, QChar>> gb2312_initial_ranges = {
+            {0xB0A1, 'A'}, {0xB0C5, 'B'}, {0xB2C1, 'C'}, {0xB4EE, 'D'},
+            {0xB6EA, 'E'}, {0xB7A2, 'F'}, {0xB8C1, 'G'}, {0xB9FE, 'H'},
+            {0xBBF7, 'J'}, {0xBFA6, 'K'}, {0xC0AC, 'L'}, {0xC2E8, 'M'},
+            {0xC4C3, 'N'}, {0xC5B6, 'O'}, {0xC5BE, 'P'}, {0xC6DA, 'Q'},
+            {0xC8BB, 'R'}, {0xC8F6, 'S'}, {0xCBFA, 'T'}, {0xCDDA, 'W'},
+            {0xCEF4, 'X'}, {0xD1B9, 'Y'}, {0xD4D1, 'Z'}
+        };
+
+        QString character_text;
+        character_text.append(character);
+        QByteArray encoded;
+        QStringEncoder gb_encoder("GB18030");
+        if (gb_encoder.isValid())
+        {
+            encoded = gb_encoder(character_text);
+        }
+        else
+        {
+            QStringEncoder system_encoder(QStringConverter::System);
+            if (!system_encoder.isValid())
+            {
+                return QString();
+            }
+            encoded = system_encoder(character_text);
+        }
+        if (encoded.size() < 2)
+        {
+            return QString();
+        }
+
+        const int code = (static_cast<unsigned char>(encoded.at(0)) << 8)
+            | static_cast<unsigned char>(encoded.at(1));
+        if (code < gb2312_initial_ranges.first().first || code > 0xD7F9)
+        {
+            return QString();
+        }
+
+        QChar initial = 'Z';
+        for (int i = 0; i < gb2312_initial_ranges.size() - 1; ++i)
+        {
+            if (code >= gb2312_initial_ranges.at(i).first
+                && code < gb2312_initial_ranges.at(i + 1).first)
+            {
+                initial = gb2312_initial_ranges.at(i).second;
+                break;
+            }
+        }
+        return QString(initial);
+    }
+
     QString contactSectionKey(const QString &display_name)
     {
         const QString trimmed = display_name.trimmed();
@@ -89,6 +151,11 @@ namespace
         if (first >= QChar('A') && first <= QChar('Z')) {
             return QString(first);
         }
+        const QString chinese_initial = chinesePinyinInitial(first);
+        if (!chinese_initial.isEmpty())
+        {
+            return chinese_initial;
+        }
         return QStringLiteral("#");
     }
 
@@ -97,11 +164,18 @@ namespace
     public:
         ContactSectionHeaderWidget(const QString &title,
                                    const QString &detail,
+                                   bool expandable = false,
+                                   std::function<void()> click_handler = nullptr,
                                    QWidget *parent = nullptr)
             : QWidget(parent)
+            , click_handler_(std::move(click_handler))
         {
             setAttribute(Qt::WA_StyledBackground, true);
             setObjectName("contactSectionHeader");
+            if (click_handler_)
+            {
+                setCursor(Qt::PointingHandCursor);
+            }
             setStyleSheet(R"(
                 QWidget#contactSectionHeader {
                     background: transparent;
@@ -135,7 +209,49 @@ namespace
             layout->addWidget(title_label);
             layout->addStretch();
             layout->addWidget(detail_label);
+            if (expandable)
+            {
+                arrow_label_ = new QLabel(this);
+                arrow_label_->setFixedSize(22, 22);
+                arrow_label_->setAlignment(Qt::AlignCenter);
+                arrow_label_->setStyleSheet(R"(
+                    QLabel {
+                        color: #425247;
+                        font-size: 16px;
+                        font-weight: 800;
+                        background: #ffffff;
+                        border: 1px solid #d5dfd8;
+                        border-radius: 11px;
+                    }
+                )");
+                layout->addWidget(arrow_label_);
+                setExpanded(false);
+            }
         }
+
+        void setExpanded(bool expanded)
+        {
+            if (arrow_label_)
+            {
+                arrow_label_->setText(expanded ? QStringLiteral("▲") : QStringLiteral("▼"));
+            }
+        }
+
+    protected:
+        void mousePressEvent(QMouseEvent *event) override
+        {
+            if (click_handler_)
+            {
+                click_handler_();
+                event->accept();
+                return;
+            }
+            QWidget::mousePressEvent(event);
+        }
+
+    private:
+        QLabel *arrow_label_ = nullptr;
+        std::function<void()> click_handler_;
     };
 
     class ContactListItemWidget : public QWidget
@@ -391,7 +507,7 @@ void MainWindow::createContactView()
     contact_tree_widget_->setHeaderHidden(true);
     contact_tree_widget_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     contact_tree_widget_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    contact_tree_widget_->setRootIsDecorated(true);
+    contact_tree_widget_->setRootIsDecorated(false);
     contact_tree_widget_->setIndentation(18);
     contact_tree_widget_->setFocusPolicy(Qt::NoFocus);
     contact_tree_widget_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -425,6 +541,26 @@ void MainWindow::createContactView()
     )");
     connect(contact_tree_widget_, &QTreeWidget::itemDoubleClicked,
             this, &MainWindow::onContactItemDoubleClicked);
+    connect(contact_tree_widget_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item)
+    {
+        if (item && item->data(0, Qt::UserRole + 1).toString() == QStringLiteral("section"))
+        {
+            if (auto *header = static_cast<ContactSectionHeaderWidget*>(contact_tree_widget_->itemWidget(item, 0)))
+            {
+                header->setExpanded(true);
+            }
+        }
+    });
+    connect(contact_tree_widget_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item)
+    {
+        if (item && item->data(0, Qt::UserRole + 1).toString() == QStringLiteral("section"))
+        {
+            if (auto *header = static_cast<ContactSectionHeaderWidget*>(contact_tree_widget_->itemWidget(item, 0)))
+            {
+                header->setExpanded(false);
+            }
+        }
+    });
 
     layout->addWidget(contact_tree_widget_);
 }
@@ -990,6 +1126,9 @@ void MainWindow::rebuildContactList()
 
     contact_tree_widget_->clear();
 
+    QCollator chinese_collator(QLocale(QLocale::Chinese, QLocale::China));
+    chinese_collator.setNumericMode(true);
+
     auto open_group = [this](const QString &group_id, const QString &title)
     {
         switchToConversation(conversationKey("group", group_id), title);
@@ -1009,15 +1148,20 @@ void MainWindow::rebuildContactList()
         new ContactSectionHeaderWidget(
             QStringLiteral("群聊"),
             QString("%1 个群聊").arg(group_names_.size()),
+            true,
+            [group_root]()
+            {
+                group_root->setExpanded(!group_root->isExpanded());
+            },
             contact_tree_widget_));
 
     QList<QString> group_ids = group_names_.keys();
     std::stable_sort(group_ids.begin(), group_ids.end(),
-                     [this](const QString &left, const QString &right)
+                     [this, &chinese_collator](const QString &left, const QString &right)
                      {
                          const QString left_name = group_names_.value(left, left);
                          const QString right_name = group_names_.value(right, right);
-                         const int name_compare = left_name.localeAwareCompare(right_name);
+                         const int name_compare = chinese_collator.compare(left_name, right_name);
                          if (name_compare != 0)
                          {
                              return name_compare < 0;
@@ -1102,11 +1246,11 @@ void MainWindow::rebuildContactList()
     {
         QList<QString> section_contacts = contacts_by_section.value(section_key);
         std::stable_sort(section_contacts.begin(), section_contacts.end(),
-                         [this](const QString &left, const QString &right)
+                         [this, &chinese_collator](const QString &left, const QString &right)
                          {
                              const QString left_name = contactDisplayName(left);
                              const QString right_name = contactDisplayName(right);
-                             const int name_compare = left_name.localeAwareCompare(right_name);
+                             const int name_compare = chinese_collator.compare(left_name, right_name);
                              if (name_compare != 0)
                              {
                                  return name_compare < 0;
@@ -1125,6 +1269,8 @@ void MainWindow::rebuildContactList()
             new ContactSectionHeaderWidget(
                 section_key,
                 QString("%1 位联系人").arg(section_contacts.size()),
+                false,
+                nullptr,
                 contact_tree_widget_));
 
         for (const QString &friend_id : section_contacts)
