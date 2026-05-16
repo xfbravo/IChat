@@ -1087,7 +1087,7 @@ void MainWindow::rebuildContactList()
     QStringList section_keys;
     for (ushort code = 'A'; code <= 'Z'; ++code)
     {
-        const QString key(QChar(code));
+        const QString key = QString(QChar(code));
         if (contacts_by_section.contains(key))
         {
             section_keys.append(key);
