@@ -21,44 +21,51 @@ find_package(Qt6 REQUIRED COMPONENTS
     QuickControls2
 )
 
+# ============================================================
+# libdatachannel / WebRTC
+#
+# 注意：
+# 1. 这里应指向 cmake --install build 之后的安装目录：
+#       C:/deps/libdatachannel
+#    不要指向源码目录：
+#       C:/msys64/home/21023/libdatachannel
+#    也不要指向 build 目录。
+#
+# 2. 你的 Qt 工程使用的是 Qt 自带 MinGW：
+#       D:/QT/Tools/mingw1310_64
+#    所以 libdatachannel 也必须用同一套 MinGW 编译并安装。
+# ============================================================
 option(ICHAT_WITH_LIBDATACHANNEL "Enable libdatachannel WebRTC signaling adapter" ON)
-set(ICHAT_LIBDATACHANNEL_ROOT "" CACHE PATH "Root directory of the Windows/MinGW libdatachannel install")
+set(ICHAT_LIBDATACHANNEL_ROOT "C:/deps/libdatachannel" CACHE PATH
+    "Root directory of the Windows/MinGW libdatachannel install"
+)
+
 if(ICHAT_WITH_LIBDATACHANNEL)
-    set(_ichat_libdatachannel_hints)
-    if(ICHAT_LIBDATACHANNEL_ROOT)
-        list(APPEND _ichat_libdatachannel_hints
-            "${ICHAT_LIBDATACHANNEL_ROOT}"
-            "${ICHAT_LIBDATACHANNEL_ROOT}/build"
-            "${ICHAT_LIBDATACHANNEL_ROOT}/install"
-        )
-    endif()
-    if(DEFINED ENV{ICHAT_LIBDATACHANNEL_ROOT})
-        list(APPEND _ichat_libdatachannel_hints
-            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}"
-            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}/build"
-            "$ENV{ICHAT_LIBDATACHANNEL_ROOT}/install"
+    if(NOT EXISTS "${ICHAT_LIBDATACHANNEL_ROOT}")
+        message(WARNING
+            "ICHAT_LIBDATACHANNEL_ROOT does not exist: ${ICHAT_LIBDATACHANNEL_ROOT}\n"
+            "Please run: cmake --install build"
         )
     endif()
 
-    # Common local paths used while developing from Qt Creator/MSYS2.
-    list(APPEND _ichat_libdatachannel_hints
-        "C:/deps/libdatachannel"
-        "C:/msys64/home/21023/libdatachannel"
-        "C:/msys64/home/21023/libdatachannel/build"
-        "C:/msys64/home/21023/libdatachannel/install"
-    )
+    # 让 find_package 优先从安装目录查找 LibDataChannelConfig.cmake
+    list(PREPEND CMAKE_PREFIX_PATH "${ICHAT_LIBDATACHANNEL_ROOT}")
 
-    find_package(LibDataChannel CONFIG QUIET
-        HINTS ${_ichat_libdatachannel_hints}
-    )
-endif()
-if(ICHAT_WITH_LIBDATACHANNEL)
-    if(LibDataChannel_FOUND)
-        message(STATUS "Found libdatachannel: enabling WebRTC PeerConnection adapter")
+    find_package(LibDataChannel CONFIG REQUIRED)
+
+    if(TARGET LibDataChannel::LibDataChannel)
+        set(ICHAT_LIBDATACHANNEL_TARGET LibDataChannel::LibDataChannel)
+    elseif(TARGET datachannel)
+        set(ICHAT_LIBDATACHANNEL_TARGET datachannel)
     else()
-        message(STATUS "libdatachannel not found: building without WebRTC PeerConnection adapter")
-        message(STATUS "Set ICHAT_LIBDATACHANNEL_ROOT or add the install prefix to CMAKE_PREFIX_PATH.")
+        message(FATAL_ERROR
+            "LibDataChannel was found, but no usable imported target exists. "
+            "Expected target: LibDataChannel::LibDataChannel or datachannel."
+        )
     endif()
+
+    message(STATUS "Found libdatachannel: ${ICHAT_LIBDATACHANNEL_ROOT}")
+    message(STATUS "Using libdatachannel target: ${ICHAT_LIBDATACHANNEL_TARGET}")
 endif()
 
 # 源文件
@@ -88,9 +95,6 @@ set(HEADERS
     include/addcontactdialog.h
 )
 
-# 添加 include 目录
-include_directories(${CMAKE_SOURCE_DIR}/include)
-
 # 资源文件
 set(RESOURCES
     res.qrc
@@ -103,21 +107,34 @@ add_executable(${PROJECT_NAME}
     ${RESOURCES}
 )
 
-# 链接 Qt 库
-target_link_libraries(${PROJECT_NAME}
-    Qt6::Core
-    Qt6::Network
-    Qt6::Widgets
-    Qt6::Gui
-    Qt6::Multimedia
-    Qt6::Qml
-    Qt6::Quick
-    Qt6::QuickControls2
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
 )
 
-if(ICHAT_WITH_LIBDATACHANNEL AND LibDataChannel_FOUND)
-    target_link_libraries(${PROJECT_NAME} LibDataChannel::LibDataChannel)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE ICHAT_WITH_LIBDATACHANNEL=1)
+# 链接 Qt 库
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+        Qt6::Core
+        Qt6::Network
+        Qt6::Widgets
+        Qt6::Gui
+        Qt6::Multimedia
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+)
+
+if(ICHAT_WITH_LIBDATACHANNEL)
+    target_link_libraries(${PROJECT_NAME}
+        PRIVATE
+            ${ICHAT_LIBDATACHANNEL_TARGET}
+    )
+
+    target_compile_definitions(${PROJECT_NAME}
+        PRIVATE
+            ICHAT_WITH_LIBDATACHANNEL=1
+    )
 endif()
 
 # Windows 特定配置
