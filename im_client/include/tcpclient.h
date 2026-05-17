@@ -105,7 +105,7 @@ public:
     /**
      * @brief 请求下载聊天文件
      */
-    void downloadFile(const QString& file_id, const QString& file_name, const QString& save_path);
+    QString downloadFile(const QString& file_id, const QString& file_name, const QString& save_path);
 
     /**
      * @brief 确认已收到离线消息

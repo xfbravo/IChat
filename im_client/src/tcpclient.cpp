@@ -329,9 +329,9 @@ void TcpClient::sendFiles(const QString& to_user_id,
     }
 }
 
-void TcpClient::downloadFile(const QString& file_id, const QString& file_name, const QString& save_path) {
+QString TcpClient::downloadFile(const QString& file_id, const QString& file_name, const QString& save_path) {
     if (state_ != ClientState::LoggedIn || file_id.isEmpty() || save_path.isEmpty()) {
-        return;
+        return QString();
     }
 
     PendingDownload download;
@@ -346,6 +346,7 @@ void TcpClient::downloadFile(const QString& file_id, const QString& file_name, c
     obj["file_id"] = file_id;
     obj["file_name"] = file_name;
     sendMessage(MsgType::FILE_DOWNLOAD_REQ, QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    return download.transfer_id;
 }
 
 void TcpClient::sendNextFileChunk(const QString& transfer_id, int chunk_index) {

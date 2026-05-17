@@ -221,6 +221,14 @@ private:
     QWidget* createVideoMessageBubble(const ChatViewMessage& message, int max_width);
     QString fileMessageTitle(const QString& content) const;
     QString humanFileSize(qint64 size) const;
+    QString attachmentUserRootPath() const;
+    QString currentMonthAttachmentPath(const QString& file_id, const QString& file_name) const;
+    QString indexedAttachmentPath(const QString& file_id) const;
+    QString localAttachmentPath(const QString& file_id, const QString& file_name) const;
+    QString reserveLocalAttachmentPath(const QString& file_id, const QString& file_name) const;
+    void rememberLocalAttachmentPath(const QString& file_id, const QString& path) const;
+    void openLocalAttachment(const QString& path);
+    void openOrDownloadAttachment(const QJsonObject& file, const QString& default_name);
     void appendMessageRow(const ChatViewMessage& message);
     void scrollToBottomAnimated();
     void rebuildMessageIndex();
@@ -379,6 +387,8 @@ private:
     // 当前右侧聊天窗口正在展示的消息，以及 msg_id 到下标的快速索引。
     QVector<ChatViewMessage> current_messages_;
     QHash<QString, int> message_index_by_id_;
+    QHash<QString, QString> open_after_download_paths_;
+    QHash<QString, QString> open_after_download_file_ids_;
 
     // 好友备注缓存，优先级高于服务端返回的昵称。
     QHash<QString, QString> contact_remarks_;

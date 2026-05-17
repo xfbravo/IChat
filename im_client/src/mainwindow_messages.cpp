@@ -28,6 +28,8 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QApplication>
+#include <QCoreApplication>
+#include <QDesktopServices>
 #include <QListView>
 #include <QAbstractItemView>
 #include <QIcon>
@@ -36,17 +38,22 @@
 #include <QPixmap>
 #include <QPen>
 #include <QPropertyAnimation>
+#include <QRegularExpression>
 #include <QEasingCurve>
 #include <QSize>
 #include <QStringList>
 #include <QToolButton>
 #include <QTimer>
 #include <QBuffer>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFont>
 #include <QImage>
 #include <QImageReader>
 #include <QIODevice>
+#include <QUrl>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -73,6 +80,20 @@ QPixmap pixmapFromDataUrl(const QString& data_url, const QSize& target_size) {
 QJsonObject messageContentObject(const QString& content) {
     const QJsonDocument doc = QJsonDocument::fromJson(content.toUtf8());
     return doc.isObject() ? doc.object() : QJsonObject();
+}
+
+QString safePathSegment(QString value, const QString& fallback) {
+    value = value.trimmed();
+    if (value.isEmpty()) {
+        value = fallback;
+    }
+    static const QRegularExpression unsafe(R"([\\/:*?"<>|\x00-\x1f])");
+    value.replace(unsafe, "_");
+    while (value.contains("..")) {
+        value.replace("..", "_");
+    }
+    value = value.trimmed();
+    return value.isEmpty() ? fallback : value;
 }
 
 int fieldMatchScore(const QString& query, const QString& field) {
@@ -1306,14 +1327,23 @@ void MainWindow::onFileTransferProgress(const QString& transfer_id, const QStrin
 void MainWindow::onFileTransferFinished(const QString& transfer_id, const QString& file_name,
                                         const QString& save_path, bool upload, bool success,
                                         const QString& message) {
-    Q_UNUSED(transfer_id);
     const QString action = upload ? "上传" : "下载";
     const QString detail = save_path.isEmpty() ? message : QString("%1：%2").arg(message, save_path);
     statusBar()->showMessage(QString("%1%2 %3：%4")
                                  .arg(action, success ? "完成" : "失败", file_name, detail),
                              5000);
     if (!success) {
+        open_after_download_paths_.remove(transfer_id);
+        open_after_download_file_ids_.remove(transfer_id);
         QMessageBox::warning(this, QString("%1文件").arg(action), detail);
+        return;
+    }
+
+    if (!upload && open_after_download_paths_.contains(transfer_id)) {
+        const QString path_to_open = open_after_download_paths_.take(transfer_id);
+        const QString file_id = open_after_download_file_ids_.take(transfer_id);
+        rememberLocalAttachmentPath(file_id, path_to_open.isEmpty() ? save_path : path_to_open);
+        openLocalAttachment(path_to_open.isEmpty() ? save_path : path_to_open);
     }
 }
 
@@ -1647,6 +1677,157 @@ QString MainWindow::fileMessageTitle(const QString& content) const {
     return QStringLiteral("文件");
 }
 
+QString MainWindow::attachmentUserRootPath() const {
+    const QString user_dir = safePathSegment(user_id_, QStringLiteral("unknown_user"));
+    return QDir(QCoreApplication::applicationDirPath())
+        .filePath(QStringLiteral("ichat_files/%1").arg(user_dir));
+}
+
+QString MainWindow::currentMonthAttachmentPath(const QString& file_id, const QString& file_name) const {
+    if (file_id.isEmpty()) {
+        return QString();
+    }
+
+    const QString month_dir = QDateTime::currentDateTime().toString(QStringLiteral("yyyy_MM"));
+    const QString safe_name = safePathSegment(file_name, QStringLiteral("file"));
+    const QString base_dir = QDir(attachmentUserRootPath()).filePath(month_dir);
+    return QDir(base_dir).filePath(safe_name);
+}
+
+QString MainWindow::indexedAttachmentPath(const QString& file_id) const {
+    if (file_id.isEmpty()) {
+        return QString();
+    }
+
+    const QDir user_root(attachmentUserRootPath());
+    QFile index_file(user_root.filePath(QStringLiteral("attachment_index.json")));
+    if (!index_file.open(QIODevice::ReadOnly)) {
+        return QString();
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(index_file.readAll());
+    if (!doc.isObject()) {
+        return QString();
+    }
+
+    const QString relative_path = doc.object()[file_id].toString();
+    if (relative_path.isEmpty()) {
+        return QString();
+    }
+
+    const QString path = user_root.filePath(relative_path);
+    return QFileInfo::exists(path) ? path : QString();
+}
+
+QString MainWindow::localAttachmentPath(const QString& file_id, const QString& file_name) const {
+    Q_UNUSED(file_name);
+    const QString indexed_path = indexedAttachmentPath(file_id);
+    if (!indexed_path.isEmpty()) {
+        return indexed_path;
+    }
+
+    return QString();
+}
+
+QString MainWindow::reserveLocalAttachmentPath(const QString& file_id, const QString& file_name) const {
+    const QString preferred = currentMonthAttachmentPath(file_id, file_name);
+    if (preferred.isEmpty()) {
+        return QString();
+    }
+
+    QDir dir(QFileInfo(preferred).absolutePath());
+    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
+        return QString();
+    }
+
+    if (!QFileInfo::exists(preferred)) {
+        return preferred;
+    }
+
+    const QFileInfo info(preferred);
+    const QString stem = info.completeBaseName();
+    const QString suffix = info.suffix();
+    for (int i = 1; i < 1000; ++i) {
+        const QString candidate_name = suffix.isEmpty()
+            ? QStringLiteral("%1_%2").arg(stem).arg(i)
+            : QStringLiteral("%1_%2.%3").arg(stem).arg(i).arg(suffix);
+        const QString candidate = dir.filePath(candidate_name);
+        if (!QFileInfo::exists(candidate)) {
+            return candidate;
+        }
+    }
+    return QString();
+}
+
+void MainWindow::rememberLocalAttachmentPath(const QString& file_id, const QString& path) const {
+    if (file_id.isEmpty() || path.isEmpty()) {
+        return;
+    }
+
+    QDir user_root(attachmentUserRootPath());
+    if (!user_root.exists() && !user_root.mkpath(QStringLiteral("."))) {
+        return;
+    }
+
+    QFile index_file(user_root.filePath(QStringLiteral("attachment_index.json")));
+    QJsonObject index;
+    if (index_file.open(QIODevice::ReadOnly)) {
+        const QJsonDocument doc = QJsonDocument::fromJson(index_file.readAll());
+        if (doc.isObject()) {
+            index = doc.object();
+        }
+        index_file.close();
+    }
+
+    index[file_id] = user_root.relativeFilePath(path);
+    if (!index_file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return;
+    }
+    index_file.write(QJsonDocument(index).toJson(QJsonDocument::Indented));
+}
+
+void MainWindow::openLocalAttachment(const QString& path) {
+    if (path.isEmpty()) {
+        return;
+    }
+    if (!QFileInfo::exists(path)) {
+        QMessageBox::warning(this, "打开文件", "本地文件不存在，请重新下载");
+        return;
+    }
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+        QMessageBox::warning(this, "打开文件", "无法用系统默认程序打开该文件");
+    }
+}
+
+void MainWindow::openOrDownloadAttachment(const QJsonObject& file, const QString& default_name) {
+    const QString file_id = file["file_id"].toString();
+    const QString file_name = file["file_name"].toString(default_name);
+    if (file_id.isEmpty()) {
+        QMessageBox::warning(this, "打开文件", "文件ID为空，无法下载");
+        return;
+    }
+
+    const QString existing_path = localAttachmentPath(file_id, file_name);
+    if (!existing_path.isEmpty() && QFileInfo::exists(existing_path)) {
+        openLocalAttachment(existing_path);
+        return;
+    }
+
+    const QString save_path = reserveLocalAttachmentPath(file_id, file_name);
+    if (save_path.isEmpty()) {
+        QMessageBox::warning(this, "下载文件", "无法创建本地保存目录");
+        return;
+    }
+
+    const QString transfer_id = tcp_client_->downloadFile(file_id, file_name, save_path);
+    if (transfer_id.isEmpty()) {
+        QMessageBox::warning(this, "下载文件", "当前未登录或文件信息无效，无法下载");
+        return;
+    }
+    open_after_download_paths_[transfer_id] = save_path;
+    open_after_download_file_ids_[transfer_id] = file_id;
+}
+
 QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int max_width) {
     QJsonObject file = messageContentObject(message.content);
 
@@ -1702,10 +1883,10 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
 
     layout->addWidget(text_box, 1);
 
-    QPushButton* download_button = new QPushButton("下载", card);
-    download_button->setEnabled(!file_id.isEmpty());
-    download_button->setCursor(Qt::PointingHandCursor);
-    download_button->setStyleSheet(R"(
+    QPushButton* open_button = new QPushButton("打开", card);
+    open_button->setEnabled(!file_id.isEmpty());
+    open_button->setCursor(Qt::PointingHandCursor);
+    open_button->setStyleSheet(R"(
         QPushButton {
             padding: 7px 12px;
             background-color: #ffffff;
@@ -1723,14 +1904,10 @@ QWidget* MainWindow::createFileMessageCard(const ChatViewMessage& message, int m
             border-color: #d5dfd8;
         }
     )");
-    connect(download_button, &QPushButton::clicked, this, [this, file_id, file_name]() {
-        const QString save_path = QFileDialog::getSaveFileName(this, "保存文件", file_name);
-        if (save_path.isEmpty()) {
-            return;
-        }
-        tcp_client_->downloadFile(file_id, file_name, save_path);
+    connect(open_button, &QPushButton::clicked, this, [this, file]() {
+        openOrDownloadAttachment(file, QStringLiteral("文件"));
     });
-    layout->addWidget(download_button, 0, Qt::AlignVCenter);
+    layout->addWidget(open_button, 0, Qt::AlignVCenter);
 
     return card;
 }
@@ -1741,17 +1918,22 @@ QWidget* MainWindow::createImageMessageBubble(const ChatViewMessage& message, in
     const QString file_name = file["file_name"].toString("图片");
     const QPixmap pixmap = pixmapFromDataUrl(preview, QSize(max_width, 420));
 
-    QLabel* image_label = new QLabel;
-    image_label->setToolTip(file_name);
-    image_label->setAlignment(Qt::AlignCenter);
-    image_label->setStyleSheet("QLabel { background: #eef0f2; border-radius: 6px; color: #777777; }");
+    QToolButton* image_label = new QToolButton;
+    image_label->setToolTip(QString("打开%1").arg(file_name));
+    image_label->setCursor(Qt::PointingHandCursor);
+    image_label->setStyleSheet("QToolButton { background: #eef0f2; border: none; border-radius: 6px; color: #777777; padding: 0; } QToolButton:hover { background: #e3e8e5; }");
     if (!pixmap.isNull()) {
-        image_label->setPixmap(pixmap);
+        image_label->setIcon(QIcon(pixmap));
+        image_label->setIconSize(pixmap.size());
         image_label->setFixedSize(pixmap.size());
     } else {
         image_label->setText("图片");
         image_label->setFixedSize(qMin(max_width, 260), 160);
     }
+    image_label->setEnabled(!file["file_id"].toString().isEmpty());
+    connect(image_label, &QToolButton::clicked, this, [this, file]() {
+        openOrDownloadAttachment(file, QStringLiteral("图片"));
+    });
     return image_label;
 }
 
@@ -1786,7 +1968,7 @@ QWidget* MainWindow::createVideoMessageBubble(const ChatViewMessage& message, in
 
     QToolButton* play_button = new QToolButton(frame);
     play_button->setCursor(Qt::PointingHandCursor);
-    play_button->setToolTip("下载视频");
+    play_button->setToolTip("打开视频");
     play_button->setText("▶");
     play_button->setFixedSize(64, 64);
     play_button->setStyleSheet(R"(
@@ -1806,12 +1988,8 @@ QWidget* MainWindow::createVideoMessageBubble(const ChatViewMessage& message, in
         }
     )");
     play_button->setEnabled(!file_id.isEmpty());
-    connect(play_button, &QToolButton::clicked, this, [this, file_id, file_name]() {
-        const QString save_path = QFileDialog::getSaveFileName(this, "保存视频", file_name);
-        if (save_path.isEmpty()) {
-            return;
-        }
-        tcp_client_->downloadFile(file_id, file_name, save_path);
+    connect(play_button, &QToolButton::clicked, this, [this, file]() {
+        openOrDownloadAttachment(file, QStringLiteral("视频"));
     });
     layout->addWidget(play_button, 0, 0, Qt::AlignCenter);
     return frame;

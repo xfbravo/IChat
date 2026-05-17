@@ -81,6 +81,44 @@ im_server/
 - CMake 3.10+
 - Boost.Asio（需要 Boost.System 和 Boost.Thread）
 
+### 依赖已安装后的服务端编译
+
+服务器上依赖已经安装完成时，只需要在项目根目录执行：
+
+```bash
+cd /你的项目目录/IChat
+git pull
+cmake -S im_server -B im_server/build -DCMAKE_BUILD_TYPE=Release
+cmake --build im_server/build --target im_server -j$(nproc)
+```
+
+编译完成后的服务端程序位于：
+
+```bash
+im_server/build/im_server
+```
+
+可选：编译并运行协议编解码自测，用于确认大文件/视频分片传输的协议层没有损坏：
+
+```bash
+cmake --build im_server/build --target codec_self_test -j$(nproc)
+./im_server/build/codec_self_test
+```
+
+看到 `codec self-test passed` 表示自测通过。
+
+启动服务端，例如监听 `8080` 端口：
+
+```bash
+./im_server/build/im_server 8080
+```
+
+指定线程数，例如 8 个线程：
+
+```bash
+./im_server/build/im_server 8080 8
+```
+
 ### Ubuntu / Debian
 
 ```bash
