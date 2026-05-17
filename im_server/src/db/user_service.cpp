@@ -172,6 +172,19 @@ bool ensure_profile_columns(MYSQL* mysql, std::string& error_message) {
                                 error_message);
 }
 
+bool ensure_message_content_columns(MYSQL* mysql, std::string& error_message) {
+    return ensure_large_text_column(mysql,
+                                    "im_message",
+                                    "content",
+                                    "MEDIUMTEXT COMMENT '消息内容'",
+                                    error_message)
+        && ensure_large_text_column(mysql,
+                                    "im_offline_message",
+                                    "content",
+                                    "MEDIUMTEXT COMMENT '消息内容'",
+                                    error_message);
+}
+
 bool ensure_moments_table(MYSQL* mysql, std::string& error_message) {
     const char* sql =
         "CREATE TABLE IF NOT EXISTS im_moment ("
@@ -1535,6 +1548,12 @@ bool UserService::save_message(const std::string& msg_id, int msg_type, int chat
     auto conn_guard = db_pool_.get_connection();
     MYSQL* mysql = conn_guard.get();
     if (!mysql) return false;
+
+    std::string schema_error;
+    if (!ensure_message_content_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 消息字段迁移失败: " << schema_error << std::endl;
+        return false;
+    }
 
     std::ostringstream sql;
     sql << "INSERT INTO im_message (msg_id, msg_type, chat_type, from_user_id, to_user_id, "

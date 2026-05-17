@@ -45,6 +45,21 @@ QString imageToDataUrl(const QImage& source, const QSize& max_size, int quality 
     return QString("data:image/jpeg;base64,%1").arg(QString::fromLatin1(bytes.toBase64()));
 }
 
+QString boundedImageToDataUrl(const QImage& source,
+                              const QList<QSize>& candidate_sizes,
+                              const QList<int>& candidate_qualities,
+                              qsizetype max_bytes) {
+    for (const QSize& size : candidate_sizes) {
+        for (int quality : candidate_qualities) {
+            const QString data_url = imageToDataUrl(source, size, quality);
+            if (!data_url.isEmpty() && data_url.toUtf8().size() <= max_bytes) {
+                return data_url;
+            }
+        }
+    }
+    return QString();
+}
+
 QString humanReadableBytes(qint64 size) {
     const QStringList units = {"B", "KB", "MB", "GB"};
     double value = static_cast<double>(qMax<qint64>(0, size));
@@ -255,7 +270,11 @@ QString TcpClient::makeVideoPosterDataUrl(const QString& file_path) const {
     connect(&video_sink, &QVideoSink::videoFrameChanged, &loop, [&](const QVideoFrame& frame) {
         QImage image = frame.toImage();
         if (!image.isNull()) {
-            poster_data_url = imageToDataUrl(image, QSize(960, 540), 76);
+            poster_data_url = boundedImageToDataUrl(
+                image,
+                {QSize(480, 270), QSize(320, 180), QSize(240, 135)},
+                {68, 56, 44},
+                48 * 1024);
             loop.quit();
         }
     });

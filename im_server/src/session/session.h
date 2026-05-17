@@ -42,6 +42,8 @@ class Server;
  */
 class Session : public std::enable_shared_from_this<Session> {
 public:
+    using SendCallback = std::function<void(const boost::system::error_code&)>;
+
     /**
      * @brief 会话状态
      */
@@ -116,6 +118,7 @@ public:
      * @param body 消息体
      */
     void send(MsgType type, const std::string& body);
+    void send(MsgType type, const std::string& body, SendCallback on_complete);
 
     /**
      * @brief 发送消息（便捷接口）
@@ -197,7 +200,13 @@ private:
     boost::asio::streambuf write_buf_;          // 写入缓冲区
 
     // 写入队列（支持多消息并发）
-    std::queue<Message> write_queue_;
+    struct PendingWrite {
+        Message message;
+        SendCallback on_complete;
+    };
+
+    std::queue<PendingWrite> write_queue_;
+    SendCallback active_write_callback_;
     bool writing_{false};                        // 是否正在写入
 
     // 编码器

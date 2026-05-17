@@ -59,17 +59,24 @@ void Session::close() {
 }
 
 void Session::send(MsgType type, const std::string& body) {
+    send(type, body, nullptr);
+}
+
+void Session::send(MsgType type, const std::string& body, SendCallback on_complete) {
     auto self = shared_from_this();
     auto msg = std::make_shared<Message>(type, body);
 
     // 使用 boost::asio::post 确保线程安全
-    boost::asio::post(socket_.get_executor(), [this, self, msg]() {
+    boost::asio::post(socket_.get_executor(), [this, self, msg, on_complete = std::move(on_complete)]() mutable {
         if (state_ == State::CLOSING || state_ == State::CLOSED) {
+            if (on_complete) {
+                on_complete(boost::asio::error::operation_aborted);
+            }
             return;
         }
 
         // 构建消息并加入发送队列
-        write_queue_.push(*msg);
+        write_queue_.push(PendingWrite{*msg, std::move(on_complete)});
 
         // 如果当前没有正在进行的写入，开始写入
         if (!writing_) {
@@ -178,7 +185,9 @@ void Session::do_write() {
     auto self = shared_from_this();
 
     // 从队列取出消息并编码到写缓冲区
-    Message& msg = write_queue_.front();
+    PendingWrite pending = std::move(write_queue_.front());
+    Message& msg = pending.message;
+    active_write_callback_ = std::move(pending.on_complete);
     write_buf_.consume(write_buf_.size());  // 清空写缓冲区
     codec_.encode(msg.type, msg.body, write_buf_);
     write_queue_.pop();
@@ -198,12 +207,23 @@ void Session::handle_write(const boost::system::error_code& ec) {
 
     if (ec) {
         std::cerr << "[Session] 写入错误: " << ec.message() << std::endl;
+        if (active_write_callback_) {
+            auto callback = std::move(active_write_callback_);
+            active_write_callback_ = nullptr;
+            callback(ec);
+        }
         close();
         return;
     }
 
     // 清空已发送的数据
     write_buf_.consume(write_buf_.size());
+
+    if (active_write_callback_) {
+        auto callback = std::move(active_write_callback_);
+        active_write_callback_ = nullptr;
+        callback(ec);
+    }
 
     // 如果队列中还有消息，继续发送
     if (!write_queue_.empty()) {

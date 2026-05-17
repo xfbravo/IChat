@@ -16,6 +16,7 @@
 #include <iomanip>
 #include <random>
 #include <cctype>
+#include <functional>
 #include <boost/json.hpp>
 
 namespace im {
@@ -1179,8 +1180,8 @@ void Server::register_default_handlers() {
             return;
         }
 
-        std::ifstream in(path, std::ios::binary);
-        if (!in) {
+        auto input = std::make_shared<std::ifstream>(path, std::ios::binary);
+        if (!*input) {
             rsp["code"] = 500;
             rsp["message"] = "打开文件失败";
             session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
@@ -1197,14 +1198,45 @@ void Server::register_default_handlers() {
         rsp["file_name"] = file_name;
         rsp["file_size"] = file_size;
         rsp["total_chunks"] = total_chunks;
-        session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp));
 
-        std::vector<char> buffer(chunk_size);
-        uint64_t chunk_index = 0;
-        while (in && chunk_index < total_chunks) {
-            in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
-            const std::streamsize bytes_read = in.gcount();
-            if (bytes_read <= 0) break;
+        auto buffer = std::make_shared<std::vector<char>>(chunk_size);
+        auto chunk_index = std::make_shared<uint64_t>(0);
+        auto send_next_chunk = std::make_shared<std::function<void(const boost::system::error_code&)>>();
+
+        *send_next_chunk = [session, input, buffer, chunk_index, send_next_chunk,
+                            transfer_id, file_id, file_name, file_size, total_chunks]
+                           (const boost::system::error_code& ec) {
+            if (ec) {
+                std::cerr << "[Server] 文件下载发送中断: transfer_id=" << transfer_id
+                          << ", error=" << ec.message() << std::endl;
+                return;
+            }
+
+            if (*chunk_index >= total_chunks || !*input) {
+                json::object done_rsp;
+                done_rsp["code"] = 0;
+                done_rsp["status"] = "complete";
+                done_rsp["message"] = "下载完成";
+                done_rsp["transfer_id"] = transfer_id;
+                done_rsp["file_id"] = file_id;
+                done_rsp["file_name"] = file_name;
+                session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(done_rsp));
+                return;
+            }
+
+            input->read(buffer->data(), static_cast<std::streamsize>(buffer->size()));
+            const std::streamsize bytes_read = input->gcount();
+            if (bytes_read <= 0) {
+                json::object done_rsp;
+                done_rsp["code"] = 0;
+                done_rsp["status"] = "complete";
+                done_rsp["message"] = "下载完成";
+                done_rsp["transfer_id"] = transfer_id;
+                done_rsp["file_id"] = file_id;
+                done_rsp["file_name"] = file_name;
+                session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(done_rsp));
+                return;
+            }
 
             json::object chunk_rsp;
             chunk_rsp["code"] = 0;
@@ -1212,21 +1244,15 @@ void Server::register_default_handlers() {
             chunk_rsp["file_id"] = file_id;
             chunk_rsp["file_name"] = file_name;
             chunk_rsp["file_size"] = file_size;
-            chunk_rsp["chunk_index"] = chunk_index;
+            chunk_rsp["chunk_index"] = *chunk_index;
             chunk_rsp["total_chunks"] = total_chunks;
-            chunk_rsp["data"] = base64_encode(std::string(buffer.data(), static_cast<std::size_t>(bytes_read)));
-            session->send(MsgType::FILE_DOWNLOAD_CHUNK, json::serialize(chunk_rsp));
-            ++chunk_index;
-        }
+            chunk_rsp["data"] = base64_encode(std::string(buffer->data(), static_cast<std::size_t>(bytes_read)));
+            ++(*chunk_index);
 
-        json::object done_rsp;
-        done_rsp["code"] = 0;
-        done_rsp["status"] = "complete";
-        done_rsp["message"] = "下载完成";
-        done_rsp["transfer_id"] = transfer_id;
-        done_rsp["file_id"] = file_id;
-        done_rsp["file_name"] = file_name;
-        session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(done_rsp));
+            session->send(MsgType::FILE_DOWNLOAD_CHUNK, json::serialize(chunk_rsp), *send_next_chunk);
+        };
+
+        session->send(MsgType::FILE_DOWNLOAD_RSP, json::serialize(rsp), *send_next_chunk);
     });
 
     auto call_reject_body = [](const std::string& call_id,
