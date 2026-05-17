@@ -13,9 +13,32 @@
 #include <boost/asio/error.hpp>
 #include <boost/system/error_code.hpp>
 #include <iostream>
+#include <array>
 #include <cstring>
 
 namespace im {
+
+namespace {
+
+std::array<char, 6> copy_header(const boost::asio::streambuf& buf) {
+    std::array<char, 6> header{};
+    boost::asio::buffer_copy(boost::asio::buffer(header), buf.data(), header.size());
+    return header;
+}
+
+uint16_t read_u16_be(const char* data) {
+    return static_cast<uint16_t>((static_cast<unsigned char>(data[0]) << 8) |
+                                 static_cast<unsigned char>(data[1]));
+}
+
+uint32_t read_u32_be(const char* data) {
+    return (static_cast<uint32_t>(static_cast<unsigned char>(data[0])) << 24) |
+           (static_cast<uint32_t>(static_cast<unsigned char>(data[1])) << 16) |
+           (static_cast<uint32_t>(static_cast<unsigned char>(data[2])) << 8) |
+           static_cast<uint32_t>(static_cast<unsigned char>(data[3]));
+}
+
+} // namespace
 
 MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code& ec) {
     ec.clear();
@@ -29,13 +52,11 @@ MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code&
         return nullptr;
     }
 
-    // 获取缓冲区数据
-    // 使用迭代器方式访问 streambuf 中的数据
-    const char* data = static_cast<const char*>(buf.data().data());
-
-    // 解析头部（网络字节序 -> 主机字节序）
-    uint16_t type = ntoh(*reinterpret_cast<const uint16_t*>(data));
-    uint32_t length = ntoh(*reinterpret_cast<const uint32_t*>(data + 2));
+    // streambuf 的 data() 是 buffer 序列，跨网络分包后不保证连续。
+    // 先复制固定头部再解析，避免大文件分片在不同机器间传输时错读长度或正文。
+    const auto header = copy_header(buf);
+    const uint16_t type = read_u16_be(header.data());
+    const uint32_t length = read_u32_be(header.data() + 2);
 
     // 检查消息长度是否合理（防止恶意数据）
     constexpr uint32_t MAX_MESSAGE_LENGTH = 10 * 1024 * 1024;  // 10MB
@@ -59,9 +80,7 @@ MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code&
     std::string body;
     if (length > 0) {
         body.resize(length);
-        // 从缓冲区复制数据到 body
-        const char* body_data = static_cast<const char*>(buf.data().data());
-        std::memcpy(body.data(), body_data, length);
+        boost::asio::buffer_copy(boost::asio::buffer(body.data(), body.size()), buf.data(), length);
         buf.consume(length);  // 移除已读取的数据
     }
 
@@ -77,18 +96,20 @@ MessagePtr Codec::decode(boost::asio::streambuf& buf, boost::system::error_code&
 }
 
 void Codec::encode(MsgType type, const std::string& body, boost::asio::streambuf& buf) {
-    // 预留 6 字节空间存储头部
-    auto header_buf = buf.prepare(6);
+    const uint16_t msg_type = static_cast<uint16_t>(type);
+    const uint32_t length = static_cast<uint32_t>(body.size());
+    const std::array<char, 6> header = {
+        static_cast<char>((msg_type >> 8) & 0xFF),
+        static_cast<char>(msg_type & 0xFF),
+        static_cast<char>((length >> 24) & 0xFF),
+        static_cast<char>((length >> 16) & 0xFF),
+        static_cast<char>((length >> 8) & 0xFF),
+        static_cast<char>(length & 0xFF),
+    };
 
-    // 写入头部（主机字节序 -> 网络字节序）
-    // 使用 data() 获取指针
-    void* header_data = header_buf.data();
-    char* data = static_cast<char*>(header_data);
-    *reinterpret_cast<uint16_t*>(data) = hton(static_cast<uint16_t>(type));
-    *reinterpret_cast<uint32_t*>(data + 2) = hton(static_cast<uint32_t>(body.size()));
-
-    // 确认写入头部
-    buf.commit(6);
+    auto header_buf = buf.prepare(header.size());
+    boost::asio::buffer_copy(header_buf, boost::asio::buffer(header));
+    buf.commit(header.size());
 
     // 写入消息体
     if (!body.empty()) {
@@ -108,8 +129,8 @@ bool Codec::hasCompleteMessage(const boost::asio::streambuf& buf) const {
         return false;
     }
 
-    const char* data = static_cast<const char*>(buf.data().data());
-    uint32_t length = ntoh(*reinterpret_cast<const uint32_t*>(data + 2));
+    const auto header = copy_header(buf);
+    const uint32_t length = read_u32_be(header.data() + 2);
 
     return buf.size() >= 6 + length;
 }

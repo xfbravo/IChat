@@ -115,6 +115,9 @@ MainWindow::MainWindow(TcpClient* tcp_client,
     connect(call_browser_bridge_, &CallBrowserBridge::localOfferReady,
             this, [this](const QString& call_id, const QString& sdp) {
                 if (call_id == active_call_id_ && call_state_ == CallState::Outgoing && tcp_client_) {
+                    if (call_status_label_) {
+                        call_status_label_->setText(QStringLiteral("通话邀请已发送，等待对方接听..."));
+                    }
                     tcp_client_->startCall(active_call_peer_id_, active_call_type_, sdp, active_call_id_);
                 }
             });

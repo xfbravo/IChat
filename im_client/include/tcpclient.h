@@ -540,6 +540,7 @@ private:
         QString save_path;
         qint64 file_size = 0;
         int total_chunks = 0;
+        int next_chunk_index = 0;
         qint64 received_size = 0;
     };
 

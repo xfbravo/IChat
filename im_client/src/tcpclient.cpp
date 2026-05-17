@@ -45,6 +45,19 @@ QString imageToDataUrl(const QImage& source, const QSize& max_size, int quality 
     return QString("data:image/jpeg;base64,%1").arg(QString::fromLatin1(bytes.toBase64()));
 }
 
+QString humanReadableBytes(qint64 size) {
+    const QStringList units = {"B", "KB", "MB", "GB"};
+    double value = static_cast<double>(qMax<qint64>(0, size));
+    int unit_index = 0;
+    while (value >= 1024.0 && unit_index < units.size() - 1) {
+        value /= 1024.0;
+        ++unit_index;
+    }
+    return unit_index == 0
+        ? QString("%1 %2").arg(static_cast<qint64>(value)).arg(units[unit_index])
+        : QString("%1 %2").arg(value, 0, 'f', 1).arg(units[unit_index]);
+}
+
 } // namespace
 
 TcpClient::TcpClient(QObject* parent)
@@ -320,13 +333,6 @@ void TcpClient::downloadFile(const QString& file_id, const QString& file_name, c
     if (state_ != ClientState::LoggedIn || file_id.isEmpty() || save_path.isEmpty()) {
         return;
     }
-
-    QFile target(save_path);
-    if (!target.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        emit fileTransferFinished(QString(), file_name, save_path, false, false, "无法创建保存文件");
-        return;
-    }
-    target.close();
 
     PendingDownload download;
     download.transfer_id = Protocol::generateMsgId();
@@ -928,8 +934,28 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             if (status == "ready") {
                 it->file_size = static_cast<qint64>(obj["file_size"].toDouble());
                 it->total_chunks = obj["total_chunks"].toInt();
+                it->next_chunk_index = 0;
+                it->received_size = 0;
+                QFile target(it->save_path);
+                if (!target.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                    emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                              "无法创建保存文件");
+                    pending_downloads_.erase(it);
+                    break;
+                }
+                target.close();
                 emit fileTransferProgress(transfer_id, it->file_name, 0, it->file_size, false);
             } else if (status == "complete") {
+                const bool size_ok = it->file_size <= 0 || it->received_size == it->file_size;
+                const bool chunks_ok = it->total_chunks <= 0 || it->next_chunk_index == it->total_chunks;
+                if (!size_ok || !chunks_ok) {
+                    emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                              QString("下载不完整：已收到 %1 / %2")
+                                                  .arg(humanReadableBytes(it->received_size),
+                                                       humanReadableBytes(it->file_size)));
+                    pending_downloads_.erase(it);
+                    break;
+                }
                 emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, true, "下载完成");
                 pending_downloads_.erase(it);
             }
@@ -945,7 +971,30 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
             auto it = pending_downloads_.find(transfer_id);
             if (it == pending_downloads_.end()) break;
 
-            QByteArray chunk = QByteArray::fromBase64(obj["data"].toString().toLatin1());
+            const int chunk_index = obj["chunk_index"].toInt(-1);
+            if (chunk_index != it->next_chunk_index) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          "下载分片顺序异常");
+                pending_downloads_.erase(it);
+                break;
+            }
+
+            const QByteArray encoded = obj["data"].toString().toLatin1();
+            const QByteArray chunk = QByteArray::fromBase64(encoded);
+            if (encoded.isEmpty() || (chunk.isEmpty() && it->received_size < it->file_size)) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          "下载分片解码失败");
+                pending_downloads_.erase(it);
+                break;
+            }
+
+            if (it->file_size > 0 && it->received_size + chunk.size() > it->file_size) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          "下载内容超过声明大小");
+                pending_downloads_.erase(it);
+                break;
+            }
+
             QFile file(it->save_path);
             if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) {
                 emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
@@ -953,8 +1002,15 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                 pending_downloads_.erase(it);
                 break;
             }
-            file.write(chunk);
+            const qint64 written = file.write(chunk);
+            if (written != chunk.size()) {
+                emit fileTransferFinished(transfer_id, it->file_name, it->save_path, false, false,
+                                          "下载文件写入不完整");
+                pending_downloads_.erase(it);
+                break;
+            }
             it->received_size += chunk.size();
+            ++it->next_chunk_index;
             emit fileTransferProgress(transfer_id, it->file_name, it->received_size, it->file_size, false);
             break;
         }

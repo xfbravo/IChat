@@ -43,6 +43,21 @@ QString callHtmlPath() {
     return QCoreApplication::applicationDirPath() + QStringLiteral("/web/call.html");
 }
 
+QByteArray loadCallHtml() {
+    QFile deployed(callHtmlPath());
+    if (deployed.open(QIODevice::ReadOnly)) {
+        return deployed.readAll();
+    }
+
+    QFile resource(QStringLiteral(":/web/call.html"));
+    if (resource.open(QIODevice::ReadOnly)) {
+        return resource.readAll();
+    }
+
+    return "<!doctype html><meta charset=\"utf-8\"><title>IChat Call</title>"
+           "<body>call.html not found. Please rebuild the client or deploy the web directory beside the executable.</body>";
+}
+
 } // namespace
 
 CallBrowserBridge::CallBrowserBridge(QObject* parent)
@@ -238,8 +253,10 @@ void CallBrowserBridge::handleRequest(QTcpSocket* socket, const PendingHttpReque
         const QString sdp = body["sdp"].toString();
         if (call_id == call_id_ && !sdp.isEmpty()) {
             if (type == "answer") {
+                emit stateChanged(QStringLiteral("浏览器已生成接听应答。"));
                 emit localAnswerReady(call_id, sdp);
             } else {
+                emit stateChanged(QStringLiteral("浏览器已生成通话邀请。"));
                 emit localOfferReady(call_id, sdp);
             }
         }
@@ -284,14 +301,7 @@ void CallBrowserBridge::sendJson(QTcpSocket* socket, const QJsonObject& body, in
 }
 
 void CallBrowserBridge::sendHtml(QTcpSocket* socket) {
-    QFile file(callHtmlPath());
-    QByteArray payload;
-    if (file.open(QIODevice::ReadOnly)) {
-        payload = file.readAll();
-    } else {
-        payload = "<!doctype html><meta charset=\"utf-8\"><title>IChat Call</title>"
-                  "<body>call.html not found. Please deploy the web directory beside the executable.</body>";
-    }
+    const QByteArray payload = loadCallHtml();
 
     QByteArray headers;
     headers += "HTTP/1.1 200 OK\r\n";

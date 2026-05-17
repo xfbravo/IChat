@@ -76,5 +76,12 @@ target_link_libraries(${PROJECT_NAME}
 # 包含目录
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
+add_executable(codec_self_test EXCLUDE_FROM_ALL
+    src/protocol/codec.cpp
+    src/protocol/codec_self_test.cpp
+)
+target_include_directories(codec_self_test PRIVATE src)
+target_link_libraries(codec_self_test Boost::system)
+
 # 安装目标
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

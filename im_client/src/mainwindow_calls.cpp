@@ -274,6 +274,11 @@ void MainWindow::startBrowserCallPage() {
     if (call_browser_hint_label_) {
         call_browser_hint_label_->setText(QStringLiteral("浏览器通话页：%1").arg(url.toString()));
     }
+    if (call_status_label_) {
+        call_status_label_->setText(active_call_incoming_
+            ? QStringLiteral("正在等待浏览器生成接听应答...")
+            : QStringLiteral("正在等待浏览器生成通话邀请..."));
+    }
     QDesktopServices::openUrl(url);
 }
 

@@ -33,7 +33,8 @@ QByteArray Protocol::encode(MsgType type, const std::string& body) {
 }
 
 QByteArray Protocol::encode(MsgType type, const QString& body) {
-    return encode(type, body.toStdString());
+    const QByteArray utf8_body = body.toUtf8();
+    return encode(type, std::string(utf8_body.constData(), static_cast<std::size_t>(utf8_body.size())));
 }
 
 bool Protocol::decode(QByteArray& data, MsgType& type, QString& body) {
