@@ -27,5 +27,5 @@ Android 客户端采用 Kotlin + Jetpack Compose，当前工程按“单 Activit
 
 ## 构建要求
 
-当前配置使用 Android Gradle Plugin 9.2.0、Kotlin 2.3.21、Compose BOM 2026.05.00。
+当前配置使用 Android Gradle Plugin 9.2.0、Gradle Wrapper 9.4.1、Kotlin 2.3.21、Compose BOM 2026.05.00。
 需要 Android Studio/Gradle 对应环境，并使用 JDK 17。
