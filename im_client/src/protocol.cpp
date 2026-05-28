@@ -83,6 +83,13 @@ QString Protocol::makeLoginRequest(const QString& user_id, const QString& passwo
     return QJsonDocument(obj).toJson(QJsonDocument::Compact);
 }
 
+QString Protocol::makeTokenLoginRequest(const QString& user_id, const QString& token) {
+    QJsonObject obj;
+    obj["user_id"] = user_id;
+    obj["token"] = token;
+    return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+}
+
 QString Protocol::makeChatMessage(const QString& from, const QString& to,
                                   const QString& content_type, const QString& content) {
     return makeChatMessage(generateMsgId(), from, to, content_type, content);

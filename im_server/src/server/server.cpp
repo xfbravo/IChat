@@ -372,18 +372,25 @@ void Server::register_default_handlers() {
     dispatcher_.register_handler(MsgType::LOGIN, [this](std::shared_ptr<Session> session, const Message& msg) {
         std::cout << "[Server] 收到登录请求: " << msg.body << std::endl;
 
-        std::string user_id, password;
+        std::string user_id, password, token;
         try {
             json::object req = parse_json_object(msg.body);
             user_id = json_string(req, "user_id");
             password = json_string(req, "password");
+            token = json_string(req, "token");
         } catch (const std::exception& e) {
             session->send(MsgType::LOGIN_RSP, json_response(400, std::string("无效 JSON: ") + e.what()));
             return;
         }
 
-        // 调用用户服务验证登录
-        LoginResult login_result = user_service_.login(user_id, password);
+        // Android 冷启动会使用上次登录返回的 token 恢复会话；首次登录仍走密码校验。
+        LoginResult login_result = (!token.empty() && password.empty())
+            ? user_service_.login_with_token(token)
+            : user_service_.login(user_id, password);
+        if (login_result.code == 0 && !user_id.empty() && user_id != login_result.user_id) {
+            login_result.code = 1001;
+            login_result.message = "登录凭证与账号不匹配";
+        }
 
         json::object rsp;
         rsp["code"] = login_result.code;

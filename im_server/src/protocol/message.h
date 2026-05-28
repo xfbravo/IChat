@@ -123,7 +123,8 @@ using MessagePtr = std::shared_ptr<Message>;
  */
 struct LoginReq {
     std::string user_id;
-    std::string token;
+    std::string password;  // 首次登录使用
+    std::string token;     // 已登录设备恢复会话时使用
 };
 
 /**
@@ -133,6 +134,12 @@ struct LoginRsp {
     uint32_t code;         // 0: 成功，非0: 失败
     std::string message;
     std::string user_id;
+    std::string nickname;
+    std::string avatar_url;
+    std::string gender;
+    std::string region;
+    std::string signature;
+    std::string token;
 };
 
 /**

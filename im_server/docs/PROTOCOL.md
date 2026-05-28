@@ -145,12 +145,20 @@ enum class MsgType : uint16_t {
 ```json
 {
     "user_id": "user_001",
-    "password_hash": "sha256_hash_of_password",
+    "password": "plain_password",
     "device_type": "ios",           // ios | android | windows | mac | web
     "device_id": "uuid-device-id",
     "app_version": "1.0.0",
     "os_version": "17.0",
     "client_time": 1713900000
+}
+```
+
+已登录设备恢复会话时复用 `LOGIN_REQ`，发送上次 `LOGIN_RSP` 返回的 `token`，不再发送密码：
+```json
+{
+    "user_id": "user_001",
+    "token": "user_001_1713900001_abcdef1234567890"
 }
 ```
 
@@ -165,9 +173,7 @@ enum class MsgType : uint16_t {
     "gender": "男",
     "region": "北京",
     "signature": "Somebody feels the rain，somebody just gets wet",
-    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",  // JWT Token
-    "refresh_token": "refresh_token_string",
-    "expires_in": 604800,              // token 有效期（秒）
+    "token": "user_001_1713900001_abcdef1234567890",
     "server_time": 1713900001
 }
 ```
@@ -181,7 +187,7 @@ enum class MsgType : uint16_t {
 {
     "user_id": "user_002",
     "nickname": "李四",
-    "password_hash": "sha256_hash_of_password",
+    "password": "plain_password",
     "phone": "+86-138****8888",
     "email": "user002@example.com",
     "verification_code": "123456",     // 验证码
@@ -703,7 +709,7 @@ enum class MsgType : uint16_t {
    |  发送 LOGIN_REQ:                                  |
    |  {                                                 |
    |    "user_id": "user_001",                        |
-   |    "password_hash": "xxx",                       |
+   |    "password": "xxx",                            |
    |    "device_type": "windows"                       |
    |  }                                                 |
    |-------------------------------------------------->|
@@ -714,12 +720,11 @@ enum class MsgType : uint16_t {
    |  接收 LOGIN_RSP:                                  |
    |  {                                                 |
    |    "code": 0,                                     |
-   |    "token": "eyJhbG...",                          |
-   |    "expires_in": 604800                           |
+   |    "token": "user_001_1713900001_abcdef1234567890" |
    |  }                                                 |
    |<--------------------------------------------------|
    |                                                    |
-   |  使用 token 发送后续请求                          |
+   |  下次启动可使用 token 再发送 LOGIN_REQ 恢复会话    |
    |-------------------------------------------------->|
    |                                                    |
 ```
@@ -928,9 +933,10 @@ message Message {
 
 message LoginReq {
     string user_id = 1;
-    string password_hash = 2;
+    string password = 2;
     string device_type = 3;
     string device_id = 4;
+    string token = 5;
 }
 
 message LoginRsp {
@@ -938,7 +944,6 @@ message LoginRsp {
     string message = 2;
     string user_id = 3;
     string token = 4;
-    uint64 expires_in = 5;
 }
 
 message ChatMessage {

@@ -41,6 +41,38 @@ std::string trim_copy(const std::string& value) {
     return value.substr(begin, end - begin + 1);
 }
 
+std::string token_signature(const std::string& user_id, const std::string& timestamp) {
+    std::ostringstream oss;
+    oss << std::hex << std::setw(16) << std::setfill('0')
+        << std::hash<std::string>{}(user_id + timestamp);
+    return oss.str();
+}
+
+bool parse_login_token(const std::string& token, std::string& user_id) {
+    const std::size_t signature_sep = token.rfind('_');
+    if (signature_sep == std::string::npos || signature_sep + 1 >= token.size()) {
+        return false;
+    }
+
+    const std::size_t timestamp_sep = token.rfind('_', signature_sep - 1);
+    if (timestamp_sep == std::string::npos || timestamp_sep + 1 >= signature_sep) {
+        return false;
+    }
+
+    user_id = token.substr(0, timestamp_sep);
+    const std::string timestamp = token.substr(timestamp_sep + 1, signature_sep - timestamp_sep - 1);
+    const std::string signature = token.substr(signature_sep + 1);
+    if (user_id.empty() || timestamp.empty() || signature.empty()) {
+        return false;
+    }
+    for (char ch : timestamp) {
+        if (ch < '0' || ch > '9') {
+            return false;
+        }
+    }
+    return token_signature(user_id, timestamp) == signature;
+}
+
 std::string sql_escape(MYSQL* mysql, const std::string& value) {
     std::string escaped;
     escaped.resize(value.size() * 2 + 1);
@@ -283,13 +315,9 @@ std::string UserService::generate_token(const std::string& user_id) {
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
         now.time_since_epoch()).count();
+    const std::string timestamp_text = std::to_string(timestamp);
 
-    std::ostringstream oss;
-    oss << user_id << "_" << timestamp << "_"
-        << std::hex << std::setw(16) << std::setfill('0')
-        << std::hash<std::string>{}(user_id + std::to_string(timestamp));
-
-    return oss.str();
+    return user_id + "_" + timestamp_text + "_" + token_signature(user_id, timestamp_text);
 }
 
 std::string UserService::generate_salt() {
@@ -422,6 +450,91 @@ LoginResult UserService::login(const std::string& user_id,
     result.token = generate_token(db_user_id);
 
     std::cout << "[UserService] 用户登录成功: " << db_user_id << std::endl;
+
+    return result;
+}
+
+LoginResult UserService::login_with_token(const std::string& token) {
+    LoginResult result;
+
+    std::string user_id;
+    if (!parse_login_token(token, user_id)) {
+        result.code = 1001;
+        result.message = "登录凭证已失效";
+        return result;
+    }
+
+    auto conn_guard = db_pool_.get_connection();
+    MYSQL* mysql = conn_guard.get();
+
+    if (!mysql) {
+        result.code = 5001;
+        result.message = "数据库连接失败";
+        return result;
+    }
+
+    std::string schema_error;
+    if (!ensure_profile_columns(mysql, schema_error)) {
+        std::cerr << "[UserService] 资料字段迁移失败: " << schema_error << std::endl;
+        result.code = 5002;
+        result.message = "资料字段迁移失败: " + schema_error;
+        return result;
+    }
+
+    // token 已包含 user_id；这里仍回库读取用户状态和最新资料，避免恢复禁用账号。
+    const std::string escaped_user_id = sql_escape(mysql, user_id);
+    std::ostringstream sql;
+    sql << "SELECT user_id, nickname, avatar_url, status, gender, region, signature "
+        << "FROM im_user WHERE user_id = '" << escaped_user_id << "'";
+
+    if (mysql_query(mysql, sql.str().c_str())) {
+        result.code = 5001;
+        result.message = "查询失败: " + std::string(mysql_error(mysql));
+        return result;
+    }
+
+    MYSQL_RES* res = mysql_store_result(mysql);
+    if (!res) {
+        result.code = 5001;
+        result.message = "获取结果失败";
+        return result;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (!row) {
+        result.code = 1001;
+        result.message = "用户不存在";
+        mysql_free_result(res);
+        return result;
+    }
+
+    std::string db_user_id = row[0] ? row[0] : "";
+    std::string db_nickname = row[1] ? row[1] : "";
+    std::string db_avatar = row[2] ? row[2] : "";
+    int db_status = row[3] ? std::stoi(row[3]) : 0;
+    std::string db_gender = row[4] ? row[4] : "";
+    std::string db_region = row[5] ? row[5] : "";
+    std::string db_signature = row[6] ? row[6] : "";
+
+    mysql_free_result(res);
+
+    if (db_status == 0) {
+        result.code = 1001;
+        result.message = "用户已被禁用";
+        return result;
+    }
+
+    result.code = 0;
+    result.message = "登录成功";
+    result.user_id = db_user_id;
+    result.nickname = db_nickname;
+    result.avatar_url = db_avatar;
+    result.gender = db_gender;
+    result.region = db_region;
+    result.signature = db_signature;
+    result.token = generate_token(db_user_id);
+
+    std::cout << "[UserService] 用户 token 登录成功: " << db_user_id << std::endl;
 
     return result;
 }

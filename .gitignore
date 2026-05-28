@@ -30,3 +30,6 @@ __pycache__/
 android/.gradle/
 android/build/
 android/*/build/
+im_android/.gradle/
+im_android/build/
+im_android/*/build/

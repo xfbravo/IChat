@@ -90,7 +90,8 @@ struct Message {
  */
 struct LoginRequest {
     std::string user_id;
-    std::string password;
+    std::string password;  // 首次登录使用
+    std::string token;     // 已登录设备恢复会话时使用
 };
 
 /**
@@ -156,6 +157,11 @@ public:
      * @brief 创建登录请求JSON
      */
     static QString makeLoginRequest(const QString& user_id, const QString& password);
+
+    /**
+     * @brief 创建 token 登录请求JSON
+     */
+    static QString makeTokenLoginRequest(const QString& user_id, const QString& token);
 
     /**
      * @brief 创建聊天消息JSON

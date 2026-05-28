@@ -62,9 +62,14 @@ public:
     explicit UserService(DbPool& db_pool) : db_pool_(db_pool) {}
 
     /**
-     * @brief 用户登录
+     * @brief 使用账号密码登录
      */
     LoginResult login(const std::string& user_id, const std::string& password);
+
+    /**
+     * @brief 使用服务端签发的 token 恢复登录态
+     */
+    LoginResult login_with_token(const std::string& token);
 
     /**
      * @brief 用户注册
