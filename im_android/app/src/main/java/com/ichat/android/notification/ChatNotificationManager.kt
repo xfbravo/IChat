@@ -65,4 +65,8 @@ class ChatNotificationManager(private val context: Context) {
         NotificationManagerCompat.from(context)
             .notify((chatType + peerId).hashCode(), notification)
     }
+
+    fun clearMessages() {
+        NotificationManagerCompat.from(context).cancelAll()
+    }
 }

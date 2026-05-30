@@ -1,6 +1,8 @@
 package com.ichat.android.data.repository
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import com.ichat.android.data.db.ChatMessageEntity
@@ -10,8 +12,12 @@ import com.ichat.android.data.db.GroupEntity
 import com.ichat.android.data.db.IChatDatabase
 import com.ichat.android.data.model.ChatTarget
 import com.ichat.android.data.model.CurrentUser
+import com.ichat.android.data.model.FriendRequest
 import com.ichat.android.data.model.LoginResult
 import com.ichat.android.data.model.MessageDraft
+import com.ichat.android.data.model.MomentImage
+import com.ichat.android.data.model.MomentPost
+import com.ichat.android.data.model.UserProfile
 import com.ichat.android.data.network.ConnectionState
 import com.ichat.android.data.network.IChatSocketClient
 import com.ichat.android.data.network.ImPacket
@@ -67,8 +73,23 @@ class IChatRepository(
 
     private val _isAppForeground = MutableStateFlow(true)
     private val _activeConversationKey = MutableStateFlow<String?>(null)
+    private val _friendRequests = MutableStateFlow<List<FriendRequest>>(emptyList())
+    val friendRequests: StateFlow<List<FriendRequest>> = _friendRequests.asStateFlow()
+    private val _userProfiles = MutableStateFlow<Map<String, UserProfile>>(emptyMap())
+    val userProfiles: StateFlow<Map<String, UserProfile>> = _userProfiles.asStateFlow()
+    private val _moments = MutableStateFlow<List<MomentPost>>(emptyList())
+    val moments: StateFlow<List<MomentPost>> = _moments.asStateFlow()
+    private val _momentsRefreshing = MutableStateFlow(false)
+    val momentsRefreshing: StateFlow<Boolean> = _momentsRefreshing.asStateFlow()
+    private val _momentPublishing = MutableStateFlow(false)
+    val momentPublishing: StateFlow<Boolean> = _momentPublishing.asStateFlow()
+    private val _momentsStatus = MutableStateFlow("")
+    val momentsStatus: StateFlow<String> = _momentsStatus.asStateFlow()
+    private val _profileStatus = MutableStateFlow("")
+    val profileStatus: StateFlow<String> = _profileStatus.asStateFlow()
 
     private var loginSequence = 0
+    private var acceptedConnectionSerial = 0L
     private var pendingLogin: PendingLogin? = null
     private var pendingRegister: CompletableDeferred<LoginResult>? = null
     private val uploadResponses = kotlinx.coroutines.flow.MutableSharedFlow<FileUploadResponse>(extraBufferCapacity = 32)
@@ -95,14 +116,51 @@ class IChatRepository(
 
     fun observeGroups(): Flow<List<GroupEntity>> = contactDao.observeGroups()
 
-    fun observeMessages(target: ChatTarget): Flow<List<ChatMessageEntity>> {
-        return messageDao.observeMessages(target.conversationKey)
+    fun observeMessages(target: ChatTarget, limit: Int): Flow<List<ChatMessageEntity>> {
+        return messageDao.observeRecentMessages(target.conversationKey, limit.coerceAtLeast(1))
+    }
+
+    private suspend fun clearUserScopedCache(clearCurrentUser: Boolean) {
+        // 账号私有的 Room 表和内存态必须一起清理，避免下一位登录用户看到上一位的好友或聊天。
+        _activeConversationKey.value = null
+        _activeConversationKey.value = null
+        _friendRequests.value = emptyList()
+        _userProfiles.value = emptyMap()
+        _moments.value = emptyList()
+        _momentsRefreshing.value = false
+        _momentPublishing.value = false
+        _momentsStatus.value = ""
+        _profileStatus.value = ""
+        pendingDownloads.clear()
+        notificationManager.clearMessages()
+        if (clearCurrentUser) {
+            acceptedConnectionSerial = 0L
+            _currentUser.value = null
+        }
+
+        withContext(Dispatchers.IO) {
+            messageDao.clearAll()
+            conversationDao.clearAll()
+            contactDao.clearFriends()
+            contactDao.clearGroups()
+        }
     }
 
     suspend fun openConversation(target: ChatTarget) {
         _activeConversationKey.value = target.conversationKey
         conversationDao.clearUnread(target.conversationKey)
         requestChatHistory(target.peerId, target.chatType)
+    }
+
+    suspend fun loadOlderMessages(target: ChatTarget, oldestMessage: ChatMessageEntity, limit: Int = 30) {
+        val beforeTimeSeconds = historyBeforeTimeSeconds(oldestMessage)
+        if (beforeTimeSeconds <= 0L) return
+        requestChatHistory(
+            peerId = target.peerId,
+            chatType = target.chatType,
+            limit = limit,
+            beforeTimeSeconds = beforeTimeSeconds
+        )
     }
 
     suspend fun login(userId: String, password: String): LoginResult {
@@ -123,7 +181,7 @@ class IChatRepository(
         if (result.code != 0) {
             preferences.clearUser()
             socketClient.disconnect()
-            _currentUser.value = null
+            clearUserScopedCache(clearCurrentUser = true)
         }
     }
 
@@ -137,8 +195,10 @@ class IChatRepository(
 
     private suspend fun performLogin(payload: JSONObject): LoginResult {
         ensureConnected()
+        loginSequence += 1
+        val sequence = loginSequence
         val waiter = CompletableDeferred<LoginResult>()
-        pendingLogin = PendingLogin(loginSequence, waiter)
+        pendingLogin = PendingLogin(sequence, waiter)
         socketClient.sendJson(MsgType.LOGIN, payload)
         return withTimeout(10_000) { waiter.await() }
     }
@@ -164,13 +224,95 @@ class IChatRepository(
         runCatching { socketClient.send(MsgType.LOGOUT, "{}") }
         socketClient.disconnect()
         preferences.clearUser()
-        _currentUser.value = null
+        clearUserScopedCache(clearCurrentUser = true)
     }
 
     suspend fun refreshContacts() {
         if (_currentUser.value == null) return
         socketClient.send(MsgType.GET_FRIEND_LIST, "{}")
         socketClient.send(MsgType.GET_GROUP_LIST, "{}")
+    }
+
+    suspend fun refreshFriendRequests() {
+        if (_currentUser.value == null) return
+        socketClient.send(MsgType.GET_FRIEND_REQUESTS, "{}")
+    }
+
+    suspend fun requestUserProfile(userId: String) {
+        val targetUserId = userId.trim()
+        if (_currentUser.value == null || targetUserId.isBlank()) return
+
+        ensureConnected()
+        val payload = JSONObject().put("user_id", targetUserId)
+        val current = _currentUser.value
+        if (current?.userId == targetUserId) {
+            // 当前用户资料带本地快照，服务端可只回 ACK，减少大头像重复下发。
+            payload
+                .put("client_user_id", current.userId)
+                .put(
+                    "local_profile",
+                    JSONObject()
+                        .put("nickname", current.nickname)
+                        .put("gender", current.gender)
+                        .put("region", current.region)
+                        .put("signature", current.signature)
+                )
+        }
+        socketClient.sendJson(MsgType.GET_USER_PROFILE, payload)
+    }
+
+    suspend fun refreshMoments(limit: Int = 50, targetUserId: String = "") {
+        if (_currentUser.value == null) {
+            _moments.value = emptyList()
+            _momentsStatus.value = "未登录"
+            return
+        }
+
+        _momentsRefreshing.value = true
+        _momentsStatus.value = "正在加载..."
+        runCatching {
+            ensureConnected()
+            val payload = JSONObject().put("limit", limit.coerceIn(1, 100))
+            if (targetUserId.isNotBlank()) {
+                payload.put("target_user_id", targetUserId.trim())
+            }
+            socketClient.sendJson(MsgType.GET_MOMENTS, payload)
+        }.onFailure {
+            _momentsRefreshing.value = false
+            _momentsStatus.value = it.message ?: "朋友圈加载失败"
+        }
+    }
+
+    suspend fun createMoment(content: String, imageUris: List<Uri>) {
+        val cleanContent = content.trim()
+        if (_currentUser.value == null) {
+            _momentsStatus.value = "未登录"
+            return
+        }
+        if (cleanContent.isBlank() && imageUris.isEmpty()) {
+            _momentsStatus.value = "请填写文字或选择图片"
+            return
+        }
+        if (imageUris.size > MaxMomentImages) {
+            _momentsStatus.value = "朋友圈图片最多九张"
+            return
+        }
+
+        _momentPublishing.value = true
+        _momentsStatus.value = "正在发布..."
+        runCatching {
+            val images = encodeMomentImages(imageUris)
+            ensureConnected()
+            socketClient.sendJson(
+                MsgType.CREATE_MOMENT,
+                JSONObject()
+                    .put("content", cleanContent)
+                    .put("images", images)
+            )
+        }.onFailure {
+            _momentPublishing.value = false
+            _momentsStatus.value = it.message ?: "发布失败"
+        }
     }
 
     suspend fun sendTextMessage(draft: MessageDraft) {
@@ -184,6 +326,7 @@ class IChatRepository(
     }
 
     suspend fun sendFriendRequest(toUserIdOrPhone: String, remark: String) {
+        ensureConnected()
         socketClient.sendJson(
             MsgType.FRIEND_REQUEST,
             JSONObject()
@@ -193,11 +336,24 @@ class IChatRepository(
     }
 
     suspend fun respondFriendRequest(requestId: String, accept: Boolean) {
+        ensureConnected()
+        // UI 先把已处理请求移除，服务端响应后会再刷新好友和请求列表。
+        _friendRequests.value = _friendRequests.value.filterNot { it.requestId == requestId }
         socketClient.sendJson(
             MsgType.FRIEND_REQUEST_RSP,
             JSONObject()
                 .put("request_id", requestId)
                 .put("accept", accept)
+        )
+    }
+
+    suspend fun createGroup(groupName: String, memberIds: List<String>) {
+        ensureConnected()
+        socketClient.sendJson(
+            MsgType.CREATE_GROUP,
+            JSONObject()
+                .put("group_name", groupName)
+                .put("member_ids", JSONArray(memberIds))
         )
     }
 
@@ -211,6 +367,8 @@ class IChatRepository(
     }
 
     suspend fun updateProfile(nickname: String, gender: String, region: String, signature: String) {
+        _profileStatus.value = "正在保存资料..."
+        ensureConnected()
         socketClient.sendJson(
             MsgType.UPDATE_PROFILE,
             JSONObject()
@@ -221,7 +379,21 @@ class IChatRepository(
         )
     }
 
+    suspend fun updateAvatar(uri: Uri) {
+        _profileStatus.value = "正在处理头像..."
+        val avatarUrl = withContext(Dispatchers.IO) {
+            encodeAvatarImage(uri)
+        }
+        ensureConnected()
+        _profileStatus.value = "正在上传头像..."
+        socketClient.sendJson(
+            MsgType.UPDATE_AVATAR,
+            JSONObject().put("avatar_url", avatarUrl)
+        )
+    }
+
     suspend fun changePassword(oldPassword: String, newPassword: String) {
+        ensureConnected()
         socketClient.sendJson(
             MsgType.CHANGE_PASSWORD,
             JSONObject()
@@ -320,15 +492,33 @@ class IChatRepository(
         sendChatMessage(peerId, chatType, contentType, content, localPath = null)
     }
 
-    private suspend fun requestChatHistory(peerId: String, chatType: String) {
+    private suspend fun requestChatHistory(
+        peerId: String,
+        chatType: String,
+        limit: Int = 30,
+        beforeTimeSeconds: Long = 0L
+    ) {
         if (_currentUser.value == null) return
+        val payload = JSONObject()
+            .put("peer_id", peerId)
+            .put("chat_type", chatType)
+            .put("limit", limit.coerceIn(1, 50))
+        if (beforeTimeSeconds > 0L) {
+            payload.put("before_time", beforeTimeSeconds)
+        }
         socketClient.sendJson(
             MsgType.GET_CHAT_HISTORY,
-            JSONObject()
-                .put("peer_id", peerId)
-                .put("chat_type", chatType)
-                .put("limit", 30)
+            payload
         )
+    }
+
+    private fun historyBeforeTimeSeconds(message: ChatMessageEntity): Long {
+        return when {
+            message.serverTimestamp > 1_000_000_000_000L -> message.serverTimestamp / 1000L
+            message.serverTimestamp > 0L -> message.serverTimestamp
+            message.clientTime > 0L -> message.clientTime
+            else -> 0L
+        }
     }
 
     private suspend fun sendChatMessage(
@@ -382,25 +572,40 @@ class IChatRepository(
     }
 
     private suspend fun handlePacket(packet: ImPacket) {
+        val isAuthPacket = packet.type == MsgType.LOGIN_RSP || packet.type == MsgType.REGISTER_RSP
+        if (!isAuthPacket &&
+            (_currentUser.value == null || packet.connectionSerial != acceptedConnectionSerial)
+        ) {
+            return
+        }
+
         when (packet.type) {
-            MsgType.LOGIN_RSP -> handleLogin(packet.body)
+            MsgType.LOGIN_RSP -> handleLogin(packet)
             MsgType.REGISTER_RSP -> handleRegister(packet.body)
             MsgType.CHAT_MESSAGE, MsgType.IMAGE, MsgType.FILE, MsgType.VOICE -> handleIncomingMessage(JSONObject(packet.body))
             MsgType.OFFLINE_MESSAGE -> handleOfflineMessages(packet.body)
             MsgType.CHAT_HISTORY_RSP -> handleHistory(packet.body)
             MsgType.ACK -> handleAck(packet.body)
             MsgType.FRIEND_LIST_RSP, MsgType.FRIEND_LIST_UPDATE -> handleFriendList(packet.body)
+            MsgType.FRIEND_REQUEST_NEW -> handleFriendRequests(packet.body)
+            MsgType.FRIEND_REQUEST_RSP -> handleFriendRequestRsp(packet.body)
+            MsgType.USER_PROFILE_RSP -> handleUserProfileRsp(packet.body)
             MsgType.GROUP_LIST_RSP, MsgType.GROUP_LIST_UPDATE -> handleGroupList(packet.body)
+            MsgType.CREATE_GROUP_RSP -> handleCreateGroupRsp(packet.body)
             MsgType.FILE_UPLOAD_RSP -> handleFileUploadRsp(packet.body)
             MsgType.FILE_DOWNLOAD_RSP -> handleFileDownloadRsp(packet.body)
             MsgType.FILE_DOWNLOAD_CHUNK -> handleFileDownloadChunk(packet.body)
+            MsgType.UPDATE_AVATAR_RSP -> handleUpdateAvatarRsp(packet.body)
+            MsgType.UPDATE_PROFILE_RSP -> handleUpdateProfileRsp(packet.body)
+            MsgType.CREATE_MOMENT_RSP -> handleCreateMomentRsp(packet.body)
+            MsgType.MOMENTS_RSP -> handleMoments(packet.body)
             MsgType.HEARTBEAT -> Unit
             else -> Unit
         }
     }
 
-    private fun handleLogin(body: String) {
-        val obj = JSONObject(body)
+    private suspend fun handleLogin(packet: ImPacket) {
+        val obj = JSONObject(packet.body)
         val code = obj.optInt("code")
         val pending = pendingLogin
         val canApplyLogin = pending?.sequence == loginSequence
@@ -415,6 +620,10 @@ class IChatRepository(
                 signature = obj.optString("signature")
             )
             if (canApplyLogin) {
+                if (_currentUser.value?.userId != user.userId) {
+                    clearUserScopedCache(clearCurrentUser = false)
+                }
+                acceptedConnectionSerial = packet.connectionSerial
                 preferences.saveUser(user)
                 _currentUser.value = user
                 socketClient.markLoggedIn()
@@ -533,7 +742,115 @@ class IChatRepository(
                 )
             }
         }
-        contactDao.upsertFriends(friends)
+        contactDao.clearFriends()
+        if (friends.isNotEmpty()) {
+            contactDao.upsertFriends(friends)
+        }
+    }
+
+    private fun handleFriendRequests(body: String) {
+        val arr = JSONArray(body)
+        val requests = buildList {
+            for (index in 0 until arr.length()) {
+                val obj = arr.getJSONObject(index)
+                val requestId = obj.optString("request_id")
+                if (requestId.isBlank()) continue
+                add(
+                    FriendRequest(
+                        requestId = requestId,
+                        fromUserId = obj.optString("from_user_id"),
+                        fromNickname = obj.optString("from_nickname"),
+                        fromAvatar = obj.optString("from_avatar"),
+                        remark = obj.optString("remark"),
+                        createTime = obj.optString("create_time")
+                    )
+                )
+            }
+        }
+        _friendRequests.value = requests
+    }
+
+    private fun handleFriendRequestRsp(body: String) {
+        val obj = JSONObject(body)
+        if (obj.optInt("code", -1) == 0) {
+            appScope.launch {
+                refreshContacts()
+                refreshFriendRequests()
+            }
+        }
+    }
+
+    private fun handleUserProfileRsp(body: String) {
+        val obj = JSONObject(body)
+        if (obj.optInt("code", -1) != 0) return
+
+        val userId = obj.optString("user_id")
+        if (userId.isBlank()) return
+
+        val current = _currentUser.value
+        val fallback = if (current?.userId == userId) {
+            UserProfile(
+                userId = current.userId,
+                nickname = current.nickname,
+                avatarUrl = current.avatarUrl,
+                gender = current.gender,
+                region = current.region,
+                signature = current.signature
+            )
+        } else {
+            _userProfiles.value[userId]
+        }
+        val profile = UserProfile(
+            userId = userId,
+            nickname = obj.optString("nickname", fallback?.nickname.orEmpty()),
+            avatarUrl = obj.optString("avatar_url", fallback?.avatarUrl.orEmpty()),
+            gender = obj.optString("gender", fallback?.gender.orEmpty()),
+            region = obj.optString("region", fallback?.region.orEmpty()),
+            signature = obj.optString("signature", fallback?.signature.orEmpty())
+        )
+        _userProfiles.value = _userProfiles.value + (userId to profile)
+
+        if (current?.userId == userId) {
+            updateCurrentUser {
+                it.copy(
+                    nickname = profile.nickname.ifBlank { it.nickname },
+                    avatarUrl = profile.avatarUrl.ifBlank { it.avatarUrl },
+                    gender = profile.gender,
+                    region = profile.region,
+                    signature = profile.signature
+                )
+            }
+        }
+    }
+
+    private fun handleUpdateAvatarRsp(body: String) {
+        val obj = JSONObject(body)
+        val code = obj.optInt("code", -1)
+        val message = obj.optString("message", if (code == 0) "头像已同步" else "头像上传失败")
+        if (code == 0) {
+            val avatarUrl = obj.optString("avatar_url")
+            if (avatarUrl.isNotBlank()) {
+                updateCurrentUser { it.copy(avatarUrl = avatarUrl) }
+            }
+        }
+        _profileStatus.value = message
+    }
+
+    private fun handleUpdateProfileRsp(body: String) {
+        val obj = JSONObject(body)
+        val code = obj.optInt("code", -1)
+        val message = obj.optString("message", if (code == 0) "资料已保存" else "资料保存失败")
+        if (code == 0) {
+            updateCurrentUser { user ->
+                user.copy(
+                    nickname = obj.optString("nickname", user.nickname),
+                    gender = obj.optString("gender", user.gender),
+                    region = obj.optString("region", user.region),
+                    signature = obj.optString("signature", user.signature)
+                )
+            }
+        }
+        _profileStatus.value = message
     }
 
     private suspend fun handleGroupList(body: String) {
@@ -554,7 +871,57 @@ class IChatRepository(
                 )
             }
         }
-        contactDao.upsertGroups(groups)
+        contactDao.clearGroups()
+        if (groups.isNotEmpty()) {
+            contactDao.upsertGroups(groups)
+        }
+    }
+
+    private suspend fun handleCreateGroupRsp(body: String) {
+        val obj = JSONObject(body)
+        if (obj.optInt("code", -1) != 0) return
+
+        val groupId = obj.optString("group_id")
+        if (groupId.isBlank()) return
+        contactDao.upsertGroups(
+            listOf(
+                GroupEntity(
+                    groupId = groupId,
+                    groupName = obj.optString("group_name"),
+                    groupAvatar = obj.optString("group_avatar"),
+                    ownerId = _currentUser.value?.userId.orEmpty(),
+                    memberCount = obj.optInt("member_count")
+                )
+            )
+        )
+        refreshContacts()
+    }
+
+    private fun handleCreateMomentRsp(body: String) {
+        val obj = JSONObject(body)
+        val code = obj.optInt("code", -1)
+        _momentPublishing.value = false
+        _momentsStatus.value = obj.optString("message", if (code == 0) "发布成功" else "发布失败")
+        if (code == 0) {
+            appScope.launch { refreshMoments() }
+        }
+    }
+
+    private fun handleMoments(body: String) {
+        _momentsRefreshing.value = false
+        val posts = runCatching {
+            val arr = JSONArray(body)
+            buildList {
+                for (index in 0 until arr.length()) {
+                    add(parseMoment(arr.getJSONObject(index)))
+                }
+            }
+        }.getOrElse {
+            _momentsStatus.value = "朋友圈加载失败"
+            return
+        }
+        _moments.value = posts
+        _momentsStatus.value = if (posts.isEmpty()) "0 条动态" else "${posts.size} 条动态"
     }
 
     private suspend fun handleFileUploadRsp(body: String) {
@@ -609,6 +976,8 @@ class IChatRepository(
             !incrementUnread -> old?.unreadCount ?: 0
             else -> (old?.unreadCount ?: 0) + 1
         }
+        val latestMessage = messageDao.latestMessages(message.conversationKey, 1).firstOrNull() ?: message
+        // 聊天历史和离线消息可能不是按时间正序抵达，摘要始终从本地库中最新一条消息生成。
         conversationDao.upsert(
             ConversationEntity(
                 conversationKey = message.conversationKey,
@@ -616,8 +985,8 @@ class IChatRepository(
                 chatType = message.chatType,
                 title = title,
                 avatarUrl = old?.avatarUrl ?: "",
-                lastMessage = previewFor(message),
-                lastTimestamp = message.serverTimestamp,
+                lastMessage = previewFor(latestMessage),
+                lastTimestamp = latestMessage.serverTimestamp,
                 unreadCount = unread
             )
         )
@@ -660,6 +1029,127 @@ class IChatRepository(
         }
     }
 
+    private fun parseMoment(obj: JSONObject): MomentPost {
+        val media = obj.optJSONArray("media")
+        val images = buildList {
+            if (media == null) return@buildList
+            for (index in 0 until media.length()) {
+                val value = media.opt(index)
+                if (value is JSONObject) {
+                    val fullUrl = value.optString("image_url", value.optString("thumb_url"))
+                    val thumbUrl = value.optString("thumb_url", fullUrl)
+                    if (thumbUrl.isNotBlank() || fullUrl.isNotBlank()) {
+                        add(MomentImage(thumbUrl = thumbUrl, imageUrl = fullUrl.ifBlank { thumbUrl }))
+                    }
+                } else {
+                    val url = media.optString(index)
+                    if (url.isNotBlank()) {
+                        add(MomentImage(thumbUrl = url, imageUrl = url))
+                    }
+                }
+            }
+        }
+        return MomentPost(
+            momentId = obj.optString("moment_id"),
+            userId = obj.optString("user_id"),
+            nickname = obj.optString("nickname", obj.optString("user_id")),
+            avatarUrl = obj.optString("avatar_url"),
+            content = obj.optString("content"),
+            mediaType = obj.optString("media_type", if (images.isEmpty()) "text" else "image"),
+            images = images,
+            createTime = obj.optString("create_time"),
+            createTimestamp = obj.optLong("create_timestamp", 0L)
+        )
+    }
+
+    private fun updateCurrentUser(update: (CurrentUser) -> CurrentUser) {
+        val current = _currentUser.value ?: return
+        val updated = update(current)
+        _currentUser.value = updated
+        preferences.saveUser(updated)
+    }
+
+    private fun encodeAvatarImage(uri: Uri): String {
+        val source = context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input)
+        } ?: error("无法读取头像")
+
+        // 服务端限制头像 data URL 小于 700KB，这里先裁成正方形再压缩，避免原图直接上传阻塞聊天协议。
+        val square = source.centerCropped(320)
+        var bytes = square.toJpegBytes(76)
+        if (bytes.size > MaxAvatarImageBytes) {
+            bytes = square.scaledToMaxEdge(240).toJpegBytes(66)
+        }
+        if (bytes.size > MaxAvatarImageBytes) {
+            error("头像图片过大，请选择更小的图片")
+        }
+        return "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+    }
+
+    private suspend fun encodeMomentImages(imageUris: List<Uri>): JSONArray = withContext(Dispatchers.IO) {
+        val images = JSONArray()
+        imageUris.forEach { uri ->
+            images.put(encodeMomentImage(uri))
+        }
+        images
+    }
+
+    private fun encodeMomentImage(uri: Uri): JSONObject {
+        val source = context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input)
+        } ?: error("无法读取图片")
+
+        // 服务端和 Qt 客户端约定朋友圈图片直接使用 data URL；这里压缩原图并生成 240px 缩略图。
+        val fullBitmap = source.scaledToMaxEdge(1280)
+        var fullBytes = fullBitmap.toJpegBytes(78)
+        if (fullBytes.size > MaxMomentImageBytes) {
+            val smaller = source.scaledToMaxEdge(960)
+            fullBytes = smaller.toJpegBytes(65)
+            if (fullBytes.size > MaxMomentImageBytes) {
+                error("图片过大，请选择更小的图片")
+            }
+        }
+        val thumbBytes = source.centerCropped(240).toJpegBytes(58)
+
+        return JSONObject()
+            .put("thumb_url", "data:image/jpeg;base64," + Base64.encodeToString(thumbBytes, Base64.NO_WRAP))
+            .put("image_url", "data:image/jpeg;base64," + Base64.encodeToString(fullBytes, Base64.NO_WRAP))
+    }
+
+    private fun Bitmap.scaledToMaxEdge(maxEdge: Int): Bitmap {
+        val edge = maxOf(width, height)
+        if (edge <= maxEdge) return this
+        val scale = maxEdge.toFloat() / edge.toFloat()
+        return Bitmap.createScaledBitmap(
+            this,
+            (width * scale).toInt().coerceAtLeast(1),
+            (height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    }
+
+    private fun Bitmap.centerCropped(size: Int): Bitmap {
+        val scale = maxOf(size.toFloat() / width.toFloat(), size.toFloat() / height.toFloat())
+        val scaledWidth = (width * scale).toInt().coerceAtLeast(size)
+        val scaledHeight = (height * scale).toInt().coerceAtLeast(size)
+        val scaled = Bitmap.createScaledBitmap(this, scaledWidth, scaledHeight, true)
+        return Bitmap.createBitmap(
+            scaled,
+            ((scaledWidth - size) / 2).coerceAtLeast(0),
+            ((scaledHeight - size) / 2).coerceAtLeast(0),
+            size,
+            size
+        )
+    }
+
+    private fun Bitmap.toJpegBytes(quality: Int): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        if (!compress(Bitmap.CompressFormat.JPEG, quality, output)) {
+            error("图片压缩失败")
+        }
+        return output.toByteArray()
+    }
+
     private data class FileUploadResponse(
         val transferId: String,
         val status: String,
@@ -689,5 +1179,8 @@ class IChatRepository(
 
     companion object {
         private const val ChunkSize = 256 * 1024
+        private const val MaxMomentImages = 9
+        private const val MaxMomentImageBytes = 850 * 1024
+        private const val MaxAvatarImageBytes = 500 * 1024
     }
 }

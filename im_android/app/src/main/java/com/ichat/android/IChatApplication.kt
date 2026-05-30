@@ -16,7 +16,7 @@ class IChatApplication : Application(), DefaultLifecycleObserver {
         private set
 
     override fun onCreate() {
-        super.onCreate()
+        super<Application>.onCreate()
         container = AppContainer(this, appScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
@@ -31,6 +31,6 @@ class IChatApplication : Application(), DefaultLifecycleObserver {
 
     override fun onTerminate() {
         appJob.cancel()
-        super.onTerminate()
+        super<Application>.onTerminate()
     }
 }

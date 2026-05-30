@@ -8,8 +8,18 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM chat_messages WHERE conversationKey = :conversationKey ORDER BY serverTimestamp ASC, clientTime ASC")
-    fun observeMessages(conversationKey: String): Flow<List<ChatMessageEntity>>
+    @Query(
+        """
+        SELECT * FROM (
+            SELECT * FROM chat_messages
+            WHERE conversationKey = :conversationKey
+            ORDER BY serverTimestamp DESC, clientTime DESC
+            LIMIT :limit
+        )
+        ORDER BY serverTimestamp ASC, clientTime ASC
+        """
+    )
+    fun observeRecentMessages(conversationKey: String, limit: Int): Flow<List<ChatMessageEntity>>
 
     @Query("SELECT * FROM chat_messages WHERE conversationKey = :conversationKey ORDER BY serverTimestamp DESC, clientTime DESC LIMIT :limit")
     suspend fun latestMessages(conversationKey: String, limit: Int): List<ChatMessageEntity>
@@ -25,6 +35,9 @@ interface MessageDao {
 
     @Query("UPDATE chat_messages SET localPath = :path, transferStatus = :status WHERE msgId = :msgId")
     suspend fun updateLocalFile(msgId: String, path: String?, status: String)
+
+    @Query("DELETE FROM chat_messages")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -40,6 +53,9 @@ interface ConversationDao {
 
     @Query("UPDATE conversations SET unreadCount = 0 WHERE conversationKey = :conversationKey")
     suspend fun clearUnread(conversationKey: String)
+
+    @Query("DELETE FROM conversations")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -61,4 +77,10 @@ interface ContactDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertGroups(groups: List<GroupEntity>)
+
+    @Query("DELETE FROM friends")
+    suspend fun clearFriends()
+
+    @Query("DELETE FROM groups")
+    suspend fun clearGroups()
 }

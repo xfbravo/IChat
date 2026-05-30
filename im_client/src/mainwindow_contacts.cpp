@@ -31,6 +31,7 @@
 #include <QCollator>
 #include <QLocale>
 #include <QMap>
+#include <QSet>
 #include <QIcon>
 #include <QPainter>
 #include <QPainterPath>
@@ -1331,12 +1332,21 @@ void MainWindow::onFriendListReceived(const QString &json)
         return;
 
     QJsonArray friends = doc.array();
+    QSet<QString> received_friend_ids;
+    contact_remarks_.clear();
+    contact_nicknames_.clear();
+    contact_avatars_.clear();
 
     // 好友列表同时驱动联系人树和消息页会话列表，避免两个页面各拉一份数据。
     for (const QJsonValue &value : friends)
     {
         QJsonObject friend_obj = value.toObject();
         QString friend_id = friend_obj["friend_id"].toString();
+        if (friend_id.isEmpty())
+        {
+            continue;
+        }
+        received_friend_ids.insert(friend_id);
         QString nickname = friend_obj["nickname"].toString();
         QString remark = friend_obj["remark"].toString().trimmed();
         QString avatar_url = friend_obj["avatar_url"].toString();
@@ -1378,6 +1388,23 @@ void MainWindow::onFriendListReceived(const QString &json)
             conversation.last_timestamp = last_timestamp;
         }
     }
+    for (auto it = conversations_.begin(); it != conversations_.end();)
+    {
+        if (!isGroupConversation(it.key()) && !received_friend_ids.contains(conversationPeerId(it.key())))
+        {
+            it = conversations_.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    if (!current_chat_target_.isEmpty() && !conversations_.contains(current_chat_target_))
+    {
+        resetCurrentConversationView();
+    }
+
     refreshConversationList();
 
     if (!current_chat_target_.isEmpty() && conversations_.contains(current_chat_target_))
@@ -1397,6 +1424,7 @@ void MainWindow::onGroupListReceived(const QString &json)
         return;
 
     const QJsonArray groups = doc.array();
+    QSet<QString> received_group_ids;
     group_names_.clear();
     group_avatars_.clear();
     group_member_counts_.clear();
@@ -1408,6 +1436,7 @@ void MainWindow::onGroupListReceived(const QString &json)
         {
             continue;
         }
+        received_group_ids.insert(group_id);
 
         const QString group_name = group_obj["group_name"].toString(group_id);
         const QString group_avatar = group_obj["group_avatar"].toString();
@@ -1438,6 +1467,23 @@ void MainWindow::onGroupListReceived(const QString &json)
             conversation.last_message = last_message;
             conversation.last_timestamp = last_timestamp;
         }
+    }
+
+    for (auto it = conversations_.begin(); it != conversations_.end();)
+    {
+        if (isGroupConversation(it.key()) && !received_group_ids.contains(conversationPeerId(it.key())))
+        {
+            it = conversations_.erase(it);
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    if (!current_chat_target_.isEmpty() && !conversations_.contains(current_chat_target_))
+    {
+        resetCurrentConversationView();
     }
 
     refreshConversationList();

@@ -514,6 +514,16 @@ private:
      */
     void saveCredentials();
 
+    /**
+     * @brief 清理当前登录会话的内存态，避免退出后旧账号数据继续参与下一次登录。
+     */
+    void resetSessionState(bool clear_saved_credentials);
+
+    /**
+     * @brief 删除本地保存的账号资料和 token。
+     */
+    void clearSavedCredentials();
+
     bool expecting_friend_requests_ = false;
     QString current_chat_history_peer_id_;
     QString current_chat_history_type_ = QStringLiteral("p2p");
@@ -566,6 +576,8 @@ private:
     QString pending_profile_region_;
     QString pending_profile_signature_;
     QString pending_user_profile_id_;
+    bool manual_disconnect_ = false;
+    bool auto_reconnect_enabled_ = true;
 
     QTimer* heartbeat_timer_ = nullptr;
     QTimer* heartbeat_timeout_timer_ = nullptr;

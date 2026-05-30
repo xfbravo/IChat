@@ -8,6 +8,7 @@ import com.ichat.android.ui.chat.MessagesViewModel
 import com.ichat.android.ui.contacts.ContactsViewModel
 import com.ichat.android.ui.me.MeViewModel
 import com.ichat.android.ui.moments.MomentsViewModel
+import com.ichat.android.ui.profile.ProfileViewModel
 
 class ViewModelFactory(
     private val repository: IChatRepository
@@ -21,6 +22,7 @@ class ViewModelFactory(
             modelClass.isAssignableFrom(ContactsViewModel::class.java) -> ContactsViewModel(repository)
             modelClass.isAssignableFrom(MomentsViewModel::class.java) -> MomentsViewModel(repository)
             modelClass.isAssignableFrom(MeViewModel::class.java) -> MeViewModel(repository)
+            modelClass.isAssignableFrom(ProfileViewModel::class.java) -> ProfileViewModel(repository)
             else -> error("Unknown ViewModel: ${modelClass.name}")
         } as T
     }

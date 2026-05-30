@@ -38,6 +38,7 @@ int main(int argc, char* argv[]) {
         QObject::connect(main_window, &MainWindow::logout, [&]() {
             delete main_window;
             main_window = nullptr;
+            login_window.resetAfterLogout();
             login_window.show();
         });
 

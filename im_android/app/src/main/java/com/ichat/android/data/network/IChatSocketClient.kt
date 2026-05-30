@@ -28,6 +28,7 @@ class IChatSocketClient(private val scope: CoroutineScope) {
     private var heartbeatJob: Job? = null
     private var host: String = ""
     private var port: Int = 0
+    private var connectionSerial: Long = 0L
 
     private val _state = MutableStateFlow(ConnectionState.Disconnected)
     val state: StateFlow<ConnectionState> = _state
@@ -45,9 +46,10 @@ class IChatSocketClient(private val scope: CoroutineScope) {
             next.keepAlive = true
             next.tcpNoDelay = true
             next.connect(InetSocketAddress(host, port), 5_000)
+            val nextSerial = ++connectionSerial
             socket = next
             _state.value = ConnectionState.Connected
-            startReader(next)
+            startReader(next, nextSerial)
             startHeartbeat()
         }
     }
@@ -78,14 +80,14 @@ class IChatSocketClient(private val scope: CoroutineScope) {
         send(type, json.toString())
     }
 
-    private fun startReader(activeSocket: Socket) {
+    private fun startReader(activeSocket: Socket, activeSerial: Long) {
         readerJob?.cancel()
         readerJob = scope.launch(Dispatchers.IO) {
             try {
                 val input = activeSocket.getInputStream()
                 while (isActive && !activeSocket.isClosed) {
                     val packet = ProtocolCodec.readPacket(input) ?: break
-                    _incoming.emit(packet)
+                    _incoming.emit(packet.copy(connectionSerial = activeSerial))
                 }
             } catch (_: Throwable) {
                 // 读取异常通常意味着对端断开或网络切换，交给上层做重新登录/重连提示。

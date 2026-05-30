@@ -1465,7 +1465,9 @@ void MainWindow::switchToConversation(const QString& conversation_key, const QSt
         : contact_remarks_.value(peer_id, title);
     chat_target_label_->setText(display_name);
     chat_more_button_->setEnabled(true);
+    message_input_->setEnabled(true);
     attach_file_button_->setEnabled(true);
+    send_button_->setEnabled(true);
     const bool can_call = chat_type == "p2p";
     if (audio_call_button_) audio_call_button_->setEnabled(can_call);
     if (video_call_button_) video_call_button_->setEnabled(can_call);

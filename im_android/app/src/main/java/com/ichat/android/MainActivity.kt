@@ -10,6 +10,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Text
@@ -18,6 +19,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.res.painterResource
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
@@ -90,8 +92,9 @@ class MainActivity : FragmentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.currentUser.collect { user ->
-                        bottomBar.visibility = if (user == null) View.GONE else View.VISIBLE
+                        updateBottomBarVisibility()
                         if (user == null) {
+                            viewModel.setBottomNavigationVisible(true)
                             showFragment(AuthFragment())
                         } else {
                             showTab(viewModel.selectedTab.value)
@@ -105,8 +108,18 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
+                launch {
+                    viewModel.bottomNavigationVisible.collect {
+                        updateBottomBarVisibility()
+                    }
+                }
             }
         }
+    }
+
+    private fun updateBottomBarVisibility() {
+        val visible = viewModel.currentUser.value != null && viewModel.bottomNavigationVisible.value
+        bottomBar.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     private fun showTab(tab: MainTab) {
@@ -153,8 +166,22 @@ private fun BottomNavigation(viewModel: MainViewModel) {
                 selected = selected == tab,
                 onClick = { viewModel.selectTab(tab) },
                 label = { Text(tab.title) },
-                icon = { Text(tab.title.take(1)) }
+                icon = {
+                    Icon(
+                        painter = painterResource(tab.iconRes()),
+                        contentDescription = tab.title
+                    )
+                },
+                alwaysShowLabel = true
             )
         }
     }
+}
+
+// 底部导航统一使用图片资源，避免图标位置退化成文字首字。
+private fun MainTab.iconRes(): Int = when (this) {
+    MainTab.Messages -> R.drawable.ic_tab_messages
+    MainTab.Contacts -> R.drawable.ic_tab_contacts
+    MainTab.Moments -> R.drawable.ic_tab_moments
+    MainTab.Me -> R.drawable.ic_tab_me
 }

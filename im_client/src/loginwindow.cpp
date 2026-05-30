@@ -138,6 +138,14 @@ LoginWindow::LoginWindow(TcpClient* tcp_client, QWidget* parent)
     tcp_client_->connectToServer(server_host_, server_port_);
 }
 
+void LoginWindow::resetAfterLogout() {
+    switchToLoginPage();
+    clearError();
+    login_user_id_edit_->clear();
+    login_password_edit_->clear();
+    login_button_->setEnabled(true);
+}
+
 void LoginWindow::createLoginPage() {
     login_page_ = new QWidget;
 

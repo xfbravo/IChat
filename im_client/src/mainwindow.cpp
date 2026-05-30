@@ -344,6 +344,60 @@ void MainWindow::onLogoutClicked() {
         return;
     }
 
+    resetUserScopedState();
     tcp_client_->disconnectFromServer();
     emit logout();
+}
+
+void MainWindow::resetCurrentConversationView() {
+    current_chat_target_.clear();
+    current_messages_.clear();
+    message_index_by_id_.clear();
+
+    if (chat_target_label_) {
+        chat_target_label_->setText(QStringLiteral("选择联系人开始聊天"));
+    }
+    if (message_input_) {
+        message_input_->clear();
+        message_input_->setEnabled(false);
+    }
+    if (attach_file_button_) {
+        attach_file_button_->setEnabled(false);
+    }
+    if (audio_call_button_) {
+        audio_call_button_->setEnabled(false);
+    }
+    if (video_call_button_) {
+        video_call_button_->setEnabled(false);
+    }
+    if (send_button_) {
+        send_button_->setEnabled(false);
+    }
+    if (chat_messages_layout_ && chat_scroll_area_ && chat_messages_widget_) {
+        renderChatMessages(false);
+    }
+}
+
+void MainWindow::resetUserScopedState() {
+    // 退出登录时先清空所有账号私有 UI 缓存，再释放网络会话，防止旧账号数据短暂残留。
+    hideSearchResults();
+    conversations_.clear();
+    contact_remarks_.clear();
+    contact_nicknames_.clear();
+    contact_avatars_.clear();
+    user_profile_cache_.clear();
+    group_names_.clear();
+    group_avatars_.clear();
+    group_member_counts_.clear();
+    open_after_download_paths_.clear();
+    open_after_download_file_ids_.clear();
+    moments_target_user_id_.clear();
+
+    if (chat_list_widget_) {
+        chat_list_widget_->clear();
+    }
+    if (contact_tree_widget_) {
+        contact_tree_widget_->clear();
+    }
+    resetCurrentConversationView();
 }

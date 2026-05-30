@@ -125,6 +125,47 @@ void TcpClient::saveCredentials() {
     qDebug() << "Saved credentials for user:" << user_id_;
 }
 
+void TcpClient::clearSavedCredentials() {
+    QSettings settings("IMClient", "TcpClient");
+    settings.remove("user_id");
+    settings.remove("user_nickname");
+    settings.remove("avatar_url");
+    settings.remove("gender");
+    settings.remove("region");
+    settings.remove("signature");
+    settings.remove("token");
+    settings.sync();
+}
+
+void TcpClient::resetSessionState(bool clear_saved_credentials) {
+    // 账号边界必须清掉所有用户态缓存，避免旧账号回包或 token 被下一次登录复用。
+    expecting_friend_requests_ = false;
+    current_chat_history_peer_id_.clear();
+    current_chat_history_type_ = QStringLiteral("p2p");
+    pending_uploads_.clear();
+    pending_downloads_.clear();
+    pending_login_user_id_.clear();
+    pending_login_password_.clear();
+    pending_profile_update_ = false;
+    pending_profile_nickname_.clear();
+    pending_profile_gender_.clear();
+    pending_profile_region_.clear();
+    pending_profile_signature_.clear();
+    pending_user_profile_id_.clear();
+
+    user_id_.clear();
+    user_nickname_.clear();
+    user_avatar_url_.clear();
+    user_gender_.clear();
+    user_region_.clear();
+    user_signature_.clear();
+    token_.clear();
+
+    if (clear_saved_credentials) {
+        clearSavedCredentials();
+    }
+}
+
 TcpClient::~TcpClient() {
     stopHeartbeat();
     heartbeat_timeout_timer_->stop();
@@ -135,6 +176,9 @@ TcpClient::~TcpClient() {
 }
 
 void TcpClient::connectToServer(const QString& host, quint16 port) {
+    auto_reconnect_enabled_ = true;
+    manual_disconnect_ = false;
+
     // 如果已经在连接中，先断开
     if (socket_->isOpen()) {
         socket_->disconnectFromHost();
@@ -166,12 +210,19 @@ void TcpClient::connectToServer(const QString& host, quint16 port) {
 }
 
 void TcpClient::disconnectFromServer() {
+    manual_disconnect_ = true;
+    auto_reconnect_enabled_ = false;
     stopHeartbeat();
     heartbeat_timeout_timer_->stop();
     reconnect_timer_->stop();
     reconnect_attempts_ = 0;
-    if (socket_->isOpen()) {
-        socket_->disconnectFromHost();
+    resetSessionState(true);
+    read_buffer_.clear();
+    if (socket_->state() != QAbstractSocket::UnconnectedState) {
+        // 主动退出时立即丢弃旧连接缓冲区，避免延迟回包跨账号进入下一次会话。
+        socket_->abort();
+    } else {
+        manual_disconnect_ = false;
     }
     state_ = ClientState::Disconnected;
     emit connectionStatusChanged(false);
@@ -210,6 +261,7 @@ void TcpClient::login(const QString& user_id, const QString& password) {
         qDebug() << "Disconnected, attempting reconnect first...";
         pending_login_user_id_ = user_id;
         pending_login_password_ = password;
+        auto_reconnect_enabled_ = true;
         attemptReconnect();
         return;
     }
@@ -744,6 +796,8 @@ void TcpClient::onConnected() {
 
 void TcpClient::onDisconnected() {
     qDebug() << "Disconnected from server";
+    const bool was_manual_disconnect = manual_disconnect_;
+    manual_disconnect_ = false;
     stopHeartbeat();
     heartbeat_timeout_timer_->stop();
     reconnect_timer_->stop();
@@ -753,7 +807,7 @@ void TcpClient::onDisconnected() {
     emit connectionStatusChanged(false);
 
     // 自动重连
-    if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+    if (!was_manual_disconnect && auto_reconnect_enabled_ && reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
         QTimer::singleShot(RECONNECT_INTERVAL, this, &TcpClient::attemptReconnect);
     }
 }
@@ -808,7 +862,7 @@ void TcpClient::onHeartbeatTimeout() {
         socket_->disconnectFromHost();
     }
 
-    if (reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
+    if (auto_reconnect_enabled_ && reconnect_attempts_ < MAX_RECONNECT_ATTEMPTS) {
         attemptReconnect();
     }
 }
@@ -825,6 +879,9 @@ void TcpClient::handleMessage(MsgType type, const QString& body) {
                     const QString login_gender = QString::fromStdString(rsp.gender);
                     const QString login_region = QString::fromStdString(rsp.region);
                     const QString login_signature = QString::fromStdString(rsp.signature);
+                    if (!same_saved_user) {
+                        resetSessionState(false);
+                    }
                     state_ = ClientState::LoggedIn;
                     user_id_ = login_user_id;
                     user_nickname_ = QString::fromStdString(rsp.nickname);
@@ -1340,6 +1397,10 @@ void TcpClient::stopHeartbeat() {
 }
 
 void TcpClient::attemptReconnect() {
+    if (!auto_reconnect_enabled_) {
+        return;
+    }
+
     if (server_host_.isEmpty() || server_port_ == 0) {
         qDebug() << "No server info saved, cannot reconnect";
         return;

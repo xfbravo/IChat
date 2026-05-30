@@ -24,6 +24,11 @@ public:
      */
     explicit LoginWindow(TcpClient* tcp_client, QWidget* parent = nullptr);
 
+    /**
+     * @brief 退出登录后清空表单里的上一账号信息。
+     */
+    void resetAfterLogout();
+
 signals:
     /**
      * @brief 登录成功信号

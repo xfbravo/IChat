@@ -8,7 +8,8 @@ import java.util.UUID
 
 data class ImPacket(
     val type: MsgType,
-    val body: String
+    val body: String,
+    val connectionSerial: Long = 0L
 )
 
 /**

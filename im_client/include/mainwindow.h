@@ -270,6 +270,8 @@ private:
     void loadChatList();
     void loadContacts();
     void switchToChatWith(const QString& user_id, const QString& nickname);
+    void resetCurrentConversationView();
+    void resetUserScopedState();
 
 private:
     // 登录态和当前用户资料。TcpClient 仍然是唯一网络入口。
