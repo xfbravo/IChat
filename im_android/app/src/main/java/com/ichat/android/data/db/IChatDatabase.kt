@@ -12,7 +12,7 @@ import androidx.room.RoomDatabase
         FriendEntity::class,
         GroupEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class IChatDatabase : RoomDatabase() {
@@ -26,7 +26,10 @@ abstract class IChatDatabase : RoomDatabase() {
                 context.applicationContext,
                 IChatDatabase::class.java,
                 "ichat.db"
-            ).build()
+            )
+                // v1 cached rows had no ownerUserId, so they cannot be safely attributed after upgrade.
+                .fallbackToDestructiveMigration()
+                .build()
         }
     }
 }

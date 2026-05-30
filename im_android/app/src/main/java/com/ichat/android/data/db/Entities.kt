@@ -2,21 +2,22 @@ package com.ichat.android.data.db
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 
 /**
- * 本地消息表是 Android 端离线体验的核心：收到、发出、离线补偿和媒体消息都先落库。
- * content 对 text 是纯文本，对 image/file/voice/video 保留服务端约定的 JSON 字符串。
+ * Local message cache. Every cached row is scoped by ownerUserId so a newly
+ * signed-in account can never read another account's conversations from Room.
  */
 @Entity(
     tableName = "chat_messages",
+    primaryKeys = ["ownerUserId", "msgId"],
     indices = [
-        Index(value = ["conversationKey", "serverTimestamp"]),
-        Index(value = ["peerId", "chatType"])
+        Index(value = ["ownerUserId", "conversationKey", "serverTimestamp"]),
+        Index(value = ["ownerUserId", "peerId", "chatType"])
     ]
 )
 data class ChatMessageEntity(
-    @PrimaryKey val msgId: String,
+    val ownerUserId: String,
+    val msgId: String,
     val conversationKey: String,
     val peerId: String,
     val chatType: String,
@@ -34,9 +35,14 @@ data class ChatMessageEntity(
     val isMine: Boolean
 )
 
-@Entity(tableName = "conversations")
+@Entity(
+    tableName = "conversations",
+    primaryKeys = ["ownerUserId", "conversationKey"],
+    indices = [Index(value = ["ownerUserId", "lastTimestamp"])]
+)
 data class ConversationEntity(
-    @PrimaryKey val conversationKey: String,
+    val ownerUserId: String,
+    val conversationKey: String,
     val peerId: String,
     val chatType: String,
     val title: String,
@@ -46,9 +52,14 @@ data class ConversationEntity(
     val unreadCount: Int
 )
 
-@Entity(tableName = "friends")
+@Entity(
+    tableName = "friends",
+    primaryKeys = ["ownerUserId", "userId"],
+    indices = [Index(value = ["ownerUserId", "userId"])]
+)
 data class FriendEntity(
-    @PrimaryKey val userId: String,
+    val ownerUserId: String,
+    val userId: String,
     val nickname: String,
     val remark: String,
     val avatarUrl: String,
@@ -57,9 +68,14 @@ data class FriendEntity(
     val signature: String
 )
 
-@Entity(tableName = "groups")
+@Entity(
+    tableName = "groups",
+    primaryKeys = ["ownerUserId", "groupId"],
+    indices = [Index(value = ["ownerUserId", "groupId"])]
+)
 data class GroupEntity(
-    @PrimaryKey val groupId: String,
+    val ownerUserId: String,
+    val groupId: String,
     val groupName: String,
     val groupAvatar: String,
     val ownerId: String,

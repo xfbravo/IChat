@@ -570,6 +570,7 @@ private fun targetProfile(
 ): AvatarProfile {
     return conversationProfile(
         ConversationEntity(
+            ownerUserId = "",
             conversationKey = target.conversationKey,
             peerId = target.peerId,
             chatType = target.chatType,

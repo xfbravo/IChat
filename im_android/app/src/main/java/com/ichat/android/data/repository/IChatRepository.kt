@@ -29,12 +29,15 @@ import com.ichat.android.notification.ChatNotificationManager
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -110,18 +113,36 @@ class IChatRepository(
         _isAppForeground.value = foreground
     }
 
-    fun observeConversations(): Flow<List<ConversationEntity>> = conversationDao.observeConversations()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun observeConversations(): Flow<List<ConversationEntity>> =
+        currentUser.flatMapLatest { user ->
+            user?.let { conversationDao.observeConversations(it.userId) } ?: flowOf(emptyList())
+        }
 
-    fun observeFriends(): Flow<List<FriendEntity>> = contactDao.observeFriends()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun observeFriends(): Flow<List<FriendEntity>> =
+        currentUser.flatMapLatest { user ->
+            user?.let { contactDao.observeFriends(it.userId) } ?: flowOf(emptyList())
+        }
 
-    fun observeGroups(): Flow<List<GroupEntity>> = contactDao.observeGroups()
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun observeGroups(): Flow<List<GroupEntity>> =
+        currentUser.flatMapLatest { user ->
+            user?.let { contactDao.observeGroups(it.userId) } ?: flowOf(emptyList())
+        }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun observeMessages(target: ChatTarget, limit: Int): Flow<List<ChatMessageEntity>> {
-        return messageDao.observeRecentMessages(target.conversationKey, limit.coerceAtLeast(1))
+        return currentUser.flatMapLatest { user ->
+            user?.let {
+                messageDao.observeRecentMessages(it.userId, target.conversationKey, limit.coerceAtLeast(1))
+            } ?: flowOf(emptyList())
+        }
     }
 
     private suspend fun clearUserScopedCache(clearCurrentUser: Boolean) {
-        // 账号私有的 Room 表和内存态必须一起清理，避免下一位登录用户看到上一位的好友或聊天。
+        val ownerUserId = _currentUser.value?.userId
+        // Clear volatile account state before switching users or leaving the signed-in session.
         _activeConversationKey.value = null
         _activeConversationKey.value = null
         _friendRequests.value = emptyList()
@@ -138,17 +159,21 @@ class IChatRepository(
             _currentUser.value = null
         }
 
-        withContext(Dispatchers.IO) {
-            messageDao.clearAll()
-            conversationDao.clearAll()
-            contactDao.clearFriends()
-            contactDao.clearGroups()
+        if (!ownerUserId.isNullOrBlank()) {
+            // Room rows are account-scoped; clear only the outgoing account instead of touching other users.
+            withContext(Dispatchers.IO) {
+                messageDao.clearForOwner(ownerUserId)
+                conversationDao.clearForOwner(ownerUserId)
+                contactDao.clearFriends(ownerUserId)
+                contactDao.clearGroups(ownerUserId)
+            }
         }
     }
 
     suspend fun openConversation(target: ChatTarget) {
+        val user = _currentUser.value ?: return
         _activeConversationKey.value = target.conversationKey
-        conversationDao.clearUnread(target.conversationKey)
+        conversationDao.clearUnread(user.userId, target.conversationKey)
         requestChatHistory(target.peerId, target.chatType)
     }
 
@@ -533,8 +558,9 @@ class IChatRepository(
         val nowSeconds = System.currentTimeMillis() / 1000
         val nowMillis = System.currentTimeMillis()
         val key = "$chatType:$peerId"
-        val title = conversationTitle(peerId, chatType)
+        val title = conversationTitle(user.userId, peerId, chatType)
         val message = ChatMessageEntity(
+            ownerUserId = user.userId,
             msgId = msgId,
             conversationKey = key,
             peerId = peerId,
@@ -567,7 +593,7 @@ class IChatRepository(
         runCatching {
             socketClient.sendJson(MsgType.CHAT_MESSAGE, payload)
         }.onFailure {
-            messageDao.updateSendStatus(msgId, "failed")
+            messageDao.updateSendStatus(user.userId, msgId, "failed")
         }
     }
 
@@ -685,9 +711,10 @@ class IChatRepository(
         val key = "$chatType:$peerId"
         val contentType = obj.optString("content_type", "text")
         val serverTimestamp = obj.optLong("server_timestamp", System.currentTimeMillis())
-        val title = conversationTitle(peerId, chatType)
+        val title = conversationTitle(user.userId, peerId, chatType)
         val isMine = fromUserId == user.userId
         val message = ChatMessageEntity(
+            ownerUserId = user.userId,
             msgId = obj.optString("msg_id", ProtocolCodec.generateMsgId()),
             conversationKey = key,
             peerId = peerId,
@@ -715,14 +742,16 @@ class IChatRepository(
     }
 
     private suspend fun handleAck(body: String) {
+        val user = _currentUser.value ?: return
         val obj = JSONObject(body)
         val msgId = obj.optString("msg_id")
         if (msgId.isNotBlank()) {
-            messageDao.updateSendStatus(msgId, obj.optString("status", "sent"))
+            messageDao.updateSendStatus(user.userId, msgId, obj.optString("status", "sent"))
         }
     }
 
     private suspend fun handleFriendList(body: String) {
+        val user = _currentUser.value ?: return
         val arr = JSONArray(body)
         val friends = buildList {
             for (index in 0 until arr.length()) {
@@ -731,6 +760,7 @@ class IChatRepository(
                 if (userId.isBlank()) continue
                 add(
                     FriendEntity(
+                        ownerUserId = user.userId,
                         userId = userId,
                         nickname = obj.optString("nickname", obj.optString("friend_nickname")),
                         remark = obj.optString("remark"),
@@ -742,7 +772,7 @@ class IChatRepository(
                 )
             }
         }
-        contactDao.clearFriends()
+        contactDao.clearFriends(user.userId)
         if (friends.isNotEmpty()) {
             contactDao.upsertFriends(friends)
         }
@@ -854,6 +884,7 @@ class IChatRepository(
     }
 
     private suspend fun handleGroupList(body: String) {
+        val user = _currentUser.value ?: return
         val arr = JSONArray(body)
         val groups = buildList {
             for (index in 0 until arr.length()) {
@@ -862,6 +893,7 @@ class IChatRepository(
                 if (groupId.isBlank()) continue
                 add(
                     GroupEntity(
+                        ownerUserId = user.userId,
                         groupId = groupId,
                         groupName = obj.optString("group_name"),
                         groupAvatar = obj.optString("group_avatar"),
@@ -871,13 +903,14 @@ class IChatRepository(
                 )
             }
         }
-        contactDao.clearGroups()
+        contactDao.clearGroups(user.userId)
         if (groups.isNotEmpty()) {
             contactDao.upsertGroups(groups)
         }
     }
 
     private suspend fun handleCreateGroupRsp(body: String) {
+        val user = _currentUser.value ?: return
         val obj = JSONObject(body)
         if (obj.optInt("code", -1) != 0) return
 
@@ -886,10 +919,11 @@ class IChatRepository(
         contactDao.upsertGroups(
             listOf(
                 GroupEntity(
+                    ownerUserId = user.userId,
                     groupId = groupId,
                     groupName = obj.optString("group_name"),
                     groupAvatar = obj.optString("group_avatar"),
-                    ownerId = _currentUser.value?.userId.orEmpty(),
+                    ownerId = user.userId,
                     memberCount = obj.optInt("member_count")
                 )
             )
@@ -971,15 +1005,16 @@ class IChatRepository(
         title: String,
         incrementUnread: Boolean
     ) {
-        val old = conversationDao.find(message.conversationKey)
+        val old = conversationDao.find(message.ownerUserId, message.conversationKey)
         val unread = when {
             !incrementUnread -> old?.unreadCount ?: 0
             else -> (old?.unreadCount ?: 0) + 1
         }
-        val latestMessage = messageDao.latestMessages(message.conversationKey, 1).firstOrNull() ?: message
+        val latestMessage = messageDao.latestMessages(message.ownerUserId, message.conversationKey, 1).firstOrNull() ?: message
         // 聊天历史和离线消息可能不是按时间正序抵达，摘要始终从本地库中最新一条消息生成。
         conversationDao.upsert(
             ConversationEntity(
+                ownerUserId = message.ownerUserId,
                 conversationKey = message.conversationKey,
                 peerId = message.peerId,
                 chatType = message.chatType,
@@ -992,11 +1027,11 @@ class IChatRepository(
         )
     }
 
-    private suspend fun conversationTitle(peerId: String, chatType: String): String {
+    private suspend fun conversationTitle(ownerUserId: String, peerId: String, chatType: String): String {
         return if (chatType == "group") {
-            contactDao.findGroup(peerId)?.groupName?.ifBlank { peerId } ?: peerId
+            contactDao.findGroup(ownerUserId, peerId)?.groupName?.ifBlank { peerId } ?: peerId
         } else {
-            contactDao.findFriend(peerId)?.let { friend ->
+            contactDao.findFriend(ownerUserId, peerId)?.let { friend ->
                 friend.remark.ifBlank { friend.nickname }.ifBlank { peerId }
             } ?: peerId
         }
