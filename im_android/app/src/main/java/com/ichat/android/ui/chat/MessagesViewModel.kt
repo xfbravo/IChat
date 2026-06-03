@@ -1,5 +1,6 @@
 package com.ichat.android.ui.chat
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ichat.android.data.db.ChatMessageEntity
@@ -79,12 +80,18 @@ class MessagesViewModel(
         lastOlderRequestKey = ""
         _selectedTarget.value = target
         viewModelScope.launch {
-            repository.openConversation(target)
+            runCatching { repository.openConversation(target) }
+                .onFailure { _actionStatus.value = it.message ?: "会话加载失败" }
         }
     }
 
     fun backToConversations() {
+        repository.closeConversation(_selectedTarget.value)
         _selectedTarget.value = null
+    }
+
+    fun clearActiveConversation() {
+        repository.closeConversation(_selectedTarget.value)
     }
 
     fun sendText() {
@@ -93,13 +100,54 @@ class MessagesViewModel(
         if (text.isBlank()) return
         _draft.value = ""
         viewModelScope.launch {
-            repository.sendTextMessage(
-                MessageDraft(
-                    peerId = target.peerId,
-                    chatType = target.chatType,
-                    content = text
+            runCatching {
+                repository.sendTextMessage(
+                    MessageDraft(
+                        peerId = target.peerId,
+                        chatType = target.chatType,
+                        content = text
+                    )
                 )
-            )
+            }.onFailure {
+                _actionStatus.value = it.message ?: "消息发送失败"
+            }
+        }
+    }
+
+    fun sendAttachment(uri: Uri, fallbackTarget: ChatTarget? = null) {
+        val target = _selectedTarget.value ?: fallbackTarget
+        if (target == null) {
+            _actionStatus.value = "请先进入一个会话再发送附件"
+            return
+        }
+        if (_selectedTarget.value == null) {
+            _messageLimit.value = MessagePageSize
+            lastOlderRequestKey = ""
+            _selectedTarget.value = target
+        }
+        viewModelScope.launch {
+            _actionStatus.value = "正在发送附件..."
+            runCatching {
+                repository.openConversation(target)
+                repository.uploadFile(target.peerId, target.chatType, uri)
+            }.onSuccess {
+                _actionStatus.value = "附件已发送"
+            }.onFailure {
+                _actionStatus.value = it.message ?: "附件发送失败"
+            }
+        }
+    }
+
+    fun downloadAttachment(message: ChatMessageEntity) {
+        viewModelScope.launch {
+            _actionStatus.value = "正在下载..."
+            runCatching {
+                repository.downloadAttachment(message)
+            }.onSuccess {
+                _actionStatus.value = if (it == null) "下载已在进行中" else "下载已开始"
+            }.onFailure {
+                _actionStatus.value = it.message ?: "下载失败"
+            }
         }
     }
 
@@ -115,7 +163,8 @@ class MessagesViewModel(
         lastOlderRequestKey = requestKey
         _messageLimit.value += MessagePageSize
         viewModelScope.launch {
-            repository.loadOlderMessages(target, oldest, MessagePageSize)
+            runCatching { repository.loadOlderMessages(target, oldest, MessagePageSize) }
+                .onFailure { _actionStatus.value = it.message ?: "历史消息加载失败" }
         }
     }
 

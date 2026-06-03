@@ -16,13 +16,13 @@ class MomentsViewModel(
 
     fun refresh(targetUserId: String = "") {
         viewModelScope.launch {
-            repository.refreshMoments(targetUserId = targetUserId)
+            runCatching { repository.refreshMoments(targetUserId = targetUserId) }
         }
     }
 
     fun createMoment(content: String, imageUris: List<Uri>) {
         viewModelScope.launch {
-            repository.createMoment(content, imageUris)
+            runCatching { repository.createMoment(content, imageUris) }
         }
     }
 }

@@ -37,8 +37,17 @@ interface MessageDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(messages: List<ChatMessageEntity>)
 
+    @Query("SELECT * FROM chat_messages WHERE ownerUserId = :ownerUserId AND msgId = :msgId LIMIT 1")
+    suspend fun findById(ownerUserId: String, msgId: String): ChatMessageEntity?
+
     @Query("UPDATE chat_messages SET sendStatus = :status WHERE ownerUserId = :ownerUserId AND msgId = :msgId")
     suspend fun updateSendStatus(ownerUserId: String, msgId: String, status: String)
+
+    @Query("UPDATE chat_messages SET sendStatus = :status WHERE ownerUserId = :ownerUserId AND msgId = :msgId AND sendStatus = 'sending'")
+    suspend fun updateSendStatusIfSending(ownerUserId: String, msgId: String, status: String)
+
+    @Query("UPDATE chat_messages SET sendStatus = :status WHERE ownerUserId = :ownerUserId AND sendStatus = 'sending'")
+    suspend fun markSendingAsFailed(ownerUserId: String, status: String)
 
     @Query("UPDATE chat_messages SET localPath = :path, transferStatus = :status WHERE ownerUserId = :ownerUserId AND msgId = :msgId")
     suspend fun updateLocalFile(ownerUserId: String, msgId: String, path: String?, status: String)

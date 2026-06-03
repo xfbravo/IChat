@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,23 +14,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -38,6 +33,7 @@ import com.ichat.android.data.model.CurrentUser
 import com.ichat.android.ui.common.AvatarProfile
 import com.ichat.android.ui.common.IChatAvatar
 import com.ichat.android.ui.main.ViewModelFactory
+import com.ichat.android.ui.moments.MomentsFragment
 import com.ichat.android.ui.theme.IChatTheme
 
 class MeFragment : Fragment() {
@@ -50,7 +46,12 @@ class MeFragment : Fragment() {
         return ComposeView(requireContext()).apply {
             setContent {
                 IChatTheme {
-                    MeScreen(viewModel, onOpenProfile = ::openMyProfile)
+                    MeScreen(
+                        viewModel = viewModel,
+                        onOpenProfile = ::openMyProfile,
+                        onOpenMoments = ::openMyMoments,
+                        onOpenSettings = ::openSettings
+                    )
                 }
             }
         }
@@ -63,21 +64,41 @@ class MeFragment : Fragment() {
             .addToBackStack("my_profile")
             .commit()
     }
+
+    private fun openMyMoments() {
+        val user = viewModel.currentUser.value ?: return
+        val hostId = (view?.parent as? ViewGroup)?.id ?: return
+        val title = user.nickname.ifBlank { user.userId }
+        parentFragmentManager.beginTransaction()
+            .replace(hostId, MomentsFragment.newInstance(user.userId, title))
+            .addToBackStack("my_moments")
+            .commit()
+    }
+
+    private fun openSettings() {
+        val hostId = (view?.parent as? ViewGroup)?.id ?: return
+        parentFragmentManager.beginTransaction()
+            .replace(hostId, SettingsFragment())
+            .addToBackStack("settings")
+            .commit()
+    }
 }
 
 @Composable
-private fun MeScreen(viewModel: MeViewModel, onOpenProfile: () -> Unit) {
+private fun MeScreen(
+    viewModel: MeViewModel,
+    onOpenProfile: () -> Unit,
+    onOpenMoments: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
     val user by viewModel.currentUser.collectAsState()
-    val status by viewModel.status.collectAsState()
-    var oldPassword by remember { mutableStateOf("") }
-    var newPassword by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp)
     ) {
-        Spacer(Modifier.height(34.dp))
+        Spacer(Modifier.height(58.dp))
         val profileInfo = user.profile()
         Card(
             modifier = Modifier
@@ -107,35 +128,27 @@ private fun MeScreen(viewModel: MeViewModel, onOpenProfile: () -> Unit) {
         }
 
         Spacer(Modifier.height(28.dp))
-        Text("修改密码", fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(
-            value = oldPassword,
-            onValueChange = { oldPassword = it },
-            label = { Text("旧密码") },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(10.dp))
-        OutlinedTextField(
-            value = newPassword,
-            onValueChange = { newPassword = it },
-            label = { Text("新密码") },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(Modifier.height(12.dp))
-        Button(onClick = { viewModel.changePassword(oldPassword, newPassword) }) {
-            Text("保存密码")
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MeModuleCard(title = "朋友圈", subtitle = "查看我发布的朋友圈", onClick = onOpenMoments)
+            MeModuleCard(title = "设置", subtitle = "账号安全、个人资料管理", onClick = onOpenSettings)
         }
-        if (status.isNotBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Text(status)
-        }
+    }
+}
 
-        Spacer(Modifier.height(28.dp))
-        Button(onClick = viewModel::logout) {
-            Text("退出登录")
+@Composable
+private fun MeModuleCard(title: String, subtitle: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(subtitle, color = Color(0xFF5E6A61))
         }
     }
 }

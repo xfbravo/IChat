@@ -3,7 +3,9 @@ package com.ichat.android.data.repository
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Base64
 import com.ichat.android.data.db.ChatMessageEntity
 import com.ichat.android.data.db.ConversationEntity
@@ -38,14 +40,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlin.coroutines.cancellation.CancellationException
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.net.URLConnection
 import java.util.concurrent.ConcurrentHashMap
 
@@ -101,11 +106,38 @@ class IChatRepository(
     val connectionState: StateFlow<ConnectionState> = socketClient.state
 
     init {
-        appScope.launch {
-            socketClient.incoming.collect { packet -> handlePacket(packet) }
+        launchRepositoryTask {
+            socketClient.incoming.collect { packet ->
+                runRepositoryTask { handlePacket(packet) }
+            }
         }
         savedUser?.let { user ->
-            appScope.launch { restoreSavedLogin(user) }
+            launchRepositoryTask {
+                recoverInterruptedOutgoingMessages(user.userId)
+                restoreSavedLogin(user)
+            }
+        }
+    }
+
+    private fun launchRepositoryTask(block: suspend () -> Unit) {
+        appScope.launch {
+            runRepositoryTask(block)
+        }
+    }
+
+    private suspend fun runRepositoryTask(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Throwable) {
+            // 后台同步失败不应终止进程；发起操作的页面会通过状态流或本地消息状态反馈失败。
+        }
+    }
+
+    private suspend fun recoverInterruptedOutgoingMessages(ownerUserId: String) {
+        withContext(Dispatchers.IO) {
+            messageDao.markSendingAsFailed(ownerUserId, "failed:发送中断，请重新发送")
         }
     }
 
@@ -177,6 +209,13 @@ class IChatRepository(
         requestChatHistory(target.peerId, target.chatType)
     }
 
+    fun closeConversation(target: ChatTarget? = null) {
+        val activeKey = _activeConversationKey.value
+        if (target == null || activeKey == target.conversationKey) {
+            _activeConversationKey.value = null
+        }
+    }
+
     suspend fun loadOlderMessages(target: ChatTarget, oldestMessage: ChatMessageEntity, limit: Int = 30) {
         val beforeTimeSeconds = historyBeforeTimeSeconds(oldestMessage)
         if (beforeTimeSeconds <= 0L) return
@@ -219,7 +258,7 @@ class IChatRepository(
     }
 
     private suspend fun performLogin(payload: JSONObject): LoginResult {
-        ensureConnected()
+        ensureSocketConnected()
         loginSequence += 1
         val sequence = loginSequence
         val waiter = CompletableDeferred<LoginResult>()
@@ -254,12 +293,14 @@ class IChatRepository(
 
     suspend fun refreshContacts() {
         if (_currentUser.value == null) return
+        ensureConnected()
         socketClient.send(MsgType.GET_FRIEND_LIST, "{}")
         socketClient.send(MsgType.GET_GROUP_LIST, "{}")
     }
 
     suspend fun refreshFriendRequests() {
         if (_currentUser.value == null) return
+        ensureConnected()
         socketClient.send(MsgType.GET_FRIEND_REQUESTS, "{}")
     }
 
@@ -383,6 +424,7 @@ class IChatRepository(
     }
 
     suspend fun updateFriendRemark(friendId: String, remark: String) {
+        ensureConnected()
         socketClient.sendJson(
             MsgType.UPDATE_FRIEND_REMARK,
             JSONObject()
@@ -428,6 +470,7 @@ class IChatRepository(
     }
 
     suspend fun downloadFile(fileId: String, fileName: String): File = withContext(Dispatchers.IO) {
+        ensureConnected()
         val transferId = ProtocolCodec.generateMsgId()
         val target = attachmentStore.reserveDownloadFile(fileId, fileName)
         pendingDownloads[transferId] = PendingDownload(transferId, fileId, fileName, target)
@@ -441,15 +484,70 @@ class IChatRepository(
         target
     }
 
+    suspend fun downloadAttachment(message: ChatMessageEntity): File? {
+        val user = _currentUser.value ?: return null
+        if (message.ownerUserId != user.userId || message.transferStatus == "downloading") return null
+
+        val cached = message.localPath
+            ?.let { File(it) }
+            ?.takeIf { message.transferStatus == "downloaded" && it.exists() }
+        if (cached != null) return cached
+
+        val file = attachmentContent(message.content)
+        val fileId = file.optString("file_id")
+        val fileName = file.optString("file_name", when (message.contentType) {
+            "image" -> "image.jpg"
+            "video" -> "video.mp4"
+            else -> "file.bin"
+        })
+        if (fileId.isBlank()) {
+            messageDao.updateLocalFile(user.userId, message.msgId, null, "failed:文件ID为空")
+            return null
+        }
+        val existingDownload = attachmentStore.findExistingDownloadFile(fileId, fileName)
+        if (existingDownload != null) {
+            messageDao.updateLocalFile(user.userId, message.msgId, existingDownload.absolutePath, "downloaded")
+            return existingDownload
+        }
+        if (pendingDownloads.values.any { it.ownerUserId == user.userId && it.msgId == message.msgId }) return null
+
+        ensureConnected()
+        return withContext(Dispatchers.IO) {
+            val transferId = ProtocolCodec.generateMsgId()
+            val target = attachmentStore.reserveDownloadFile(fileId, fileName)
+            pendingDownloads[transferId] = PendingDownload(
+                transferId = transferId,
+                fileId = fileId,
+                fileName = fileName,
+                target = target,
+                ownerUserId = user.userId,
+                msgId = message.msgId
+            )
+            messageDao.updateLocalFile(user.userId, message.msgId, null, "downloading")
+            socketClient.sendJson(
+                MsgType.FILE_DOWNLOAD_REQ,
+                JSONObject()
+                    .put("transfer_id", transferId)
+                    .put("file_id", fileId)
+                    .put("file_name", fileName)
+            )
+            target
+        }
+    }
+
     suspend fun uploadFile(peerId: String, chatType: String, uri: Uri) = withContext(Dispatchers.IO) {
-        val fileName = uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "file" } ?: "file"
+        ensureConnected()
+        val fileName = displayNameForUri(uri)
         val mimeType = context.contentResolver.getType(uri)
             ?: URLConnection.guessContentTypeFromName(fileName)
             ?: "application/octet-stream"
-        if (mimeType.startsWith("video/")) {
-            error("视频消息暂不实现")
+        val contentType = when {
+            mimeType.startsWith("image/") -> "image"
+            mimeType.startsWith("video/") -> "video"
+            else -> "file"
         }
-
+        val previewDataUrl = if (contentType == "image") makeImagePreviewDataUrl(uri) else ""
+        val posterDataUrl = if (contentType == "video") makeVideoPosterDataUrl(uri) else ""
         val transferId = ProtocolCodec.generateMsgId()
         val tempFile = File(context.cacheDir, "ichat_upload_$transferId.tmp")
         context.contentResolver.openInputStream(uri)?.use { input ->
@@ -461,60 +559,129 @@ class IChatRepository(
         if (fileSize > 200L * 1024L * 1024L) error("单个文件不能超过200MB")
 
         val totalChunks = ((fileSize + ChunkSize - 1) / ChunkSize).toInt()
-        val readyDeferred = CompletableDeferred<FileUploadResponse>()
-        val readyWaiter = appScope.launch {
-            uploadResponses
-                .filter { it.transferId == transferId && (it.status == "ready" || it.status == "failed") }
-                .first()
-                .also { readyDeferred.complete(it) }
+        val ready = awaitUploadResponse(
+            transferId = transferId,
+            statuses = setOf("ready"),
+            timeoutMillis = UploadResponseTimeoutMillis,
+            timeoutMessage = "等待服务器准备上传超时"
+        ) {
+            socketClient.sendJson(
+                MsgType.FILE_UPLOAD_START,
+                JSONObject()
+                    .put("transfer_id", transferId)
+                    .put("to_user_id", peerId)
+                    .put("chat_type", chatType)
+                    .put("file_name", fileName)
+                    .put("file_size", fileSize)
+                    .put("mime_type", mimeType)
+                    .put("total_chunks", totalChunks)
+            )
         }
+        if (ready.code != 0 || ready.status == "failed") error(ready.message.ifBlank { "服务器拒绝上传" })
 
-        socketClient.sendJson(
-            MsgType.FILE_UPLOAD_START,
-            JSONObject()
-                .put("transfer_id", transferId)
-                .put("to_user_id", peerId)
-                .put("chat_type", chatType)
-                .put("file_name", fileName)
-                .put("file_size", fileSize)
-                .put("mime_type", mimeType)
-                .put("total_chunks", totalChunks)
-        )
-        val ready = withTimeout(15_000) { readyDeferred.await() }
-        readyWaiter.cancel()
-        if (ready.code != 0) error(ready.message.ifBlank { "服务器拒绝上传" })
-
-        FileInputStream(tempFile).use { input ->
-            val buffer = ByteArray(ChunkSize)
-            for (index in 0 until totalChunks) {
-                val read = input.read(buffer)
-                if (read <= 0) error("读取文件分片失败")
-                val chunk = if (read == buffer.size) buffer else buffer.copyOf(read)
-                socketClient.sendJson(
-                    MsgType.FILE_UPLOAD_CHUNK,
-                    JSONObject()
-                        .put("transfer_id", transferId)
-                        .put("chunk_index", index)
-                        .put("data", Base64.encodeToString(chunk, Base64.NO_WRAP))
-                )
-            }
+        val complete = try {
+            uploadFileChunks(tempFile, transferId, totalChunks, ready.nextChunkIndex)
+        } finally {
+            tempFile.delete()
         }
-        tempFile.delete()
-
-        val complete = withTimeout(30_000) {
-            uploadResponses
-                .filter { it.transferId == transferId && it.status == "complete" }
-                .first()
+        val localPath = if (contentType == "image" && previewDataUrl.isNotBlank()) {
+            attachmentStore.saveDataUrlToCache(complete.fileId, complete.fileName.ifBlank { fileName }, previewDataUrl)
+                ?.absolutePath
+        } else {
+            null
         }
-        val contentType = if (mimeType.startsWith("image/")) "image" else "file"
         val content = JSONObject()
             .put("file_id", complete.fileId)
             .put("file_name", complete.fileName.ifBlank { fileName })
             .put("file_size", complete.fileSize)
             .put("mime_type", complete.mimeType.ifBlank { mimeType })
             .put("transfer_id", transferId)
-            .toString()
-        sendChatMessage(peerId, chatType, contentType, content, localPath = null)
+        if (previewDataUrl.isNotBlank()) {
+            content.put("preview_data_url", previewDataUrl)
+        }
+        if (posterDataUrl.isNotBlank()) {
+            content.put("poster_data_url", posterDataUrl)
+        }
+        sendChatMessage(peerId, chatType, contentType, content.toString(), localPath = localPath)
+    }
+
+    private suspend fun uploadFileChunks(
+        file: File,
+        transferId: String,
+        totalChunks: Int,
+        firstChunkIndex: Int
+    ): FileUploadResponse {
+        var nextChunkIndex = firstChunkIndex.coerceAtLeast(0)
+        while (nextChunkIndex < totalChunks) {
+            val chunkIndex = nextChunkIndex
+            val chunk = readUploadChunk(file, chunkIndex)
+            val response = awaitUploadResponse(
+                transferId = transferId,
+                statuses = setOf("chunk", "complete"),
+                timeoutMillis = UploadResponseTimeoutMillis,
+                timeoutMessage = "等待服务器确认分片超时"
+            ) {
+                socketClient.sendJson(
+                    MsgType.FILE_UPLOAD_CHUNK,
+                    JSONObject()
+                        .put("transfer_id", transferId)
+                        .put("chunk_index", chunkIndex)
+                        .put("data", Base64.encodeToString(chunk, Base64.NO_WRAP))
+                )
+            }
+            if (response.code != 0 || response.status == "failed") error(response.message.ifBlank { "文件分片上传失败" })
+            if (response.status == "complete") return response
+            val serverNextChunk = response.nextChunkIndex
+            if (serverNextChunk <= chunkIndex) {
+                error("服务器分片进度异常")
+            }
+            nextChunkIndex = serverNextChunk
+        }
+        error("文件上传未收到完成确认")
+    }
+
+    private suspend fun awaitUploadResponse(
+        transferId: String,
+        statuses: Set<String>,
+        timeoutMillis: Long,
+        timeoutMessage: String,
+        beforeAwait: suspend () -> Unit
+    ): FileUploadResponse {
+        val deferred = CompletableDeferred<FileUploadResponse>()
+        val waiter = appScope.launch {
+            uploadResponses
+                .filter {
+                    it.transferId == transferId &&
+                        (it.status in statuses || it.status == "failed" || it.code != 0)
+                }
+                .first()
+                .also {
+                    if (!deferred.isCompleted) deferred.complete(it)
+                }
+        }
+        try {
+            beforeAwait()
+            return try {
+                withTimeout(timeoutMillis) { deferred.await() }
+            } catch (_: TimeoutCancellationException) {
+                error(timeoutMessage)
+            }
+        } finally {
+            waiter.cancel()
+        }
+    }
+
+    private fun readUploadChunk(file: File, chunkIndex: Int): ByteArray {
+        val offset = chunkIndex.toLong() * ChunkSize
+        val remaining = file.length() - offset
+        if (remaining <= 0) error("读取文件分片失败")
+        val size = minOf(ChunkSize.toLong(), remaining).toInt()
+        val bytes = ByteArray(size)
+        RandomAccessFile(file, "r").use { input ->
+            input.seek(offset)
+            input.readFully(bytes)
+        }
+        return bytes
     }
 
     private suspend fun requestChatHistory(
@@ -524,6 +691,7 @@ class IChatRepository(
         beforeTimeSeconds: Long = 0L
     ) {
         if (_currentUser.value == null) return
+        ensureConnected()
         val payload = JSONObject()
             .put("peer_id", peerId)
             .put("chat_type", chatType)
@@ -571,7 +739,7 @@ class IChatRepository(
             content = content,
             localPath = localPath,
             transferId = null,
-            transferStatus = "none",
+            transferStatus = initialTransferStatus(contentType, localPath),
             sendStatus = "sending",
             clientTime = nowSeconds,
             serverTimestamp = nowMillis,
@@ -591,9 +759,18 @@ class IChatRepository(
             .put("client_time", nowSeconds)
 
         runCatching {
+            ensureConnected()
             socketClient.sendJson(MsgType.CHAT_MESSAGE, payload)
+            scheduleOutgoingMessageTimeout(user.userId, msgId)
         }.onFailure {
             messageDao.updateSendStatus(user.userId, msgId, "failed")
+        }
+    }
+
+    private fun scheduleOutgoingMessageTimeout(ownerUserId: String, msgId: String) {
+        launchRepositoryTask {
+            delay(OutgoingAckTimeoutMillis)
+            messageDao.updateSendStatusIfSending(ownerUserId, msgId, "failed:发送超时，请重试")
         }
     }
 
@@ -652,8 +829,9 @@ class IChatRepository(
                 acceptedConnectionSerial = packet.connectionSerial
                 preferences.saveUser(user)
                 _currentUser.value = user
+                recoverInterruptedOutgoingMessages(user.userId)
                 socketClient.markLoggedIn()
-                appScope.launch { refreshContacts() }
+                launchRepositoryTask { refreshContacts() }
             }
             LoginResult(code, obj.optString("message"), user)
         } else {
@@ -709,23 +887,38 @@ class IChatRepository(
         if (peerId.isBlank()) return
 
         val key = "$chatType:$peerId"
+        val msgId = obj.optString("msg_id", ProtocolCodec.generateMsgId())
         val contentType = obj.optString("content_type", "text")
+        val content = obj.optString("content")
+        val existing = messageDao.findById(user.userId, msgId)
+        val cachedPreviewPath = cacheIncomingImagePreview(contentType, content)
+        val recoveredDownloadPath = recoverExistingDownloadPath(contentType, content)
+        val preservedLocalPath = existing?.localPath
+            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { File(it).exists() }
+        val localPath = preservedLocalPath ?: recoveredDownloadPath ?: cachedPreviewPath
+        val transferStatus = preservedTransferStatus(
+            existing = existing,
+            preservedLocalPath = preservedLocalPath,
+            contentType = contentType,
+            localPath = localPath
+        )
         val serverTimestamp = obj.optLong("server_timestamp", System.currentTimeMillis())
         val title = conversationTitle(user.userId, peerId, chatType)
         val isMine = fromUserId == user.userId
         val message = ChatMessageEntity(
             ownerUserId = user.userId,
-            msgId = obj.optString("msg_id", ProtocolCodec.generateMsgId()),
+            msgId = msgId,
             conversationKey = key,
             peerId = peerId,
             chatType = chatType,
             fromUserId = fromUserId,
             toUserId = toUserId,
             contentType = contentType,
-            content = obj.optString("content"),
-            localPath = null,
+            content = content,
+            localPath = localPath,
             transferId = null,
-            transferStatus = "none",
+            transferStatus = transferStatus,
             sendStatus = if (isMine) "sent" else "received",
             clientTime = obj.optLong("client_time", 0L),
             serverTimestamp = serverTimestamp,
@@ -733,7 +926,7 @@ class IChatRepository(
             isMine = isMine
         )
         messageDao.upsert(message)
-        val incrementUnread = !isMine && _activeConversationKey.value != key
+        val incrementUnread = !isMine && (_activeConversationKey.value != key || !_isAppForeground.value)
         upsertConversationFor(message, title, incrementUnread)
 
         if (notifyIfBackground && !isMine && !_isAppForeground.value) {
@@ -803,7 +996,7 @@ class IChatRepository(
     private fun handleFriendRequestRsp(body: String) {
         val obj = JSONObject(body)
         if (obj.optInt("code", -1) == 0) {
-            appScope.launch {
+            launchRepositoryTask {
                 refreshContacts()
                 refreshFriendRequests()
             }
@@ -937,7 +1130,7 @@ class IChatRepository(
         _momentPublishing.value = false
         _momentsStatus.value = obj.optString("message", if (code == 0) "发布成功" else "发布失败")
         if (code == 0) {
-            appScope.launch { refreshMoments() }
+            launchRepositoryTask { refreshMoments() }
         }
     }
 
@@ -969,7 +1162,8 @@ class IChatRepository(
                 fileId = obj.optString("file_id"),
                 fileName = obj.optString("file_name"),
                 fileSize = obj.optLong("file_size"),
-                mimeType = obj.optString("mime_type")
+                mimeType = obj.optString("mime_type"),
+                nextChunkIndex = obj.optInt("next_chunk_index")
             )
         )
     }
@@ -978,13 +1172,21 @@ class IChatRepository(
         val obj = JSONObject(body)
         val transferId = obj.optString("transfer_id")
         val download = pendingDownloads[transferId] ?: return
+        if (obj.optInt("code", 0) != 0 || obj.optString("status") == "failed") {
+            markPendingDownload(download, "failed:${obj.optString("message", "下载失败")}")
+            pendingDownloads.remove(transferId)
+            return
+        }
         when (obj.optString("status")) {
             "ready" -> withContext(Dispatchers.IO) {
                 download.totalChunks = obj.optInt("total_chunks")
                 download.fileSize = obj.optLong("file_size")
                 download.target.writeBytes(ByteArray(0))
             }
-            "complete" -> pendingDownloads.remove(transferId)
+            "complete" -> {
+                markPendingDownload(download, "downloaded", download.target.absolutePath)
+                pendingDownloads.remove(transferId)
+            }
         }
     }
 
@@ -998,6 +1200,12 @@ class IChatRepository(
             download.receivedSize += chunk.size
             download.nextChunkIndex += 1
         }
+    }
+
+    private suspend fun markPendingDownload(download: PendingDownload, status: String, path: String? = null) {
+        val ownerUserId = download.ownerUserId ?: return
+        val msgId = download.msgId ?: return
+        messageDao.updateLocalFile(ownerUserId, msgId, path, status)
     }
 
     private suspend fun upsertConversationFor(
@@ -1038,6 +1246,19 @@ class IChatRepository(
     }
 
     private suspend fun ensureConnected() {
+        if (socketClient.state.value == ConnectionState.LoggedIn) {
+            return
+        }
+        ensureSocketConnected()
+        val user = _currentUser.value
+        if (user?.token.isNullOrBlank()) return
+        val result = loginWithToken(user.userId, user.token)
+        if (result.code != 0) {
+            error(result.message.ifBlank { "登录已失效，请重新登录" })
+        }
+    }
+
+    private suspend fun ensureSocketConnected() {
         if (socketClient.state.value == ConnectionState.Connected || socketClient.state.value == ConnectionState.LoggedIn) {
             return
         }
@@ -1151,6 +1372,97 @@ class IChatRepository(
             .put("image_url", "data:image/jpeg;base64," + Base64.encodeToString(fullBytes, Base64.NO_WRAP))
     }
 
+    private fun displayNameForUri(uri: Uri): String {
+        val queried = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+                }
+        }.getOrNull()
+        return queried?.takeIf { it.isNotBlank() }
+            ?: uri.lastPathSegment?.substringAfterLast('/')?.ifBlank { "file" }
+            ?: "file"
+    }
+
+    private fun makeImagePreviewDataUrl(uri: Uri): String {
+        val source = context.contentResolver.openInputStream(uri)?.use { input ->
+            BitmapFactory.decodeStream(input)
+        } ?: error("无法读取图片")
+        return "data:image/jpeg;base64," + Base64.encodeToString(
+            source.scaledToMaxEdge(1280).toJpegBytes(78),
+            Base64.NO_WRAP
+        )
+    }
+
+    private fun makeVideoPosterDataUrl(uri: Uri): String {
+        val retriever = MediaMetadataRetriever()
+        return runCatching {
+            // Video messages should be recognizable before the user downloads the original file.
+            retriever.setDataSource(context, uri)
+            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.getFrameAtTime()
+                ?: return@runCatching ""
+            "data:image/jpeg;base64," + Base64.encodeToString(
+                frame.scaledToMaxEdge(640).toJpegBytes(68),
+                Base64.NO_WRAP
+            )
+        }.getOrDefault("").also {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private suspend fun cacheIncomingImagePreview(contentType: String, content: String): String? {
+        if (contentType != "image") return null
+        val file = attachmentContent(content)
+        val preview = file.optString("preview_data_url")
+        if (preview.isBlank()) return null
+        // Images render directly from a local cached preview so conversation scrolling stays smooth.
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                attachmentStore.saveDataUrlToCache(
+                    file.optString("file_id"),
+                    file.optString("file_name", "image.jpg"),
+                    preview
+                )?.absolutePath
+            }.getOrNull()
+        }
+    }
+
+    private fun recoverExistingDownloadPath(contentType: String, content: String): String? {
+        if (contentType !in setOf("image", "video", "file")) return null
+        val file = attachmentContent(content)
+        val fileId = file.optString("file_id")
+        val fileName = file.optString("file_name")
+        if (fileId.isBlank() || fileName.isBlank()) return null
+        return attachmentStore.findExistingDownloadFile(fileId, fileName)?.absolutePath
+    }
+
+    private fun attachmentContent(content: String): JSONObject {
+        return runCatching { JSONObject(content) }.getOrDefault(JSONObject())
+    }
+
+    private fun initialTransferStatus(contentType: String, localPath: String?): String {
+        if (localPath != null) return "downloaded"
+        return when (contentType) {
+            "image", "video", "file" -> "not_downloaded"
+            else -> "none"
+        }
+    }
+
+    private fun preservedTransferStatus(
+        existing: ChatMessageEntity?,
+        preservedLocalPath: String?,
+        contentType: String,
+        localPath: String?
+    ): String {
+        // History refreshes replace full message rows, so keep durable local download state when the file still exists.
+        if (preservedLocalPath != null && existing?.transferStatus == "downloaded") return "downloaded"
+        if (existing?.transferStatus == "downloading") return "downloading"
+        if (existing?.transferStatus?.startsWith("failed:") == true && localPath == null) return existing.transferStatus
+        return initialTransferStatus(contentType, localPath)
+    }
+
     private fun Bitmap.scaledToMaxEdge(maxEdge: Int): Bitmap {
         val edge = maxOf(width, height)
         if (edge <= maxEdge) return this
@@ -1193,7 +1505,8 @@ class IChatRepository(
         val fileId: String,
         val fileName: String,
         val fileSize: Long,
-        val mimeType: String
+        val mimeType: String,
+        val nextChunkIndex: Int
     )
 
     private data class PendingLogin(
@@ -1206,6 +1519,8 @@ class IChatRepository(
         val fileId: String,
         val fileName: String,
         val target: File,
+        val ownerUserId: String? = null,
+        val msgId: String? = null,
         var fileSize: Long = 0,
         var totalChunks: Int = 0,
         var nextChunkIndex: Int = 0,
@@ -1214,6 +1529,8 @@ class IChatRepository(
 
     companion object {
         private const val ChunkSize = 256 * 1024
+        private const val UploadResponseTimeoutMillis = 15_000L
+        private const val OutgoingAckTimeoutMillis = 30_000L
         private const val MaxMomentImages = 9
         private const val MaxMomentImageBytes = 850 * 1024
         private const val MaxAvatarImageBytes = 500 * 1024

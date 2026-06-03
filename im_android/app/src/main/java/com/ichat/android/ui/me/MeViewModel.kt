@@ -18,7 +18,8 @@ class MeViewModel(
 
     fun logout() {
         viewModelScope.launch {
-            repository.logout()
+            runCatching { repository.logout() }
+                .onFailure { _status.value = it.message ?: "退出登录失败" }
         }
     }
 

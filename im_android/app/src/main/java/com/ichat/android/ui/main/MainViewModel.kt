@@ -29,6 +29,9 @@ class MainViewModel(
     private val _pendingChatTarget = MutableStateFlow<ChatTarget?>(null)
     val pendingChatTarget: StateFlow<ChatTarget?> = _pendingChatTarget.asStateFlow()
 
+    private val _activeChatTarget = MutableStateFlow<ChatTarget?>(null)
+    val activeChatTarget: StateFlow<ChatTarget?> = _activeChatTarget.asStateFlow()
+
     fun selectTab(tab: MainTab) {
         _bottomNavigationVisible.value = true
         _selectedTab.value = tab
@@ -40,8 +43,10 @@ class MainViewModel(
 
     fun openChat(peerId: String, chatType: String, title: String) {
         if (peerId.isBlank()) return
+        val target = ChatTarget(peerId, chatType.ifBlank { "p2p" }, title.ifBlank { peerId })
         _selectedTab.value = MainTab.Messages
-        _pendingChatTarget.value = ChatTarget(peerId, chatType.ifBlank { "p2p" }, title.ifBlank { peerId })
+        _activeChatTarget.value = target
+        _pendingChatTarget.value = target
     }
 
     fun openChatFromNotification(peerId: String, chatType: String, title: String) {
@@ -50,5 +55,13 @@ class MainViewModel(
 
     fun consumePendingChatTarget() {
         _pendingChatTarget.value = null
+    }
+
+    fun setActiveChatTarget(target: ChatTarget) {
+        _activeChatTarget.value = target
+    }
+
+    fun clearActiveChatTarget() {
+        _activeChatTarget.value = null
     }
 }

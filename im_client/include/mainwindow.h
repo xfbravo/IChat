@@ -308,6 +308,7 @@ private:
     QToolButton* attach_file_button_ = nullptr;
     QPushButton* send_button_;
     QPropertyAnimation* chat_scroll_animation_ = nullptr;
+    int chat_render_generation_ = 0;
 
     // Contact View
     QWidget* contact_view_;

@@ -95,7 +95,8 @@ class MainActivity : FragmentActivity() {
                         updateBottomBarVisibility()
                         if (user == null) {
                             viewModel.setBottomNavigationVisible(true)
-                            showFragment(AuthFragment())
+                            viewModel.clearActiveChatTarget()
+                            showAuth()
                         } else {
                             showTab(viewModel.selectedTab.value)
                         }
@@ -123,6 +124,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun showTab(tab: MainTab) {
+        if (isShowingTab(tab)) return
         val fragment: Fragment = when (tab) {
             MainTab.Messages -> MessagesFragment()
             MainTab.Contacts -> ContactsFragment()
@@ -130,6 +132,21 @@ class MainActivity : FragmentActivity() {
             MainTab.Me -> MeFragment()
         }
         showFragment(fragment)
+    }
+
+    private fun showAuth() {
+        if (supportFragmentManager.findFragmentById(containerId) is AuthFragment) return
+        showFragment(AuthFragment())
+    }
+
+    private fun isShowingTab(tab: MainTab): Boolean {
+        val current = supportFragmentManager.findFragmentById(containerId) ?: return false
+        return when (tab) {
+            MainTab.Messages -> current is MessagesFragment
+            MainTab.Contacts -> current is ContactsFragment
+            MainTab.Moments -> current is MomentsFragment
+            MainTab.Me -> current is MeFragment
+        }
     }
 
     private fun showFragment(fragment: Fragment) {

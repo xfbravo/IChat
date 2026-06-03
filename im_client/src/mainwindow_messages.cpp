@@ -43,6 +43,7 @@
 #include <QSize>
 #include <QStringList>
 #include <QToolButton>
+#include <memory>
 #include <QTimer>
 #include <QBuffer>
 #include <QDir>
@@ -2175,6 +2176,14 @@ bool MainWindow::updateRenderedMessageStatus(const QString& msg_id, const QStrin
 }
 
 void MainWindow::renderChatMessages(bool scroll_to_bottom) {
+    const int render_generation = ++chat_render_generation_;
+
+    if (chat_scroll_animation_) {
+        chat_scroll_animation_->stop();
+        chat_scroll_animation_->deleteLater();
+        chat_scroll_animation_ = nullptr;
+    }
+
     QScrollBar* scroll_bar = chat_scroll_area_->verticalScrollBar();
     const int previous_scroll_value = scroll_bar ? scroll_bar->value() : 0;
     QWidget* viewport = chat_scroll_area_->viewport();
@@ -2202,15 +2211,33 @@ void MainWindow::renderChatMessages(bool scroll_to_bottom) {
     chat_messages_widget_->updateGeometry();
     chat_messages_layout_->activate();
 
-    // Qt 布局会延迟计算滚动范围，连续补几次滚动位置能避免偶发不到底。
-    auto apply_scroll = [this, scroll_to_bottom, previous_scroll_value]() {
+    // Keep the first painted frame pinned to the final bottom while Qt settles the range.
+    auto apply_scroll = [this, scroll_to_bottom, previous_scroll_value, render_generation]() {
+        if (render_generation != chat_render_generation_) return;
         QScrollBar* bar = chat_scroll_area_->verticalScrollBar();
         if (!bar) return;
         bar->setValue(scroll_to_bottom ? bar->maximum() : previous_scroll_value);
     };
 
+    std::shared_ptr<QMetaObject::Connection> bottom_range_connection;
+    if (scroll_to_bottom && scroll_bar) {
+        bottom_range_connection = std::make_shared<QMetaObject::Connection>();
+        *bottom_range_connection = connect(scroll_bar, &QScrollBar::rangeChanged, this,
+                                           [this, render_generation](int, int maximum) {
+                                               if (render_generation != chat_render_generation_) return;
+                                               QScrollBar* bar = chat_scroll_area_->verticalScrollBar();
+                                               if (bar) {
+                                                   bar->setValue(maximum);
+                                               }
+                                           });
+        QTimer::singleShot(180, this, [bottom_range_connection]() {
+            QObject::disconnect(*bottom_range_connection);
+        });
+    }
+
     apply_scroll();
-    QTimer::singleShot(0, this, [this, apply_scroll]() {
+    QTimer::singleShot(0, this, [this, apply_scroll, render_generation]() {
+        if (render_generation != chat_render_generation_) return;
         apply_scroll();
         chat_messages_widget_->setUpdatesEnabled(true);
         if (QWidget* current_viewport = chat_scroll_area_->viewport()) {
@@ -2220,8 +2247,6 @@ void MainWindow::renderChatMessages(bool scroll_to_bottom) {
         chat_scroll_area_->setUpdatesEnabled(true);
         chat_scroll_area_->update();
     });
-    QTimer::singleShot(50, this, apply_scroll);
-    QTimer::singleShot(150, this, apply_scroll);
 }
 
 QString MainWindow::statusText(const QString& status) const {

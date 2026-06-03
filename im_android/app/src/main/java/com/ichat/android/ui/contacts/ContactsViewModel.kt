@@ -32,7 +32,8 @@ class ContactsViewModel(
 
     fun refresh() {
         viewModelScope.launch {
-            repository.refreshContacts()
+            runCatching { repository.refreshContacts() }
+                .onFailure { _actionStatus.value = it.message ?: "联系人刷新失败" }
         }
     }
 

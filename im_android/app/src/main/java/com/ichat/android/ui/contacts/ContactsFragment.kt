@@ -39,12 +39,14 @@ import androidx.fragment.app.viewModels
 import com.ichat.android.IChatApplication
 import com.ichat.android.data.db.FriendEntity
 import com.ichat.android.data.db.GroupEntity
+import com.ichat.android.ui.common.AvatarProfile
 import com.ichat.android.ui.common.ContactActionDialogs
 import com.ichat.android.ui.common.HomeTopBar
 import com.ichat.android.ui.common.IChatAvatar
 import com.ichat.android.ui.common.IChatSearchField
 import com.ichat.android.ui.main.MainViewModel
 import com.ichat.android.ui.main.ViewModelFactory
+import com.ichat.android.ui.profile.ContactProfileFragment
 import com.ichat.android.ui.theme.IChatTheme
 import java.nio.charset.Charset
 import java.text.Collator
@@ -64,6 +66,7 @@ class ContactsFragment : Fragment() {
                     ContactsScreen(
                         viewModel = viewModel,
                         mainViewModel = mainViewModel,
+                        onOpenProfile = ::openContactProfile,
                         onOpenFriendRequests = ::openFriendRequests
                     )
                 }
@@ -78,12 +81,21 @@ class ContactsFragment : Fragment() {
             .addToBackStack("friend_requests")
             .commit()
     }
+
+    private fun openContactProfile(profile: AvatarProfile) {
+        val hostId = (view?.parent as? ViewGroup)?.id ?: return
+        parentFragmentManager.beginTransaction()
+            .replace(hostId, ContactProfileFragment.newInstance(profile))
+            .addToBackStack("contact_profile")
+            .commit()
+    }
 }
 
 @Composable
 private fun ContactsScreen(
     viewModel: ContactsViewModel,
     mainViewModel: MainViewModel,
+    onOpenProfile: (AvatarProfile) -> Unit,
     onOpenFriendRequests: () -> Unit
 ) {
     val currentUser by viewModel.currentUser.collectAsState()
@@ -167,13 +179,7 @@ private fun ContactsScreen(
             items(section.friends, key = { it.userId }) { friend ->
                 FriendRow(
                     friend = friend,
-                    onClick = {
-                        mainViewModel.openChat(
-                            peerId = friend.userId,
-                            chatType = "p2p",
-                            title = friend.displayName()
-                        )
-                    }
+                    onClick = { onOpenProfile(friend.toAvatarProfile()) }
                 )
             }
         }
@@ -299,6 +305,22 @@ private data class ContactSection(val key: String, val friends: List<FriendEntit
 private fun FriendEntity.displayName(): String = remark.ifBlank { nickname }.ifBlank { userId }
 
 private fun GroupEntity.displayName(): String = groupName.ifBlank { groupId }
+
+private fun FriendEntity.toAvatarProfile(): AvatarProfile {
+    return AvatarProfile(
+        title = displayName(),
+        subtitle = "账号：$userId",
+        avatarUrl = avatarUrl,
+        detail = signature,
+        userId = userId,
+        chatType = "p2p",
+        gender = gender,
+        region = region,
+        signature = signature,
+        nickname = nickname,
+        remark = remark
+    )
+}
 
 private fun FriendEntity.matches(query: String): Boolean {
     val keyword = query.trim()
